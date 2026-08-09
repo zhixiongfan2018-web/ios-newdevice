@@ -1,0 +1,5 @@
+Archive: stable
+Component: main
+Origin: NewDevice
+Label: NewDevice
+Architecture: iphoneos-arm64
