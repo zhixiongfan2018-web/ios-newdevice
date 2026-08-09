@@ -5,4 +5,4 @@ Version: 1.0
 Codename: stable
 Architectures: iphoneos-arm64
 Components: main
-Description: NewDevice Sileo source (jsDelivr)
+Description: NewDevice Sileo source
