@@ -126,7 +126,7 @@
         [self refresh];
         [self refreshIP:YES expectedChangeFrom:prevIP];
         if (!ok) {
-            [self alert:error.localizedDescription ?: @"执行失败（请确认 newdeviced 已运行）"];
+            [self alert:error.localizedDescription ?: @"执行失败（请保持 NewDevice App 在前台，确认 API 已监听）"];
         }
     }];
 }

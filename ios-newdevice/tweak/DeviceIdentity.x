@@ -48,10 +48,14 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     if ([st shouldSpoof] && key) {
         NSString *k = (__bridge NSString *)key;
         NDDeviceProfile *p = st.profile;
+        // UniqueDeviceIDData is CFData on real devices — returning NSString can crash consumers.
+        if ([k isEqualToString:@"UniqueDeviceIDData"] && p.UDID.length) {
+            NSData *data = [p.UDID dataUsingEncoding:NSUTF8StringEncoding];
+            if (data) return CFBridgingRetain(data);
+        }
         NSDictionary *map = @{
             @"SerialNumber": p.Serial ?: @"",
             @"UniqueDeviceID": p.UDID ?: @"",
-            @"UniqueDeviceIDData": p.UDID ?: @"",
             @"WifiAddress": p.WiFiMAC ?: @"",
             @"BluetoothAddress": p.BTMAC ?: @"",
             @"ProductType": st.config.fakeDeviceModel ? (p.ProductType ?: @"") : @"",

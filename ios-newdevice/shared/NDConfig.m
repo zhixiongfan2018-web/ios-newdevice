@@ -1,5 +1,6 @@
 #import "NDConfig.h"
 #import "NDPaths.h"
+#import <notify.h>
 
 @implementation NDConfig
 
@@ -69,7 +70,12 @@
         @"preferredModels": self.preferredModels ?: @[],
         @"preferredSystems": self.preferredSystems ?: @[],
     };
-    return [dict writeToFile:[NDPaths configPlistPath] atomically:YES];
+    BOOL ok = [dict writeToFile:[NDPaths configPlistPath] atomically:YES];
+    if (ok) {
+        // Push config/targetApps changes to already-running hooked processes.
+        notify_post([NDNotifyReload UTF8String]);
+    }
+    return ok;
 }
 
 - (BOOL)isTargetApp:(NSString *)bundleId {

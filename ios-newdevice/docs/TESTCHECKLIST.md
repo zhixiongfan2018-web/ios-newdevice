@@ -45,4 +45,12 @@
 - [ ] 手机上访问 `http://127.0.0.1:8080/` → `NewDevice API OK`（电脑浏览器会打不开，属正常）
 - [ ] `http://127.0.0.1:8080/cmd?fun=newRecord` → 立刻 200 `accepted`，结果文件最终为 `1`
 - [ ] `getCurrentRecordName` / `nextRecord` / `deleteRecord` 行为正常
+- [ ] 仅有「原始机器」时 `nextRecord` 成功且不清空目标 App 数据
+- [ ] 删除当前记录后切回「原始机器」，目标 App 数据被清理
 - [ ] 触动脚本 `scripts/AMG_compat.lua` 中 `AMG.New()` 返回 true
+
+## 主机侧链路模拟（无真机）
+
+```bash
+python3 ios-newdevice/scripts/simulate_chain.py
+```
