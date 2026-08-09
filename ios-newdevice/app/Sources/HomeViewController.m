@@ -78,7 +78,7 @@
     [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     b.titleLabel.font = [UIFont boldSystemFontOfSize:17];
     b.layer.cornerRadius = 12;
-    b.contentEdgeInsets = UIEdgeInsetsMake(14, 12, 14, 12);
+    [b.heightAnchor constraintEqualToConstant:48].active = YES;
     [b addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
     return b;
 }
