@@ -1,9 +1,10 @@
 #import "ProfileDetailViewController.h"
 #import "NDRecordStore.h"
+#import "NDTheme.h"
 
 @interface ProfileDetailViewController ()
 @property (nonatomic, strong) NDDeviceProfile *profile;
-@property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows; // key, value
+@property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows;
 @end
 
 @implementation ProfileDetailViewController
@@ -19,6 +20,8 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.view.backgroundColor = [NDTheme canvas];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(save)];
     [self rebuild];
 }
@@ -36,13 +39,22 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows.count; }
 
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    return @"点按任意字段可编辑，完成后点右上角保存。";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
+    cell.textLabel.font = [NDTheme captionFont];
+    cell.textLabel.textColor = [UIColor secondaryLabelColor];
     cell.textLabel.text = self.rows[indexPath.row][0];
+    cell.detailTextLabel.font = [NDTheme monoFont:14];
+    cell.detailTextLabel.textColor = [UIColor labelColor];
     cell.detailTextLabel.text = self.rows[indexPath.row][1];
     cell.detailTextLabel.numberOfLines = 0;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.tintColor = [NDTheme accent];
     return cell;
 }
 

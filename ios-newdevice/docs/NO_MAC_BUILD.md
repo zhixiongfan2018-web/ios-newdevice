@@ -6,20 +6,25 @@
 
 仓库已带工作流 [`.github/workflows/build-deb.yml`](../../.github/workflows/build-deb.yml)，在 GitHub 的 **macos-14** 机器上执行 Theos 打包。
 
-### 步骤
+### 步骤（推荐：Sileo 源）
 
-1. 把本项目推到你的 GitHub 仓库（可用 GitHub Desktop，全程在 Windows）。
-2. 打开仓库 → **Actions** → 选 **Build NewDevice deb** → **Run workflow**。
-3. 等跑完（约 5–15 分钟）→ 点进本次 run → **Artifacts** → 下载 `NewDevice-deb`。
-4. 解压得到 `.deb`，传到手机用 **Sileo / Filza** 安装，然后 Respring。
-5. **打开 NewDevice App**，首页应显示 API 已监听；再在手机上访问  
-   `http://127.0.0.1:8080/`。
+1. 把本项目推到 `master`（会自动打包并发布 GitHub Pages 源）。
+2. 等 Actions **Build NewDevice deb** 成功。
+3. 手机 Sileo → **源** → 添加：
 
-### 传到手机的常用办法
+   `https://zhixiongfan2018-web.github.io/ios-newdevice/`
 
-- AirDrop / iCloud（若方便）
-- Filza 网页上传、或电脑 `scp` 到手机
-- 微信/网盘发文件到手机后用 Filza 打开安装
+4. 刷新源 → 搜索 **NewDevice** → 安装 → Respring。
+5. 打开 NewDevice App，确认首页显示 API 已监听。
+
+浏览器也可打开同一地址，页面上有源链接和 `.deb` 直链。
+
+### 备选：手动装 deb
+
+1. Actions → 本次 run → **Artifacts** → 下载 `NewDevice-deb`。
+2. 传到手机用 **Sileo / Filza** 安装，然后 Respring。
+
+传到手机：AirDrop、Filza 网页上传、网盘等。
 
 ## 其他可选
 

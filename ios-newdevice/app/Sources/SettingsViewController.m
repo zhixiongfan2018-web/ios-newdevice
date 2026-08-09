@@ -1,5 +1,6 @@
 #import "SettingsViewController.h"
 #import "NDConfig.h"
+#import "NDTheme.h"
 #import "CatalogPickerViewController.h"
 
 typedef NS_ENUM(NSInteger, NDSettingRow) {
@@ -26,6 +27,8 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"设置";
+    self.view.backgroundColor = [NDTheme canvas];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     [[NDConfig shared] reload];
 }
 
@@ -46,29 +49,40 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 2) {
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-        cell.textLabel.text = @"深度防越狱可能导致闪退";
-        cell.detailTextLabel.text = @"脚本 API: http://127.0.0.1:8080/cmd?fun=newRecord";
+        cell.textLabel.font = [NDTheme headlineFont];
+        cell.textLabel.text = @"使用提示";
+        cell.detailTextLabel.font = [NDTheme bodyFont];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         cell.detailTextLabel.numberOfLines = 0;
+        cell.detailTextLabel.text = @"深度防越狱可能导致目标 App 闪退。\n脚本 API：http://127.0.0.1:8080/cmd?fun=newRecord";
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         return cell;
     }
     if (indexPath.section == 1) {
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+        cell.textLabel.font = [NDTheme headlineFont];
+        cell.detailTextLabel.font = [NDTheme captionFont];
+        cell.detailTextLabel.textColor = [NDTheme accent];
         NDConfig *c = [NDConfig shared];
         if (indexPath.row == 0) {
             cell.textLabel.text = @"机型池";
+            cell.imageView.image = [UIImage systemImageNamed:@"iphone"];
             cell.detailTextLabel.text = c.preferredModels.count ? [NSString stringWithFormat:@"%lu 项", (unsigned long)c.preferredModels.count] : @"全部";
         } else {
             cell.textLabel.text = @"系统版本池";
+            cell.imageView.image = [UIImage systemImageNamed:@"gear"];
             cell.detailTextLabel.text = c.preferredSystems.count ? [NSString stringWithFormat:@"%lu 项", (unsigned long)c.preferredSystems.count] : @"全部";
         }
+        cell.imageView.tintColor = [NDTheme accent];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return cell;
     }
+
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"s"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"s"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"s"];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     UISwitch *sw = [UISwitch new];
+    sw.onTintColor = [NDTheme accent];
     sw.tag = indexPath.row;
     [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
     NDConfig *c = [NDConfig shared];
@@ -76,11 +90,19 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
         @"伪装设备机型", @"伪装系统版本", @"伪装运营商", @"伪装定位", @"随机位置",
         @"智能偏移位置", @"智能飞行模式", @"基础防越狱检测", @"深度防越狱检测", @"全息备份"
     ];
+    NSArray *subs = @[
+        @"ProductType / hw.machine", @"UIDevice systemVersion", @"运营商名与 MCC/MNC", @"CLLocation 坐标", @"一键新机时随机坐标",
+        @"在基准点附近微调", @"切换身份时开关飞行", @"隐藏常见越狱路径", @"更激进，可能闪退", @"按记录备份目标 App 数据"
+    ];
     NSArray *values = @[
         @(c.fakeDeviceModel), @(c.fakeSystemVer), @(c.fakeCarrier), @(c.spoofLocation), @(c.randomLocation),
         @(c.smartLocationOffset), @(c.smartAirplane), @(c.jailbreakHideBasic), @(c.jailbreakHideDeep), @(c.holographicBackup)
     ];
+    cell.textLabel.font = [NDTheme headlineFont];
     cell.textLabel.text = titles[indexPath.row];
+    cell.detailTextLabel.font = [NDTheme captionFont];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    cell.detailTextLabel.text = subs[indexPath.row];
     sw.on = [values[indexPath.row] boolValue];
     cell.accessoryView = sw;
     return cell;
@@ -118,4 +140,3 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
 }
 
 @end
-

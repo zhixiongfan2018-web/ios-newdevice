@@ -2,6 +2,7 @@
 #import "NDRecordStore.h"
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
+#import "NDTheme.h"
 #import "ProfileDetailViewController.h"
 
 @interface RecordsViewController ()
@@ -10,10 +11,19 @@
 
 @implementation RecordsViewController
 
+- (instancetype)init {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    return self;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"记录";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reload)];
+    self.view.backgroundColor = [NDTheme canvas];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 72;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -36,9 +46,26 @@
     NSString *name = self.names[indexPath.row];
     NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
     BOOL current = [name isEqualToString:[[NDRecordStore shared] currentRecordName]];
-    cell.textLabel.text = [NSString stringWithFormat:@"%@%@%@", current ? @"✓ " : @"", name, p.enabled ? @"" : @" (禁用)"];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ | %@", p.Model, p.SystemVer];
+
+    cell.textLabel.font = [NDTheme headlineFont];
+    cell.textLabel.text = name;
+    cell.detailTextLabel.font = [NDTheme captionFont];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    cell.detailTextLabel.numberOfLines = 2;
+    NSString *state = p.enabled ? @"" : @" · 已禁用";
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state];
+
+    if (current) {
+        cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
+        cell.imageView.tintColor = [NDTheme accent];
+        cell.textLabel.textColor = [NDTheme accent];
+    } else {
+        cell.imageView.image = [UIImage systemImageNamed:@"circle"];
+        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+        cell.textLabel.textColor = [UIColor labelColor];
+    }
     cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
+    cell.tintColor = [NDTheme accent];
     return cell;
 }
 
@@ -77,6 +104,7 @@
             completionHandler(YES);
         }];
     }];
+    toggle.backgroundColor = [NDTheme accent];
     return [UISwipeActionsConfiguration configurationWithActions:@[del, toggle]];
 }
 

@@ -7,10 +7,22 @@ on:
       - "ios-newdevice/**"
       - ".github/workflows/build-deb.yml"
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-and-deb
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,11 +44,11 @@ jobs:
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
           echo "$HOME/theos/bin" >> "$GITHUB_PATH"
 
-      - name: Install ldid
+      - name: Install ldid + dpkg
         run: |
-          brew install ldid
+          brew install ldid dpkg
           which ldid
-          ldid 2>&1 | head -n 2 || true
+          which dpkg-scanpackages
 
       - name: Make package
         working-directory: ios-newdevice
@@ -50,6 +62,7 @@ jobs:
           make package FINALPACKAGE=1 PACKAGE_VERSION=1.0.0-${{ github.run_number }}
 
       - name: Collect deb
+        id: collect
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -62,6 +75,7 @@ jobs:
           fi
           cp "${files[@]}" dist/
           ls -la dist
+          echo "deb=$(ls dist/*.deb | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -70,3 +84,73 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
           retention-days: 14
+
+      - name: Build Sileo apt repo
+        run: |
+          set -euo pipefail
+          REPO_ROOT="$PWD/sileo-site"
+          mkdir -p "$REPO_ROOT/debs"
+          cp dist/*.deb "$REPO_ROOT/debs/"
+
+          (
+            cd "$REPO_ROOT"
+            dpkg-scanpackages -m debs /dev/null > Packages
+            bzip2 -f -k Packages
+            gzip -f -k Packages
+          )
+
+          printf '%s\n' \
+            'Origin: NewDevice' \
+            'Label: NewDevice' \
+            'Suite: stable' \
+            'Version: 1.0' \
+            'Codename: stable' \
+            'Architectures: iphoneos-arm64' \
+            'Components: main' \
+            'Description: NewDevice local Sileo source' \
+            > "$REPO_ROOT/Release"
+
+          DEB_NAME=$(basename "$(ls dist/*.deb | head -n1)")
+          cat > "$REPO_ROOT/index.html" <<HTML
+          <!doctype html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>NewDevice Sileo Source</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; line-height: 1.5; max-width: 40rem; }
+              code, a { word-break: break-all; }
+              .box { background: #f4f6f8; padding: 1rem 1.2rem; border-radius: 12px; }
+            </style>
+          </head>
+          <body>
+            <h1>NewDevice</h1>
+            <p>Sileo → Sources → Add:</p>
+            <p class="box"><code>https://zhixiongfan2018-web.github.io/ios-newdevice/</code></p>
+            <p>Refresh, search <strong>NewDevice</strong>, install, then Respring.</p>
+            <p>Direct deb: <a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
+          </body>
+          </html>
+          HTML
+          # Remove YAML-style leading indentation from generated HTML
+          python3 -c "from pathlib import Path; p=Path('sileo-site/index.html'); p.write_text('\n'.join(l[2:] if l.startswith('  ') else l for l in p.read_text().splitlines())+'\n', encoding='utf-8')"
+
+          ls -la "$REPO_ROOT" "$REPO_ROOT/debs"
+          echo "----- Packages (head) -----"
+          head -n 30 "$REPO_ROOT/Packages"
+
+      - name: Setup Pages
+        if: github.ref == 'refs/heads/master'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: sileo-site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        if: github.ref == 'refs/heads/master'
+        uses: actions/deploy-pages@v4

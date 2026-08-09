@@ -1,5 +1,6 @@
 #import "AppsViewController.h"
 #import "NDConfig.h"
+#import "NDTheme.h"
 #import <objc/message.h>
 #import <objc/runtime.h>
 
@@ -17,13 +18,25 @@
 
 @implementation AppsViewController
 
+- (instancetype)init {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    return self;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"目标应用";
+    self.view.backgroundColor = [NDTheme canvas];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(save)];
     [[NDConfig shared] reload];
     self.selected = [NSMutableSet setWithArray:[NDConfig shared].targetApps ?: @[]];
     [self loadApps];
+    [self updateTitleBadge];
+}
+
+- (void)updateTitleBadge {
+    self.navigationItem.prompt = [NSString stringWithFormat:@"已选 %lu 个 · 一键新机将清理/备份这些 App", (unsigned long)self.selected.count];
 }
 
 - (void)loadApps {
@@ -66,7 +79,6 @@
     }];
     self.apps = items;
     if (items.count == 0) {
-        // Fallback empty state row handled by table (0 rows) — show alert
         UIAlertController *a = [UIAlertController alertControllerWithTitle:@"未枚举到应用"
                                                                    message:@"当前环境无法使用 LSApplicationWorkspace。仍可手动编辑 config.plist 的 targetApps。"
                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -81,6 +93,7 @@
 - (void)save {
     [NDConfig shared].targetApps = self.selected.allObjects;
     [[NDConfig shared] save];
+    [self updateTitleBadge];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"已保存" message:[NSString stringWithFormat:@"已选择 %lu 个应用", (unsigned long)self.selected.count] preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
@@ -90,13 +103,23 @@
     return self.apps.count;
 }
 
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    return @"勾选后点右上角保存。NewDevice 自身始终参与伪装探测。";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
     NDAppItem *item = self.apps[indexPath.row];
+    BOOL on = [self.selected containsObject:item.bundleId];
+    cell.textLabel.font = [NDTheme headlineFont];
     cell.textLabel.text = item.name;
+    cell.detailTextLabel.font = [NDTheme monoFont:11];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.text = item.bundleId;
-    cell.accessoryType = [self.selected containsObject:item.bundleId] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.imageView.image = [UIImage systemImageNamed:on ? @"checkmark.circle.fill" : @"circle"];
+    cell.imageView.tintColor = on ? [NDTheme accent] : [UIColor tertiaryLabelColor];
+    cell.accessoryType = UITableViewCellAccessoryNone;
     return cell;
 }
 
@@ -105,6 +128,7 @@
     NDAppItem *item = self.apps[indexPath.row];
     if ([self.selected containsObject:item.bundleId]) [self.selected removeObject:item.bundleId];
     else [self.selected addObject:item.bundleId];
+    [self updateTitleBadge];
     [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 }
 

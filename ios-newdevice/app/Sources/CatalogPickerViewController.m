@@ -1,6 +1,7 @@
 #import "CatalogPickerViewController.h"
 #import "NDConfig.h"
 #import "NDDeviceCatalog.h"
+#import "NDTheme.h"
 
 @interface CatalogPickerViewController ()
 @property (nonatomic, assign) NDCatalogPickerKind kind;
@@ -21,6 +22,8 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.view.backgroundColor = [NDTheme canvas];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     [[NDConfig shared] reload];
     if (self.kind == NDCatalogPickerModels) {
         NSMutableArray *opts = [NSMutableArray array];
@@ -57,8 +60,13 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"c"];
     NSString *opt = self.options[indexPath.row];
+    BOOL on = [self.selected containsObject:opt];
+    cell.textLabel.font = [NDTheme bodyFont];
     cell.textLabel.text = opt;
-    cell.accessoryType = [self.selected containsObject:opt] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.imageView.image = [UIImage systemImageNamed:on ? @"checkmark.circle.fill" : @"circle"];
+    cell.imageView.tintColor = on ? [NDTheme accent] : [UIColor tertiaryLabelColor];
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.tintColor = [NDTheme accent];
     return cell;
 }
 
