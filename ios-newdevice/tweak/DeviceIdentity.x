@@ -10,6 +10,21 @@ static NSUUID *NDUUIDFromString(NSString *s) {
     return [[NSUUID alloc] initWithUUIDString:s];
 }
 
+static NSData *NDDataFromHexString(NSString *hex) {
+    if (!hex.length) return nil;
+    NSString *clean = [[hex stringByReplacingOccurrencesOfString:@" " withString:@""] lowercaseString];
+    if (clean.length % 2 != 0) return nil;
+    NSMutableData *data = [NSMutableData dataWithCapacity:clean.length / 2];
+    const char *c = clean.UTF8String;
+    for (NSUInteger i = 0; i + 1 < clean.length; i += 2) {
+        unsigned int byte = 0;
+        if (sscanf(c + i, "%2x", &byte) != 1) return nil;
+        uint8_t b = (uint8_t)byte;
+        [data appendBytes:&b length:1];
+    }
+    return data;
+}
+
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     NDTweakState *st = [NDTweakState shared];
@@ -48,22 +63,28 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     if ([st shouldSpoof] && key) {
         NSString *k = (__bridge NSString *)key;
         NDDeviceProfile *p = st.profile;
-        // UniqueDeviceIDData is CFData on real devices — returning NSString can crash consumers.
+
+        // UniqueDeviceIDData is CFData(20 bytes) on real devices — hex-decode UDID.
         if ([k isEqualToString:@"UniqueDeviceIDData"] && p.UDID.length) {
-            NSData *data = [p.UDID dataUsingEncoding:NSUTF8StringEncoding];
+            NSData *data = NDDataFromHexString(p.UDID);
             if (data) return CFBridgingRetain(data);
         }
-        NSDictionary *map = @{
-            @"SerialNumber": p.Serial ?: @"",
-            @"UniqueDeviceID": p.UDID ?: @"",
-            @"WifiAddress": p.WiFiMAC ?: @"",
-            @"BluetoothAddress": p.BTMAC ?: @"",
-            @"ProductType": st.config.fakeDeviceModel ? (p.ProductType ?: @"") : @"",
-            @"HardwareModel": st.config.fakeDeviceModel ? (p.HardwareMachine ?: @"") : @"",
-            @"DeviceName": st.config.fakeDeviceModel ? (p.Model ?: @"") : @"",
-            @"ProductVersion": st.config.fakeSystemVer ? (p.SystemVer ?: @"") : @"",
-            @"BuildVersion": st.config.fakeSystemVer ? (p.Build ?: @"") : @"",
-        };
+
+        NSMutableDictionary *map = [NSMutableDictionary dictionary];
+        if (p.Serial.length) map[@"SerialNumber"] = p.Serial;
+        if (p.UDID.length) map[@"UniqueDeviceID"] = p.UDID;
+        if (p.WiFiMAC.length) map[@"WifiAddress"] = p.WiFiMAC;
+        if (p.BTMAC.length) map[@"BluetoothAddress"] = p.BTMAC;
+        if (st.config.fakeDeviceModel) {
+            if (p.ProductType.length) map[@"ProductType"] = p.ProductType;
+            // Board id — do NOT reuse ProductType here (was a common "没生效"/crash cause).
+            if (p.HardwareModel.length) map[@"HardwareModel"] = p.HardwareModel;
+            if (p.Model.length) map[@"DeviceName"] = p.Model;
+        }
+        if (st.config.fakeSystemVer) {
+            if (p.SystemVer.length) map[@"ProductVersion"] = p.SystemVer;
+            if (p.Build.length) map[@"BuildVersion"] = p.Build;
+        }
         NSString *val = map[k];
         if (val.length) {
             return CFBridgingRetain(val);
