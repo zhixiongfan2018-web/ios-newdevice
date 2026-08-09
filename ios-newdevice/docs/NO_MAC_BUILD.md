@@ -2,29 +2,31 @@
 
 本项目是 **越狱 iPhone 上的 deb**，不能在 Windows 上直接运行，也不需要你买一台 Mac。
 
-## 推荐：GitHub Actions 云端打包（免费）
+## 推荐：raw 直链下载 deb
 
-仓库已带工作流 [`.github/workflows/build-deb.yml`](../../.github/workflows/build-deb.yml)，在 GitHub 的 **macos-14** 机器上执行 Theos 打包。
+打包成功后，用手机浏览器打开（不进 Actions）：
 
-### 步骤（推荐：Sileo 源）
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb
 
-1. 把本项目推到 `master`（会自动打包并发布 GitHub Pages 源）。
-2. 等 Actions **Build NewDevice deb** 成功。
-3. 手机 Sileo → **源** → 添加：
+或版本化地址：
 
-   `https://zhixiongfan2018-web.github.io/ios-newdevice/`
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/com.local.newdevice_1.0.0-13_iphoneos-arm64.deb
 
-4. 刷新源 → 搜索 **NewDevice** → 安装 → Respring。
-5. 打开 NewDevice App，确认首页显示 API 已监听。
+下载后用 **Filza / Sileo** 安装 → Respring → 打开 NewDevice。
 
-浏览器也可打开同一地址，页面上有源链接和 `.deb` 直链。
+## 云端打包
 
-### 备选：手动装 deb
+仓库工作流 [`.github/workflows/build-deb.yml`](../../.github/workflows/build-deb.yml) 在 GitHub **macos-14** 上 Theos 打包。推送到 `master` 后会：
 
-1. Actions → 本次 run → **Artifacts** → 下载 `NewDevice-deb`。
-2. 传到手机用 **Sileo / Filza** 安装，然后 Respring。
+1. 生成 `.deb`
+2. 更新 `downloads/`（上面的 raw 直链）
+3. 同步 GitHub Pages Sileo 源（可选）
 
-传到手机：AirDrop、Filza 网页上传、网盘等。
+### Sileo 源（可选）
+
+`https://zhixiongfan2018-web.github.io/ios-newdevice/`
+
+国内若打不开 Pages，请用上面的 **raw 直链**。
 
 ## 其他可选
 
@@ -32,11 +34,10 @@
 |------|------|
 | 租用云 Mac | MacinCloud 等按小时租，SSH 进去装 Theos 后 `make package` |
 | Linux + Theos | 可在 Ubuntu 配 toolchain，门槛高于 Actions |
-| 找有 Mac 的朋友 | 把仓库给他，跑一遍 `make package` 把 deb 发你 |
 
 ## 你仍需要的东西
 
-- 一台 **已越狱** 的 iPhone（Dopamine / rootless，iOS 15–16 优先）
+- 一台 **已越狱** 的 iPhone（Dopamine / rootless）
 - Windows 只负责改代码 + 触发云编译 + 把 deb 装进手机
 
 ## 本地 Windows 做不到什么

@@ -8,7 +8,7 @@ on:
       - ".github/workflows/build-deb.yml"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -85,6 +85,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Publish deb to downloads/ (raw.githubusercontent.com)
+        if: github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          mkdir -p downloads
+          rm -f downloads/com.local.newdevice_*.deb downloads/NewDevice.deb
+          DEB="$(ls dist/*.deb | head -n1)"
+          cp "$DEB" downloads/
+          cp "$DEB" downloads/NewDevice.deb
+          ls -la downloads
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/*.deb
+          if git diff --cached --quiet; then
+            echo "downloads/ already up to date"
+            exit 0
+          fi
+          git commit -m "Update downloads deb for raw.githubusercontent.com [skip ci]"
+          git push origin "HEAD:master"
+
       - name: Build Sileo apt repo
         run: |
           set -euo pipefail
@@ -126,10 +146,11 @@ jobs:
           </head>
           <body>
             <h1>NewDevice</h1>
-            <p>Sileo → Sources → Add:</p>
+            <p>推荐直链（raw，手机浏览器可下）：</p>
+            <p class="box"><code>https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb</code></p>
+            <p>Sileo 源（可选）：</p>
             <p class="box"><code>https://zhixiongfan2018-web.github.io/ios-newdevice/</code></p>
-            <p>Refresh, search <strong>NewDevice</strong>, install, then Respring.</p>
-            <p>Direct deb: <a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
+            <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>
           HTML
