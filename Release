@@ -1,0 +1,20 @@
+Origin: NewDevice
+Label: NewDevice
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm64
+Components: main
+Description: NewDevice one-tap new device tweak repo for Dopamine/rootless
+MD5Sum:
+ 43e5e262730b11fa789a1642631c5b06 599 Packages
+ 85c9b9e1114ce175772a6f84967146f4 438 Packages.gz
+ 1008f6fedbac61dd8d0a54ffbc2b0ee3 458 Packages.bz2
+SHA1:
+ 7a730823d5132e1724f46eedbc0960c37ca2fad4 599 Packages
+ 1c7e866a90b9c1049b8aa03fea275dcc66e3abd1 438 Packages.gz
+ db19733b02efef52a0508e1613c4cfcec7f44d1c 458 Packages.bz2
+SHA256:
+ 47a845d6d2def15fe42fdfbf423205f0bf54ae8b5ccffbbe1fb10314a0cf0342 599 Packages
+ fb0221a2793588d380c6a005dbea7a5f498f037da23f040abc932f76eb5a0575 438 Packages.gz
+ 8f5499d8a391319b5b7ebf2f71f91b994953759824f6af2620bfe33ee506bb0a 458 Packages.bz2

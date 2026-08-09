@@ -1,0 +1,17 @@
+Package: com.local.newdevice
+Version: 1.0.0-8
+Architecture: iphoneos-arm64
+Maintainer: Local Dev
+Installed-Size: 544
+Depends: firmware (>= 15.0), mobilesubstrate | ellekit
+Filename: debs/com.local.newdevice_1.0.0-8_iphoneos-arm64.deb
+Size: 83734
+MD5sum: 74671332954c617d459c7e308623d08f
+SHA1: 96fb58c67e118c3d9e40bdfb4b79b82974489689
+SHA256: 458e61a1d2713dc95cc1a9013b0af4d236d4c5528378c4baa00deb3b19009896
+Section: Tweaks
+Homepage: https://localhost/newdevice
+Description: One-tap new device identity, records, location spoof, jailbreak hide, holographic backup.
+Author: Local Dev
+Name: NewDevice
+
