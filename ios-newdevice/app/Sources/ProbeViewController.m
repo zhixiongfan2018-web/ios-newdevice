@@ -24,7 +24,16 @@
     size_t size = sizeof(machine);
     sysctlbyname("hw.machine", machine, &size, NULL, 0);
     CTTelephonyNetworkInfo *info = [CTTelephonyNetworkInfo new];
-    CTCarrier *carrier = info.serviceSubscriberCellularProviders.allValues.firstObject ?: info.subscriberCellularProvider;
+    CTCarrier *carrier = nil;
+    if (@available(iOS 12.0, *)) {
+        carrier = info.serviceSubscriberCellularProviders.allValues.firstObject;
+    }
+    if (!carrier) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        carrier = info.subscriberCellularProvider;
+#pragma clang diagnostic pop
+    }
     _rows = @[
         @[@"name", dev.name ?: @""],
         @[@"model", dev.model ?: @""],

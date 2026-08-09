@@ -35,7 +35,7 @@ static NSString *NDRandomSerial(void) {
 
 static NSString *NDRandomBuild(NSString *systemVer) {
     NSArray *parts = [systemVer componentsSeparatedByString:@"."];
-    NSInteger major = parts.count ? parts[0].integerValue : 16;
+    NSInteger major = parts.count ? [parts[0] integerValue] : 16;
     return [NSString stringWithFormat:@"%ldA%d", (long)(major + 100), arc4random_uniform(900) + 100];
 }
 

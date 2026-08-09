@@ -62,9 +62,7 @@
         if ([r isEqualToString:@"LTE"]) return CTRadioAccessTechnologyLTE;
         if ([r isEqualToString:@"WCDMA"]) return CTRadioAccessTechnologyWCDMA;
         if ([r isEqualToString:@"NR"] || [r isEqualToString:@"NRNSA"]) {
-            if (@available(iOS 14.1, *)) {
-                return CTRadioAccessTechnologyNR;
-            }
+            return @"CTRadioAccessTechnologyNR";
         }
         return CTRadioAccessTechnologyLTE;
     }
