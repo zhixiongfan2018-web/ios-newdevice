@@ -44,6 +44,8 @@ jobs:
           set -euo pipefail
           export THEOS="${THEOS:-$HOME/theos}"
           export THEOS_PACKAGE_SCHEME=rootless
+          # Windows checkout often loses +x; dpkg requires maintainer scripts executable
+          chmod 755 layout/DEBIAN/postinst layout/DEBIAN/prerm
           make clean || true
           make package FINALPACKAGE=1 PACKAGE_VERSION=1.0.0-${{ github.run_number }}
 
