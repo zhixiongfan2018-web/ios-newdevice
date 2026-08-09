@@ -61,9 +61,9 @@
         NSString *r = st.profile.RadioAccess;
         if ([r isEqualToString:@"LTE"]) return CTRadioAccessTechnologyLTE;
         if ([r isEqualToString:@"WCDMA"]) return CTRadioAccessTechnologyWCDMA;
-        if ([r isEqualToString:@"NR"] || [r isEqualToString:@"NRNSA"]) {
-            return @"CTRadioAccessTechnologyNR";
-        }
+        // Runtime values of CTRadioAccessTechnologyNR / NRNSA are @"NR" / @"NRNSA".
+        if ([r isEqualToString:@"NR"]) return @"NR";
+        if ([r isEqualToString:@"NRNSA"]) return @"NRNSA";
         return CTRadioAccessTechnologyLTE;
     }
     return %orig;
