@@ -1,0 +1,34 @@
+#!/bin/bash
+set -e
+
+JB_PREFIX=""
+if [ -d /var/jb ]; then
+  JB_PREFIX="/var/jb"
+fi
+
+PLIST="${JB_PREFIX}/Library/LaunchDaemons/com.local.newdevice.daemon.plist"
+BIN="${JB_PREFIX}/usr/local/bin/newdeviced"
+
+chown root:wheel "$PLIST" 2>/dev/null || true
+chmod 644 "$PLIST" 2>/dev/null || true
+chmod 755 "$BIN" 2>/dev/null || true
+
+# Ensure data dirs exist for mobile
+mkdir -p "${JB_PREFIX}/var/mobile/NewDevice/Records"
+mkdir -p "${JB_PREFIX}/var/mobile/Library/Preferences/com.local.newdevice"
+chown -R mobile:mobile "${JB_PREFIX}/var/mobile/NewDevice" 2>/dev/null || true
+chown -R mobile:mobile "${JB_PREFIX}/var/mobile/Library/Preferences/com.local.newdevice" 2>/dev/null || true
+
+if command -v launchctl >/dev/null 2>&1; then
+  launchctl unload "$PLIST" 2>/dev/null || true
+  launchctl load "$PLIST" 2>/dev/null || true
+fi
+
+# Fallback: start daemon directly
+if ! curl -s --max-time 1 "http://127.0.0.1:8080/" >/dev/null 2>&1; then
+  if [ -x "$BIN" ]; then
+    su mobile -c "nohup '$BIN' >/dev/null 2>&1 &" 2>/dev/null || nohup "$BIN" >/dev/null 2>&1 &
+  fi
+fi
+
+exit 0

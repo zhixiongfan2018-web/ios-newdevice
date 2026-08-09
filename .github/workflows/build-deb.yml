@@ -1,0 +1,69 @@
+name: Build NewDevice deb
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios-newdevice/**"
+      - ".github/workflows/build-deb.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --recursive https://github.com/theos/theos.git "$HOME/theos"
+          # iOS SDKs for Theos (rootless arm64)
+          git clone --depth=1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
+
+      - name: Install ldid
+        run: |
+          brew install ldid || true
+          # Fallback: Theos vendor ldid if brew fails
+          which ldid || ls "$HOME/theos/bin"
+
+      - name: Make package
+        working-directory: ios-newdevice
+        run: |
+          set -euo pipefail
+          export THEOS="${THEOS:-$HOME/theos}"
+          export THEOS_PACKAGE_SCHEME=rootless
+          make clean || true
+          make package FINALPACKAGE=1 PACKAGE_VERSION=1.0.0-${{ github.run_number }}
+
+      - name: Collect deb
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          shopt -s nullglob
+          files=(ios-newdevice/packages/*.deb)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No deb produced"
+            find ios-newdevice -maxdepth 3 -type f | head -n 200
+            exit 1
+          fi
+          cp "${files[@]}" dist/
+          ls -la dist
+          echo "deb=$(ls dist/*.deb | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewDevice-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 14

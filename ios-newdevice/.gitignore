@@ -1,0 +1,7 @@
+.theos/
+packages/
+*.deb
+.DS_Store
+*.swp
+objc/
+.idea/
