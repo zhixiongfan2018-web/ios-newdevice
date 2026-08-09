@@ -24,6 +24,7 @@ static NSString *NDRandomMAC(void) {
 }
 
 static NSString *NDRandomSerial(void) {
+    // Apple-like 12-char serial alphabet (no ambiguous A/B/I/O).
     static NSString *alphabet = @"CDEFGHJKLMNPQRSTUVWXYZ0123456789";
     NSMutableString *s = [NSMutableString stringWithCapacity:12];
     for (int i = 0; i < 12; i++) {
@@ -33,10 +34,13 @@ static NSString *NDRandomSerial(void) {
     return s;
 }
 
-static NSString *NDRandomBuild(NSString *systemVer) {
-    NSArray *parts = [systemVer componentsSeparatedByString:@"."];
-    NSInteger major = parts.count ? [parts[0] integerValue] : 16;
-    return [NSString stringWithFormat:@"%ldA%d", (long)(major + 100), arc4random_uniform(900) + 100];
+static NSString *NDStringFromDict(NSDictionary *dict, NSArray<NSString *> *keys) {
+    for (NSString *key in keys) {
+        id v = dict[key];
+        if ([v isKindOfClass:[NSString class]] && [(NSString *)v length]) return v;
+        if ([v isKindOfClass:[NSNumber class]]) return [v stringValue];
+    }
+    return @"";
 }
 
 @implementation NDDeviceProfile
@@ -57,6 +61,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.Model = @"";
     p.ProductType = @"";
     p.HardwareMachine = @"";
+    p.HardwareModel = @"";
     p.SystemVer = @"";
     p.Build = @"";
     p.Carrier = @"";
@@ -77,17 +82,10 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.enabled = YES;
     p.createdAt = [NSDate date];
 
-    NSDictionary *dev = nil;
-    NSArray *models = [NDDeviceCatalog deviceModels];
-    if (model.length) {
-        for (NSDictionary *m in models) {
-            if ([m[@"Model"] isEqualToString:model] || [m[@"ProductType"] isEqualToString:model]) {
-                dev = m;
-                break;
-            }
-        }
-    }
+    // AMG-compatible random pool: preferred model/system if set, else catalog random.
+    NSDictionary *dev = [NDDeviceCatalog deviceEntryMatching:model];
     if (!dev) {
+        NSArray *models = [NDDeviceCatalog deviceModels];
         dev = models[arc4random_uniform((uint32_t)models.count)];
     }
 
@@ -95,6 +93,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     NSDictionary *carrier = [NDDeviceCatalog carriers][arc4random_uniform((uint32_t)[NDDeviceCatalog carriers].count)];
     NSDictionary *coord = [NDDeviceCatalog randomChinaCoordinate];
 
+    // Identity — same key names AMG scripts read/write (IDFA/IDFV/Serial/UDID/…).
     p.IDFA = NDRandomUUID();
     p.IDFV = NDRandomUUID();
     p.UUID = NDRandomUUID();
@@ -104,11 +103,12 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.BTMAC = NDRandomMAC();
     p.DeviceToken = NDRandomHex(64);
 
-    p.Model = dev[@"Model"];
-    p.ProductType = dev[@"ProductType"];
-    p.HardwareMachine = dev[@"HardwareMachine"];
+    p.Model = dev[@"Model"] ?: @"";
+    p.ProductType = dev[@"ProductType"] ?: @"";
+    p.HardwareMachine = dev[@"HardwareMachine"] ?: p.ProductType;
+    p.HardwareModel = dev[@"HardwareModel"] ?: @"";
     p.SystemVer = sys;
-    p.Build = NDRandomBuild(sys);
+    p.Build = [NDDeviceCatalog buildForSystemVersion:sys] ?: @"";
 
     p.Carrier = carrier[@"Carrier"];
     p.MCC = carrier[@"MCC"];
@@ -121,10 +121,32 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     return p;
 }
 
+- (void)syncIdentityFromCatalog {
+    // Prefer marketing Model (AMG Set_Device_Model writes only this key).
+    NSString *key = self.Model.length ? self.Model : self.ProductType;
+    NSDictionary *dev = [NDDeviceCatalog deviceEntryMatching:key];
+    if (dev) {
+        if (!self.Model.length) self.Model = dev[@"Model"] ?: @"";
+        // If Model matches catalog row, always align ProductType / board ids.
+        if ([dev[@"Model"] isEqualToString:self.Model] || !self.ProductType.length) {
+            self.ProductType = dev[@"ProductType"] ?: self.ProductType;
+            self.HardwareMachine = dev[@"HardwareMachine"] ?: self.HardwareMachine;
+            self.HardwareModel = dev[@"HardwareModel"] ?: self.HardwareModel;
+        } else {
+            if (!self.HardwareMachine.length) self.HardwareMachine = dev[@"HardwareMachine"] ?: @"";
+            if (!self.HardwareModel.length) self.HardwareModel = dev[@"HardwareModel"] ?: @"";
+        }
+    }
+    if (self.SystemVer.length && !self.Build.length) {
+        self.Build = [NDDeviceCatalog buildForSystemVersion:self.SystemVer] ?: self.Build;
+    }
+}
+
 + (instancetype)profileFromDictionary:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]]) return nil;
     NDDeviceProfile *p = [NDDeviceProfile new];
-    p.name = dict[@"name"] ?: dict[@"Name"] ?: @"unnamed";
+    p.name = NDStringFromDict(dict, @[@"name", @"Name"]) ?: @"unnamed";
+    if (!p.name.length) p.name = @"unnamed";
     p.enabled = dict[@"enabled"] ? [dict[@"enabled"] boolValue] : YES;
     id created = dict[@"createdAt"];
     if ([created isKindOfClass:[NSDate class]]) {
@@ -137,29 +159,40 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         p.createdAt = [NSDate date];
     }
 
-    p.IDFA = dict[@"IDFA"] ?: @"";
-    p.IDFV = dict[@"IDFV"] ?: @"";
-    p.UUID = dict[@"UUID"] ?: @"";
-    p.Serial = dict[@"Serial"] ?: @"";
-    p.UDID = dict[@"UDID"] ?: @"";
-    p.WiFiMAC = dict[@"WiFiMAC"] ?: @"";
-    p.BTMAC = dict[@"BTMAC"] ?: @"";
-    p.DeviceToken = dict[@"DeviceToken"] ?: @"";
+    // Accept AMG key names + a few common aliases from other tools.
+    p.IDFA = NDStringFromDict(dict, @[@"IDFA"]);
+    p.IDFV = NDStringFromDict(dict, @[@"IDFV"]);
+    p.UUID = NDStringFromDict(dict, @[@"UUID"]);
+    p.Serial = NDStringFromDict(dict, @[@"Serial", @"SerialNumber", @"SerialNum"]);
+    p.UDID = NDStringFromDict(dict, @[@"UDID"]);
+    p.WiFiMAC = NDStringFromDict(dict, @[@"WiFiMAC", @"WifiAddress", @"MAC"]);
+    p.BTMAC = NDStringFromDict(dict, @[@"BTMAC", @"BluetoothAddress"]);
+    p.DeviceToken = NDStringFromDict(dict, @[@"DeviceToken"]);
 
-    p.Model = dict[@"Model"] ?: @"";
-    p.ProductType = dict[@"ProductType"] ?: @"";
-    p.HardwareMachine = dict[@"HardwareMachine"] ?: @"";
-    p.SystemVer = dict[@"SystemVer"] ?: @"";
-    p.Build = dict[@"Build"] ?: @"";
+    p.Model = NDStringFromDict(dict, @[@"Model", @"DeviceName"]);
+    p.ProductType = NDStringFromDict(dict, @[@"ProductType"]);
+    p.HardwareMachine = NDStringFromDict(dict, @[@"HardwareMachine"]);
+    p.HardwareModel = NDStringFromDict(dict, @[@"HardwareModel"]);
+    p.SystemVer = NDStringFromDict(dict, @[@"SystemVer", @"SystemVersion", @"ProductVersion"]);
+    p.Build = NDStringFromDict(dict, @[@"Build", @"BuildVersion"]);
 
-    p.Carrier = dict[@"Carrier"] ?: @"";
-    p.MCC = dict[@"MCC"] ?: @"";
-    p.MNC = dict[@"MNC"] ?: @"";
-    p.RadioAccess = dict[@"RadioAccess"] ?: @"";
+    p.Carrier = NDStringFromDict(dict, @[@"Carrier"]);
+    p.MCC = NDStringFromDict(dict, @[@"MCC"]);
+    p.MNC = NDStringFromDict(dict, @[@"MNC"]);
+    p.RadioAccess = NDStringFromDict(dict, @[@"RadioAccess"]);
 
-    p.Latitude = [dict[@"Latitude"] doubleValue];
-    p.Longitude = [dict[@"Longitude"] doubleValue];
-    p.Altitude = dict[@"Altitude"] ? [dict[@"Altitude"] doubleValue] : 10;
+    id lat = dict[@"Latitude"] ?: dict[@"latitude"];
+    id lon = dict[@"Longitude"] ?: dict[@"longitude"];
+    id alt = dict[@"Altitude"] ?: dict[@"altitude"];
+    p.Latitude = [lat respondsToSelector:@selector(doubleValue)] ? [lat doubleValue] : 0;
+    p.Longitude = [lon respondsToSelector:@selector(doubleValue)] ? [lon doubleValue] : 0;
+    p.Altitude = alt ? [alt doubleValue] : 10;
+
+    // AMG Set_Device_Model only writes Model — fill ProductType/board ids.
+    [p syncIdentityFromCatalog];
+    if (p.SystemVer.length && !p.Build.length) {
+        p.Build = [NDDeviceCatalog buildForSystemVersion:p.SystemVer] ?: @"";
+    }
     return p;
 }
 
@@ -187,6 +220,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"Model": self.Model ?: @"",
         @"ProductType": self.ProductType ?: @"",
         @"HardwareMachine": self.HardwareMachine ?: @"",
+        @"HardwareModel": self.HardwareModel ?: @"",
         @"SystemVer": self.SystemVer ?: @"",
         @"Build": self.Build ?: @"",
         @"Carrier": self.Carrier ?: @"",

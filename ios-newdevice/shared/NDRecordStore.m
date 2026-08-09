@@ -165,19 +165,18 @@
     NSString *sys = cfg.preferredSystems.count ? cfg.preferredSystems[arc4random_uniform((uint32_t)cfg.preferredSystems.count)] : nil;
     NDDeviceProfile *p = [NDDeviceProfile randomProfileWithName:[self makeRecordName] preferredModel:model preferredSystem:sys];
 
-    if (!cfg.randomLocation && !cfg.spoofLocation) {
+    // When randomLocation is off, always inherit current coords (including 0,0 on 原始机器).
+    // Do not keep catalog-randomized GPS from randomProfile.
+    if (!cfg.randomLocation) {
         NDDeviceProfile *cur = [self currentProfile];
         if (cur) {
             p.Latitude = cur.Latitude;
             p.Longitude = cur.Longitude;
             p.Altitude = cur.Altitude;
-        }
-    } else if (!cfg.randomLocation) {
-        NDDeviceProfile *cur = [self currentProfile];
-        if (cur && (cur.Latitude != 0 || cur.Longitude != 0)) {
-            p.Latitude = cur.Latitude;
-            p.Longitude = cur.Longitude;
-            p.Altitude = cur.Altitude;
+        } else {
+            p.Latitude = 0;
+            p.Longitude = 0;
+            p.Altitude = 0;
         }
     }
 
@@ -204,11 +203,15 @@
     NSString *current = [self currentRecordName] ?: @"原始机器";
     NSUInteger idx = [names indexOfObject:current];
     NSUInteger next = (idx == NSNotFound) ? 0 : (idx + 1) % names.count;
-    // skip disabled
+    // skip disabled; if we wrap back to current, treat as no-op success (do not fail scripts)
     for (NSUInteger n = 0; n < names.count; n++) {
         NSUInteger i = (next + n) % names.count;
         NDDeviceProfile *p = [self profileNamed:names[i]];
         if (p.enabled || [names[i] isEqualToString:@"原始机器"]) {
+            if ([names[i] isEqualToString:current]) {
+                // Only one enabled record (or all others disabled) — stay put.
+                return YES;
+            }
             return [self switchToRecord:names[i] error:error];
         }
     }

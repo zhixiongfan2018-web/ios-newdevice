@@ -47,6 +47,16 @@ static int hooked_stat(const char *path, struct stat *buf) {
     return orig_stat(path, buf);
 }
 
+static int (*orig_lstat)(const char *, struct stat *);
+static int hooked_lstat(const char *path, struct stat *buf) {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.config.jailbreakHideBasic && NDIsJBPath(path)) {
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_lstat(path, buf);
+}
+
 static int (*orig_access)(const char *, int);
 static int hooked_access(const char *path, int mode) {
     NDTweakState *st = [NDTweakState shared];
@@ -107,6 +117,7 @@ static pid_t hooked_fork(void) {
 
 %ctor {
     MSHookFunction((void *)stat, (void *)hooked_stat, (void **)&orig_stat);
+    MSHookFunction((void *)lstat, (void *)hooked_lstat, (void **)&orig_lstat);
     MSHookFunction((void *)access, (void *)hooked_access, (void **)&orig_access);
     MSHookFunction((void *)fopen, (void *)hooked_fopen, (void **)&orig_fopen);
     MSHookFunction((void *)_dyld_get_image_name, (void *)hooked_dyld_get_image_name, (void **)&orig_dyld_get_image_name);

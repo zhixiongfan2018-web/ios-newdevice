@@ -43,15 +43,17 @@
 - (void)call:(NSString *)fun query:(NSDictionary<NSString *,NSString *> *)query completion:(void (^)(BOOL, NSString * _Nullable, NSError * _Nullable))completion {
     NSError *ensureErr = nil;
     if (![[NDHTTPServer shared] ensureRunning:&ensureErr]) {
-        // Fallback: call service in-process if bind failed for unexpected reasons
-        if (![NDOperationService isAsyncAckFun:fun]) {
-            [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *body, NSInteger httpCode) {
+        // Fallback: run in-process for both sync and async funs when no listener is available.
+        [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *body, NSInteger httpCode) {
+            if ([NDOperationService isAsyncAckFun:fun]) {
+                [self pollResultWithTimeout:120 completion:completion];
+            } else {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     completion(httpCode == 200, body, httpCode == 200 ? nil : ensureErr);
                 });
-            }];
-            return;
-        }
+            }
+        }];
+        return;
     }
 
     NSURLComponents *comp = [NSURLComponents new];

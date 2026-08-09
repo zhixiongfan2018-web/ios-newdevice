@@ -6,6 +6,10 @@
 #import "NDPaths.h"
 #import "NDDeviceProfile.h"
 
+@interface NDOperationService ()
+@property (nonatomic, strong) dispatch_queue_t opQueue;
+@end
+
 @implementation NDOperationService
 
 + (instancetype)shared {
@@ -15,6 +19,15 @@
         svc = [NDOperationService new];
     });
     return svc;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        // Serialize all record mutations so concurrent HTTP clients cannot interleave backups.
+        _opQueue = dispatch_queue_create("com.local.newdevice.ops", DISPATCH_QUEUE_SERIAL);
+    }
+    return self;
 }
 
 + (BOOL)isAsyncAckFun:(NSString *)fun {
@@ -39,23 +52,51 @@
     block(apps, prev);
 }
 
-- (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
+/// Returns YES when switch data pipeline completed (or was intentionally skipped).
+- (BOOL)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps error:(NSError **)error {
+    if (!current.length) {
+        if (error) *error = [NSError errorWithDomain:@"NDOperation" code:10 userInfo:@{NSLocalizedDescriptionKey: @"Empty current record"}];
+        return NO;
+    }
+    // Same-record switch must not wipe / re-backup target sandboxes.
+    if (previous.length && [previous isEqualToString:current]) {
+        return YES;
+    }
+
     NDConfig *cfg = [NDConfig shared];
+    NSError *pipelineError = nil;
     if (cfg.holographicBackup && apps.count) {
         if (previous.length && ![previous isEqualToString:@"原始机器"]) {
-            [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+            NSError *err = nil;
+            [[NDAppDataManager shared] backupApps:apps toRecord:previous error:&err];
+            if (err) pipelineError = err;
         }
         if ([current isEqualToString:@"原始机器"]) {
-            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            NSError *err = nil;
+            if (![[NDAppDataManager shared] clearDataForApps:apps error:&err] && err) {
+                pipelineError = err;
+            }
         } else {
-            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
+            NSError *err = nil;
+            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:&err];
+            if (err) pipelineError = err;
         }
     } else if (apps.count) {
-        [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+        NSError *err = nil;
+        if (![[NDAppDataManager shared] clearDataForApps:apps error:&err] && err) {
+            pipelineError = err;
+        }
     }
     if (cfg.smartAirplane) {
-        [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+        NSError *airErr = nil;
+        if (![NDAirplane toggleAirplaneWithDelay:3.0 error:&airErr] && airErr) {
+            // Airplane is best-effort; do not fail the whole new-device chain.
+            NSLog(@"[NewDevice] airplane toggle failed: %@", airErr);
+        }
     }
+    if (pipelineError && error) *error = pipelineError;
+    // Holographic IO errors are logged via error out-param but do not fail identity switch.
+    return YES;
 }
 
 - (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *,NSString *> *)query completion:(void (^)(NSString * _Nullable, NSInteger))completion {
@@ -63,7 +104,7 @@
         if (completion) completion(body, code);
     };
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(self.opQueue, ^{
         [[NDRecordStore shared] writeResultCode:2];
         NSError *error = nil;
         NSString *body = @"";
@@ -78,7 +119,7 @@
                     done(@"", 500);
                     return;
                 }
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps error:nil];
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
             }];
@@ -89,7 +130,7 @@
             [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToOriginal:&err];
-                if (success) [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps];
+                if (success) [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps error:nil];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(success ? @"原始机器" : @"", success ? 200 : 500);
             }];
@@ -101,7 +142,7 @@
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToNext:&err];
                 NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
-                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps];
+                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps error:nil];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(cur, success ? 200 : 500);
             }];
@@ -113,7 +154,7 @@
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToFirst:&err];
                 NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
-                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps];
+                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps error:nil];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(cur, success ? 200 : 500);
             }];
@@ -125,7 +166,7 @@
             [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
-                if (success) [self afterSwitchFrom:previousRecord to:name apps:apps];
+                if (success) [self afterSwitchFrom:previousRecord to:name apps:apps error:nil];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(name, success ? 200 : 500);
             }];
@@ -159,16 +200,31 @@
         }
 
         if ([fun isEqualToString:@"deleteRecord"]) {
-            ok = [[NDRecordStore shared] deleteRecord:query[@"recordName"] ?: @"" error:&error];
-            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(@"", ok ? 200 : 500);
+            NSString *name = query[@"recordName"] ?: @"";
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                BOOL wasCurrent = previousRecord.length && [previousRecord isEqualToString:name];
+                BOOL success = [[NDRecordStore shared] deleteRecord:name error:&err];
+                if (success && wasCurrent) {
+                    // Pointer already flipped to 原始机器 inside store; run data pipeline.
+                    [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps error:nil];
+                }
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(@"", success ? 200 : 500);
+            }];
             return;
         }
 
         if ([fun isEqualToString:@"deleteAllRecords"]) {
-            ok = [[NDRecordStore shared] deleteAllRecordsKeepingCurrent:YES error:&error];
-            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(@"", ok ? 200 : 500);
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                BOOL success = [[NDRecordStore shared] deleteAllRecordsKeepingCurrent:YES error:&err];
+                // keepCurrent=YES: identity unchanged → skip afterSwitch.
+                (void)apps;
+                (void)previousRecord;
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(@"", success ? 200 : 500);
+            }];
             return;
         }
 

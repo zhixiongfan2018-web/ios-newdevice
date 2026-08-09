@@ -16,11 +16,15 @@
 - [ ] 再次新机生成另一条记录，可在记录页看到多条
 - [ ] 「原始机器」可切回，目标 App 数据被清理或按策略处理
 
-## Tweak 生效
+## Tweak 生效（对比 AMG 参数）
+
+AMG 脚本读写的字段名：`IDFA` / `IDFV` / `DeviceToken` / `Model` / `SystemVer` / `Latitude` / `Longitude` 等（见 `scripts/AMG_compat.lua`）。
 
 - [ ] 将 NewDevice 自己或测试 App 勾选为目标
-- [ ] 打开探测页（或测试 App），IDFA/系统版本/hw.machine 与当前记录一致
+- [ ] 一键新机后打开 **生效探测**：IDFA / systemVersion / hw.machine / MG Serial·UDID·ProductType·HardwareModel 显示「生效」
+- [ ] `HardwareModel` 为板级 id（如 `D63AP`），不是 `iPhone14,2`
 - [ ] 切回「原始机器」后探测值恢复真实机（需杀进程重开）
+- [ ] 脚本 `AMG.Get_Param()` 导出的 plist 含 `Model`/`SystemVer`/`DeviceToken`；改 `Model` 为 `iPhone X` 再 `Set_Param` 后 ProductType 变为 `iPhone10,3`
 
 ## 定位 / 飞行 / IP
 
@@ -45,4 +49,13 @@
 - [ ] 手机上访问 `http://127.0.0.1:8080/` → `NewDevice API OK`（电脑浏览器会打不开，属正常）
 - [ ] `http://127.0.0.1:8080/cmd?fun=newRecord` → 立刻 200 `accepted`，结果文件最终为 `1`
 - [ ] `getCurrentRecordName` / `nextRecord` / `deleteRecord` 行为正常
+- [ ] 仅有「原始机器」时 `nextRecord` 成功且不清空目标 App 数据
+- [ ] 删除当前记录后切回「原始机器」，目标 App 数据被清理
 - [ ] 触动脚本 `scripts/AMG_compat.lua` 中 `AMG.New()` 返回 true
+
+## 主机侧链路模拟（无真机）
+
+```bash
+python3 ios-newdevice/scripts/simulate_chain.py
+python3 ios-newdevice/scripts/simulate_amg_params.py
+```

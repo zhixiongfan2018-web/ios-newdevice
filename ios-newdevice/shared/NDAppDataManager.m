@@ -1,5 +1,6 @@
 #import "NDAppDataManager.h"
 #import "NDPaths.h"
+#import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <spawn.h>
@@ -18,48 +19,116 @@ extern char **environ;
     return m;
 }
 
-- (void)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
+- (int)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
+    if (![[NSFileManager defaultManager] isExecutableFileAtPath:launchPath]) {
+        return -1;
+    }
     pid_t pid = 0;
     const char *path = launchPath.fileSystemRepresentation;
     NSUInteger count = args.count;
     char **argv = calloc(count + 2, sizeof(char *));
+    if (!argv) return -1;
     argv[0] = (char *)path;
     for (NSUInteger i = 0; i < count; i++) {
         argv[i + 1] = (char *)args[i].UTF8String;
     }
     argv[count + 1] = NULL;
-    posix_spawn(&pid, path, NULL, NULL, argv, environ);
-    if (pid > 0) {
+    int rc = posix_spawn(&pid, path, NULL, NULL, argv, environ);
+    if (rc == 0 && pid > 0) {
         int status = 0;
         waitpid(pid, &status, 0);
+        free(argv);
+        if (WIFEXITED(status)) return WEXITSTATUS(status);
+        return status;
     }
     free(argv);
+    return rc == 0 ? -1 : rc;
+}
+
+- (nullable id)applicationProxyForBundleId:(NSString *)bundleId {
+    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+    if (!LSApplicationProxy) return nil;
+    SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+    if (![LSApplicationProxy respondsToSelector:sel]) return nil;
+    return ((id (*)(id, SEL, id))objc_msgSend)(LSApplicationProxy, sel, bundleId);
+}
+
+- (NSString *)executableNameForBundleId:(NSString *)bundleId {
+    if (!bundleId.length) return nil;
+    id proxy = [self applicationProxyForBundleId:bundleId];
+    if (proxy) {
+        SEL execNameSel = NSSelectorFromString(@"executableName");
+        if ([proxy respondsToSelector:execNameSel]) {
+            NSString *name = ((id (*)(id, SEL))objc_msgSend)(proxy, execNameSel);
+            if ([name isKindOfClass:[NSString class]] && name.length) return name;
+        }
+        for (NSString *selName in @[@"bundleURL", @"bundleContainerURL"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if (![proxy respondsToSelector:sel]) continue;
+            NSURL *url = ((id (*)(id, SEL))objc_msgSend)(proxy, sel);
+            if (![url isKindOfClass:[NSURL class]] || !url.path.length) continue;
+            NSString *infoPath = [url.path stringByAppendingPathComponent:@"Info.plist"];
+            // Some proxies return .app container root already; also try Contents-less iOS layout.
+            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+            if (!info) {
+                // If URL is the .app itself, Info.plist is direct; if parent, scan *.app
+                NSArray *children = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:url.path error:nil];
+                for (NSString *child in children) {
+                    if ([child.pathExtension.lowercaseString isEqualToString:@"app"]) {
+                        info = [NSDictionary dictionaryWithContentsOfFile:[[url.path stringByAppendingPathComponent:child] stringByAppendingPathComponent:@"Info.plist"]];
+                        if (info) break;
+                    }
+                }
+            }
+            NSString *exec = info[@"CFBundleExecutable"];
+            if ([exec isKindOfClass:[NSString class]] && exec.length) return exec;
+        }
+    }
+    // Last path component of a reverse-DNS id is rarely the process name; still try as fallback.
+    return bundleId.lastPathComponent;
+}
+
+- (void)killExecutableNamed:(NSString *)execName {
+    if (!execName.length) return;
+    NSArray<NSString *> *bins = @[
+        @"/var/jb/usr/bin/killall",
+        @"/usr/bin/killall",
+        @"/var/jb/bin/killall",
+        @"/bin/killall",
+    ];
+    for (NSString *bin in bins) {
+        [self runCommand:bin arguments:@[@"-9", execName]];
+    }
 }
 
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds {
     for (NSString *bid in bundleIds) {
-        // killall by executable name is fragile; use launchctl / killall best-effort
-        [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", bid.lastPathComponent]];
-        [self runCommand:@"/usr/bin/killall" arguments:@[@"-9", bid.lastPathComponent]];
+        if (!bid.length) continue;
+        NSString *execName = [self executableNameForBundleId:bid];
+        if (execName.length) {
+            [self killExecutableNamed:execName];
+        }
+        // Workspace private terminate when available (SpringBoard-side).
+        Class LSApplicationWorkspace = NSClassFromString(@"LSApplicationWorkspace");
+        SEL defSel = NSSelectorFromString(@"defaultWorkspace");
+        if (LSApplicationWorkspace && [LSApplicationWorkspace respondsToSelector:defSel]) {
+            id workspace = ((id (*)(id, SEL))objc_msgSend)(LSApplicationWorkspace, defSel);
+            SEL termSel = NSSelectorFromString(@"terminateApplication:withOptions:error:");
+            if (workspace && [workspace respondsToSelector:termSel]) {
+                NSError *err = nil;
+                ((BOOL (*)(id, SEL, id, id, NSError **))objc_msgSend)(workspace, termSel, bid, @{}, &err);
+            }
+        }
     }
-    // Also try sbutils-style via bash kill by bundle through `killall` of common names
+    // Give processes a brief moment to exit before sandbox IO.
+    [NSThread sleepForTimeInterval:0.35];
 }
 
 - (NSString *)containerPathForBundleId:(NSString *)bundleId {
-    // Prefer lsappinfo / private API when available; fallback to Application scanning
-    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
-    if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleId];
-#pragma clang diagnostic pop
-        if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            NSURL *url = [proxy performSelector:NSSelectorFromString(@"dataContainerURL")];
-#pragma clang diagnostic pop
-            if ([url isKindOfClass:[NSURL class]]) return url.path;
-        }
+    id proxy = [self applicationProxyForBundleId:bundleId];
+    if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
+        NSURL *url = ((id (*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"dataContainerURL"));
+        if ([url isKindOfClass:[NSURL class]] && url.path.length) return url.path;
     }
 
     // Fallback: search mobile containers (slow, best-effort)
@@ -91,21 +160,28 @@ extern char **environ;
 
 - (BOOL)clearDataForApps:(NSArray<NSString *> *)bundleIds error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *lastError = nil;
     for (NSString *bid in bundleIds) {
         NSString *container = [self containerPathForBundleId:bid];
         if (!container) continue;
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
             NSString *path = [container stringByAppendingPathComponent:sub];
             if ([fm fileExistsAtPath:path]) {
-                [fm removeItemAtPath:path error:nil];
+                NSError *err = nil;
+                if (![fm removeItemAtPath:path error:&err]) {
+                    lastError = err;
+                    continue;
+                }
                 [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
             }
         }
     }
-    return YES;
+    if (lastError && error) *error = lastError;
+    return lastError == nil;
 }
 
 - (BOOL)backupApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName error:(NSError **)error {
+    NSError *lastError = nil;
     for (NSString *bid in bundleIds) {
         NSString *container = [self containerPathForBundleId:bid];
         if (!container) continue;
@@ -113,12 +189,15 @@ extern char **environ;
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
             NSString *src = [container stringByAppendingPathComponent:sub];
             NSString *dst = [backupRoot stringByAppendingPathComponent:sub];
-            if (![self copyItem:src to:dst error:error]) {
-                // continue best-effort
+            NSError *err = nil;
+            if (![self copyItem:src to:dst error:&err] && err) {
+                lastError = err;
             }
         }
         [self backupKeychainHintsForApps:@[bid] toRecord:recordName];
     }
+    if (lastError && error) *error = lastError;
+    // Partial backup still counts as soft-success for holographic chain continuity.
     return YES;
 }
 

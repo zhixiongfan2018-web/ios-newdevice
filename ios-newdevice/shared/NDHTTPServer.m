@@ -32,6 +32,7 @@
     if (self) {
         _serverFD = -1;
         _port = (uint16_t)NDHTTPPort;
+        // Accept/dispatch stays concurrent; record ops serialize inside NDOperationService.
         _acceptQueue = dispatch_queue_create("com.local.newdevice.http", DISPATCH_QUEUE_CONCURRENT);
     }
     return self;
@@ -63,7 +64,8 @@
                         @"Access-Control-Allow-Origin: *\r\n"
                         @"\r\n",
                         status, (unsigned long)data.length];
-    send(clientFD, header.UTF8String, header.length, 0);
+    const char *hdr = header.UTF8String;
+    if (hdr) send(clientFD, hdr, strlen(hdr), 0);
     if (data.length) send(clientFD, data.bytes, data.length, 0);
     close(clientFD);
 }

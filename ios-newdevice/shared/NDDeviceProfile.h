@@ -20,8 +20,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *Model;
 @property (nonatomic, copy) NSString *ProductType;
 @property (nonatomic, copy) NSString *HardwareMachine;
+/// MobileGestalt HardwareModel board id (e.g. D63AP). Distinct from ProductType.
+@property (nonatomic, copy) NSString *HardwareModel;
 @property (nonatomic, copy) NSString *SystemVer;
 @property (nonatomic, copy) NSString *Build;
+
+/// When Model/ProductType is set AMG-style, fill ProductType/Hardware* from catalog.
+- (void)syncIdentityFromCatalog;
 
 @property (nonatomic, copy) NSString *Carrier;
 @property (nonatomic, copy) NSString *MCC;

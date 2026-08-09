@@ -10,9 +10,13 @@
 
 %hook UIDevice
 - (NSString *)model {
+    // UIDevice.model is the family string ("iPhone"/"iPad"), not marketing name.
+    // Marketing name is spoofed via -name / MG DeviceName (= profile.Model).
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.Model.length) {
-        return @"iPhone";
+    if ([st shouldSpoof] && st.config.fakeDeviceModel) {
+        NSString *pt = st.profile.ProductType ?: @"";
+        if ([pt.lowercaseString containsString:@"ipad"]) return @"iPad";
+        if (st.profile.Model.length || pt.length) return @"iPhone";
     }
     return %orig;
 }

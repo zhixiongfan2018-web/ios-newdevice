@@ -25,7 +25,7 @@
 
 - (void)rebuild {
     NSDictionary *d = [self.profile toDictionary];
-    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"Serial",@"UDID",@"WiFiMAC",@"BTMAC",@"DeviceToken",@"Model",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"Latitude",@"Longitude",@"Altitude"];
+    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"Serial",@"UDID",@"WiFiMAC",@"BTMAC",@"DeviceToken",@"Model",@"ProductType",@"HardwareMachine",@"HardwareModel",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"Latitude",@"Longitude",@"Altitude"];
     NSMutableArray *rows = [NSMutableArray array];
     for (NSString *k in keys) {
         [rows addObject:@[k, [NSString stringWithFormat:@"%@", d[k] ?: @""]]];
@@ -62,6 +62,7 @@
             d[key] = newVal;
         }
         self.profile = [NDDeviceProfile profileFromDictionary:d];
+        [self.profile syncIdentityFromCatalog];
         [self rebuild];
     }]];
     [self presentViewController:a animated:YES completion:nil];
