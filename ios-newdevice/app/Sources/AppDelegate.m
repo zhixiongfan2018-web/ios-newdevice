@@ -11,15 +11,14 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.bgTask = UIBackgroundTaskInvalid;
-    [NDPaths ensureDirectories];
-    [NDTheme applyGlobalAppearance];
 
-    NSError *error = nil;
-    if (![[NDHTTPServer shared] ensureRunning:&error]) {
-        NSLog(@"[NewDevice] API start failed: %@", error);
-    } else {
-        NSLog(@"[NewDevice] API ready at http://127.0.0.1:%u/cmd", [NDHTTPServer shared].port ?: (unsigned)NDHTTPPort);
+    @try {
+        [NDPaths ensureDirectories];
+    } @catch (__unused NSException *e) {
+        NSLog(@"[NewDevice] ensureDirectories failed: %@", e);
     }
+
+    [NDTheme applyGlobalAppearance];
 
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.tintColor = [NDTheme accent];
@@ -35,13 +34,13 @@
 
     UINavigationController *recs = [[UINavigationController alloc] initWithRootViewController:[RecordsViewController new]];
     recs.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"记录"
-                                                    image:[UIImage systemImageNamed:@"rectangle.stack"]
-                                            selectedImage:[UIImage systemImageNamed:@"rectangle.stack.fill"]];
+                                                    image:[UIImage systemImageNamed:@"list.bullet"]
+                                            selectedImage:[UIImage systemImageNamed:@"list.bullet"]];
 
     UINavigationController *apps = [[UINavigationController alloc] initWithRootViewController:[AppsViewController new]];
     apps.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"应用"
-                                                    image:[UIImage systemImageNamed:@"app.badge"]
-                                            selectedImage:[UIImage systemImageNamed:@"app.badge.fill"]];
+                                                    image:[UIImage systemImageNamed:@"square.grid.2x2"]
+                                            selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
 
     UINavigationController *set = [[UINavigationController alloc] initWithRootViewController:[SettingsViewController new]];
     set.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置"
@@ -56,6 +55,17 @@
     tab.viewControllers = @[home, recs, apps, set];
     self.window.rootViewController = tab;
     [self.window makeKeyAndVisible];
+
+    // Start API after UI is up so a bind failure cannot prevent launch.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSError *error = nil;
+        if (![[NDHTTPServer shared] ensureRunning:&error]) {
+            NSLog(@"[NewDevice] API start failed: %@", error);
+        } else {
+            NSLog(@"[NewDevice] API ready at http://127.0.0.1:%u/cmd", [NDHTTPServer shared].port ?: (unsigned)NDHTTPPort);
+        }
+    });
+
     return YES;
 }
 

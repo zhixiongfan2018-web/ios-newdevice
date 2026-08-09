@@ -8,10 +8,16 @@ fi
 
 PLIST="${JB_PREFIX}/Library/LaunchDaemons/com.local.newdevice.daemon.plist"
 BIN="${JB_PREFIX}/usr/local/bin/newdeviced"
+APP="${JB_PREFIX}/Applications/NewDevice.app"
 
 chown root:wheel "$PLIST" 2>/dev/null || true
 chmod 644 "$PLIST" 2>/dev/null || true
 chmod 755 "$BIN" 2>/dev/null || true
+
+if [ -d "$APP" ]; then
+  chown -R root:wheel "$APP" 2>/dev/null || true
+  chmod 755 "$APP/NewDevice" 2>/dev/null || true
+fi
 
 # Ensure data dirs exist for mobile
 mkdir -p "${JB_PREFIX}/var/mobile/NewDevice/Records"
@@ -29,6 +35,11 @@ if ! curl -s --max-time 1 "http://127.0.0.1:8080/" >/dev/null 2>&1; then
   if [ -x "$BIN" ]; then
     su mobile -c "nohup '$BIN' >/dev/null 2>&1 &" 2>/dev/null || nohup "$BIN" >/dev/null 2>&1 &
   fi
+fi
+
+# Refresh SpringBoard so the App icon/launch registration is valid
+if command -v uicache >/dev/null 2>&1; then
+  uicache -p "$APP" 2>/dev/null || uicache --path "$APP" 2>/dev/null || uicache -a 2>/dev/null || true
 fi
 
 exit 0
