@@ -6,5 +6,6 @@ Description: One-tap new device identity, records, location spoof, jailbreak hid
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
-Depends: firmware (>= 15.0), mobilesubstrate | ellekit
-Homepage: https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb
+Depends: firmware (>= 15.0)
+Recommends: ellekit | mobilesubstrate
+Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@master/repo/
