@@ -1,20 +1,3 @@
-Package: ellekit
-Name: ElleKit Compat
-Description: Compatibility meta package for Dopamine/ElleKit environments (satisfies NewDevice Depends).
-Maintainer: Local Dev
-Author: Local Dev
-Section: Tweaks
-Depends: firmware (>= 15.0)
-Provides: mobilesubstrate
-Architecture: iphoneos-arm64
-Version: 1.0.0
-Installed-Size: 8
-Filename: debs/ellekit_1.0.0_iphoneos-arm64.deb
-Size: 569
-MD5sum: bc730648ec6123c1439a465a56088c55
-SHA1: 470a782d1cc65ed032f040d88ff22425f0fe78a0
-SHA256: 50fe193522832cf99f01870e6f0238a2d5558dba512979b4ccc5354a04f39874
-
 Package: com.local.newdevice
 Name: NewDevice
 Description: One-tap new device identity, records, location spoof, jailbreak hide, holographic backup.
@@ -22,13 +5,14 @@ Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
 Depends: firmware (>= 15.0)
-Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@master/repo/
+Homepage: https://zhixiongfan2018-web.github.io/ios-newdevice/
 Architecture: iphoneos-arm64
-Version: 1.0.0-20
+Version: 1.0.0-13
 Installed-Size: 496
-Filename: debs/com.local.newdevice_1.0.0-20_iphoneos-arm64.deb
+X-Pad: xxxxxxxxxxxxxxxxxxx
+Filename: debs/com.local.newdevice_1.0.0-13_iphoneos-arm64.deb
 Size: 81622
-MD5sum: 97e9888655d6a022f10cd23f958edb01
-SHA1: 4a5ea0308021b7fa2352223d7d1ae5b2336b99a5
-SHA256: fb53866b1f6745b8f526918ef44ce5c6142d8985227ed17a57bbe8f345498c29
+MD5sum: 1356a95af68ddf34f0fb8d9a9b1f5d37
+SHA1: b93f7c6765f67ac06527a99e5f6a3853d72394ad
+SHA256: 539067cf33af9ca2a9bea05e4faed4617fb4e01210ce3df19c5757b6751684a4
 
