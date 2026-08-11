@@ -1,4 +1,4 @@
-Date: Tue, 11 Aug 2026 21:42:12 GMT
+Date: Tue, 11 Aug 2026 21:48:26 +0000
 Origin: NewDevice
 Label: NewDevice
 Suite: stable
@@ -7,13 +7,16 @@ Codename: stable
 Architectures: iphoneos-arm64
 Components: main
 Description: NewDevice Sileo source
-Comment: pkg-bz2-only-1786484532
+Comment: fix-gz-hash-1786484906
 MD5Sum:
  0062fb40aa1cc9fbb3bb76f88fc04e70 1126 main/binary-iphoneos-arm64/Packages
+ 3412979cd6749ba705ac16fbdac6792d 640 main/binary-iphoneos-arm64/Packages.gz
  563743d55290daa297d09818bd5636b5 721 main/binary-iphoneos-arm64/Packages.bz2
 SHA1:
  b7da896f0f94b80cb3afbd8c58fd27fb0d95c237 1126 main/binary-iphoneos-arm64/Packages
+ 659824349243959518cc9970f7d8ab9e4dd2f70e 640 main/binary-iphoneos-arm64/Packages.gz
  641324f0edf074b21f797ff64be1742e90a0200c 721 main/binary-iphoneos-arm64/Packages.bz2
 SHA256:
  7eda64787c8aba576108c72319210e4941c4b1b51807f051cd945f00b5c4843c 1126 main/binary-iphoneos-arm64/Packages
+ b7e6c121215a237afb1d004ec5bc2d951e409735c16a9a4511ce6bf4cbfb0d6e 640 main/binary-iphoneos-arm64/Packages.gz
  4aadb7c41367fc6ceb55a77124bf58ec84ce47575483fea909fb08c849fbf22a 721 main/binary-iphoneos-arm64/Packages.bz2
