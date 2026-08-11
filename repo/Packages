@@ -1,6 +1,6 @@
 Package: ellekit
 Name: ElleKit Compat
-Description: Compatibility meta package for Dopamine/ElleKit environments.
+Description: Compatibility meta package for Dopamine/ElleKit environments (satisfies NewDevice Depends).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
