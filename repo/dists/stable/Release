@@ -6,7 +6,6 @@ Codename: stable
 Architectures: iphoneos-arm64
 Components: main
 Description: NewDevice Sileo source
-Comment: sync-1786424933
 MD5Sum:
  0062fb40aa1cc9fbb3bb76f88fc04e70 1126 main/binary-iphoneos-arm64/Packages
  464a580a96990f480f565d22d5aff23a 640 main/binary-iphoneos-arm64/Packages.gz
