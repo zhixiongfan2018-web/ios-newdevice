@@ -7,5 +7,4 @@ Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
 Depends: firmware (>= 15.0)
-Recommends: ellekit | mobilesubstrate
 Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@master/repo/
