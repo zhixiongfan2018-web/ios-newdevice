@@ -151,9 +151,7 @@ jobs:
           </head>
           <body>
             <h1>NewDevice</h1>
-            <p>推荐直链（raw，手机浏览器可下）：</p>
-            <p class="box"><code>https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb</code></p>
-            <p>Sileo 固定源：</p>
+            <p>Sileo 固定源（只用这一条）：</p>
             <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
