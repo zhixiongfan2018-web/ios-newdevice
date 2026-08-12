@@ -48,6 +48,8 @@ NS_ASSUME_NONNULL_BEGIN
                           preferredSystem:(nullable NSString *)systemVer;
 + (nullable instancetype)profileFromDictionary:(NSDictionary *)dict;
 + (nullable instancetype)profileAtPath:(NSString *)path;
+/// Normalize AMG / AWZ / CTW-style keys into NewDevice profile keys.
++ (NSDictionary *)normalizedImportDictionary:(NSDictionary *)dict;
 
 - (NSDictionary *)toDictionary;
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;

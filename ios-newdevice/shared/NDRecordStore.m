@@ -268,6 +268,86 @@
     return YES;
 }
 
+- (NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(NSString *)name error:(NSError **)error {
+    NDDeviceProfile *p = [NDDeviceProfile profileAtPath:path];
+    if (!p) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:20 userInfo:@{NSLocalizedDescriptionKey: @"Unable to read profile plist"}];
+        return nil;
+    }
+    // Skip empty / junk plists with no identity
+    if (!p.IDFA.length && !p.UDID.length && !p.Serial.length && !p.IMEI.length && !p.Model.length) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:21 userInfo:@{NSLocalizedDescriptionKey: @"Plist has no identity fields"}];
+        return nil;
+    }
+    if (name.length) p.name = name;
+    if (!p.name.length || [p.name isEqualToString:@"unnamed"]) {
+        p.name = [[path lastPathComponent] stringByDeletingPathExtension];
+    }
+    if ([p.name isEqualToString:@"原始机器"] || [p.name isEqualToString:@"config"] || [p.name isEqualToString:@"settings"]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:22 userInfo:@{NSLocalizedDescriptionKey: @"Skipped reserved name"}];
+        return nil;
+    }
+    if ([self profileNamed:p.name]) {
+        NSString *base = p.name;
+        NSInteger suffix = 2;
+        while ([self profileNamed:[NSString stringWithFormat:@"%@-%ld", base, (long)suffix]]) {
+            suffix++;
+        }
+        p.name = [NSString stringWithFormat:@"%@-%ld", base, (long)suffix];
+    }
+    if (![self saveProfile:p error:error]) return nil;
+    return p;
+}
+
+- (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError **)error {
+    if (!dir.length) dir = @"/var/mobile/AMG";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:23 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"AMG directory not found: %@", dir]}];
+        return 0;
+    }
+    NSUInteger imported = 0;
+    NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *entry in entries) {
+        if ([entry hasPrefix:@"."]) continue;
+        NSString *full = [dir stringByAppendingPathComponent:entry];
+        BOOL entryIsDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&entryIsDir];
+
+        NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+        if (entryIsDir) {
+            // Common AMG layouts: <name>/profile.plist, <name>/<name>.plist, any *.plist inside
+            NSString *profile = [full stringByAppendingPathComponent:@"profile.plist"];
+            if ([fm fileExistsAtPath:profile]) [candidates addObject:profile];
+            NSString *named = [full stringByAppendingPathComponent:[entry stringByAppendingPathExtension:@"plist"]];
+            if ([fm fileExistsAtPath:named]) [candidates addObject:named];
+            NSArray *inner = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+            for (NSString *f in inner) {
+                if ([[f pathExtension].lowercaseString isEqualToString:@"plist"]) {
+                    NSString *p = [full stringByAppendingPathComponent:f];
+                    if (![candidates containsObject:p]) [candidates addObject:p];
+                }
+            }
+        } else if ([[entry pathExtension].lowercaseString isEqualToString:@"plist"]) {
+            [candidates addObject:full];
+        }
+
+        for (NSString *plistPath in candidates) {
+            NSString *prefer = entryIsDir ? entry : [[entry stringByDeletingPathExtension] length] ? [entry stringByDeletingPathExtension] : entry;
+            if ([prefer isEqualToString:@"config"] || [prefer isEqualToString:@"settings"] || [prefer isEqualToString:@"Info"]) continue;
+            NSError *local = nil;
+            NDDeviceProfile *p = [self importProfileAtPath:plistPath preferredName:prefer error:&local];
+            if (p) {
+                imported++;
+                break; // one plist per record folder
+            }
+        }
+    }
+    if (imported) [self notifyReload];
+    return imported;
+}
+
 - (void)writeResultCode:(NSInteger)code {
     [NDPaths ensureDirectories];
     NSString *value = [NSString stringWithFormat:@"%ld", (long)code];

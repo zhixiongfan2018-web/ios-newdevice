@@ -33,11 +33,26 @@
 
 - (void)showMore {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"记录" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG 导入 (/var/mobile/AMG)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromAMG];
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportCurrent];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)importFromAMG {
+    NSError *err = nil;
+    NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:@"/var/mobile/AMG" error:&err];
+    NSString *msg = n
+        ? [NSString stringWithFormat:@"已导入 %lu 条身份记录。\n注意：AMG 的 App 全息备份目录不会自动迁移，需在「应用」里重新勾选目标 App。", (unsigned long)n]
+        : (err.localizedDescription ?: @"未找到可导入的 AMG 记录");
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+    [self reload];
 }
 
 - (void)exportCurrent {

@@ -339,10 +339,50 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     return p;
 }
 
++ (NSDictionary *)normalizedImportDictionary:(NSDictionary *)dict {
+    if (![dict isKindOfClass:[NSDictionary class]]) return @{};
+    NSMutableDictionary *d = [dict mutableCopy];
+
+    // Record name
+    if (!d[@"name"] && d[@"Name"]) d[@"name"] = d[@"Name"];
+    if (!d[@"name"] && d[@"RecordName"]) d[@"name"] = d[@"RecordName"];
+    if (!d[@"name"] && d[@"RecordID"]) d[@"name"] = d[@"RecordID"];
+
+    // Identity aliases used by AMG / AWZ / CTW exports
+    if (!d[@"Serial"] && d[@"SerialNum"]) d[@"Serial"] = d[@"SerialNum"];
+    if (!d[@"Serial"] && d[@"SerialNumber"]) d[@"Serial"] = d[@"SerialNumber"];
+    if (!d[@"WiFiMAC"] && d[@"MAC"]) d[@"WiFiMAC"] = d[@"MAC"];
+    if (!d[@"WiFiMAC"] && d[@"WifiAddress"]) d[@"WiFiMAC"] = d[@"WifiAddress"];
+    if (!d[@"WiFiMAC"] && d[@"WiFiAddress"]) d[@"WiFiMAC"] = d[@"WiFiAddress"];
+    if (!d[@"BTMAC"] && d[@"BluetoothAddress"]) d[@"BTMAC"] = d[@"BluetoothAddress"];
+    if (!d[@"BTMAC"] && d[@"BTAddress"]) d[@"BTMAC"] = d[@"BTAddress"];
+    if (!d[@"SystemVer"] && d[@"SystemVersion"]) d[@"SystemVer"] = d[@"SystemVersion"];
+    if (!d[@"SystemVer"] && d[@"ProductVersion"]) d[@"SystemVer"] = d[@"ProductVersion"];
+    if (!d[@"Build"] && d[@"BuildVersion"]) d[@"Build"] = d[@"BuildVersion"];
+    if (!d[@"Model"] && d[@"DeviceName"]) d[@"Model"] = d[@"DeviceName"];
+    if (!d[@"Model"] && d[@"DeviceModel"]) d[@"Model"] = d[@"DeviceModel"];
+    if (!d[@"ProductType"] && d[@"HardwareMachine"]) d[@"ProductType"] = d[@"HardwareMachine"];
+    if (!d[@"HardwareMachine"] && d[@"ProductType"]) d[@"HardwareMachine"] = d[@"ProductType"];
+    if (!d[@"IMEI"] && d[@"InternationalMobileEquipmentIdentity"]) d[@"IMEI"] = d[@"InternationalMobileEquipmentIdentity"];
+    if (!d[@"IMEI2"] && d[@"InternationalMobileEquipmentIdentity2"]) d[@"IMEI2"] = d[@"InternationalMobileEquipmentIdentity2"];
+
+    // Nested profile dict (some backups wrap under "profile")
+    if (d[@"profile"] && [d[@"profile"] isKindOfClass:[NSDictionary class]] && !d[@"IDFA"] && !d[@"UDID"]) {
+        NSMutableDictionary *merged = [d[@"profile"] mutableCopy];
+        for (NSString *k in d) {
+            if ([k isEqualToString:@"profile"]) continue;
+            if (!merged[k]) merged[k] = d[k];
+        }
+        return [self normalizedImportDictionary:merged];
+    }
+    return d;
+}
+
 + (instancetype)profileFromDictionary:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]]) return nil;
+    dict = [self normalizedImportDictionary:dict];
     NDDeviceProfile *p = [NDDeviceProfile new];
-    p.name = dict[@"name"] ?: dict[@"Name"] ?: @"unnamed";
+    p.name = dict[@"name"] ?: @"unnamed";
     p.enabled = dict[@"enabled"] ? [dict[@"enabled"] boolValue] : YES;
     id created = dict[@"createdAt"];
     if ([created isKindOfClass:[NSDate class]]) {
@@ -388,6 +428,20 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.Latitude = [dict[@"Latitude"] doubleValue];
     p.Longitude = [dict[@"Longitude"] doubleValue];
     p.Altitude = dict[@"Altitude"] ? [dict[@"Altitude"] doubleValue] : 10;
+
+    // Fill ProductType from catalog Model name when AMG only stored Model string
+    if (!p.ProductType.length && p.Model.length) {
+        for (NSDictionary *m in [NDDeviceCatalog deviceModels]) {
+            if ([m[@"Model"] isEqualToString:p.Model]) {
+                p.ProductType = m[@"ProductType"];
+                p.HardwareMachine = m[@"HardwareMachine"];
+                break;
+            }
+        }
+    }
+    if (!p.HardwareMachine.length && p.ProductType.length) {
+        p.HardwareMachine = p.ProductType;
+    }
     return p;
 }
 

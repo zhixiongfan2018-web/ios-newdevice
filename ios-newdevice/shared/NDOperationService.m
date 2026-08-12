@@ -26,7 +26,7 @@
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
-            @"clearAppData", @"cleanApps",
+            @"clearAppData", @"cleanApps", @"importAMGRecords",
         ]];
     });
     return fun.length && [set containsObject:fun];

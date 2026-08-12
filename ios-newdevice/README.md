@@ -114,7 +114,18 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 
 **边界**：基带级 IMEI、部分系统进程内标识、完整 Keychain 跨组迁移无法保证 100%。全息 Keychain 仅为可枚举 generic password 的尽力备份。
 
-额外 API：`clearAppData` / `cleanApps`（只清目标 App，不换身份）。
+额外 API：`clearAppData` / `cleanApps`（只清目标 App，不换身份）；`importAMGRecords`（从 `/var/mobile/AMG` 导入身份）。
+
+### 从 AMG 导入数据
+
+可以。AMG 的身份参数 plist 与 NewDevice 高度兼容：
+
+1. 确保设备上仍有目录：`/var/mobile/AMG/`（AMG 卸载后若未删数据也可）。  
+2. 打开 NewDevice → **记录** → **导入** → **从 AMG 目录导入**。  
+3. 或填单个 plist 路径导入；`SerialNum` / `MAC` / `SystemVersion` 等别名会自动映射。  
+4. **不会**自动迁移 AMG 的 App 全息备份包；导入后请在「应用」重新勾选目标 App，需要时再一键新机/切换以重建备份。
+
+脚本：`http://127.0.0.1:8080/cmd?fun=importAMGRecords`（可选 `&dir=/path`）。
 
 ## 自测清单
 
