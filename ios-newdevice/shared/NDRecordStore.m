@@ -678,7 +678,7 @@
             if (![fm fileExistsAtPath:p isDirectory:&d] || !d) continue;
             unsigned long long bytes = 0;
             NSDirectoryEnumerator *en = [fm enumeratorAtPath:p];
-            for (NSString *rel in en) {
+            while ([en nextObject]) {
                 NSDictionary *attrs = [en fileAttributes];
                 if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) bytes += [attrs fileSize];
             }
