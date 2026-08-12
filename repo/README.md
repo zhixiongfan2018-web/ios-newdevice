@@ -1,9 +1,9 @@
 # Sileo 固定源
 
-Sileo **不能**添加带 `@` 的 jsDelivr 链接。请只用：
+只用这一条（**不要带 `@`**）：
 
 ```
-https://zhixiongfan2018-web.github.io/ios-newdevice/
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
 ```
 
-添加后刷新 → 安装 NewDevice → 只 Respring。
+不要用 `@latest` / `@master` / `/repo`。添加后刷新 → 安装 → 只 Respring。

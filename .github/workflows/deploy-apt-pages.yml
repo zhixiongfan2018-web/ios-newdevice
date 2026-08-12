@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - master
-      - "cursor/fixed-sileo-source-461d"
     paths:
       - "apt/**"
       - ".github/workflows/deploy-apt-pages.yml"

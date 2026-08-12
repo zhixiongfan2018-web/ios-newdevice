@@ -5,10 +5,10 @@
 **Sileo 固定源（只用这一条，不要带 `@`）：**
 
 ```
-https://zhixiongfan2018-web.github.io/ios-newdevice/
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
 ```
 
-jsDelivr 的 `@latest` / `@master` 链接 Sileo **无法添加**（`@` 会被误解析）。请删掉旧源后只加上面这条。
+带 `@latest` / `@master` 的链接 Sileo **无法添加**。请删掉旧源后只加上面这条。
 
 添加后刷新 → 安装 NewDevice → **只 Respring**。
 
