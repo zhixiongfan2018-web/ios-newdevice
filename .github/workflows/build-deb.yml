@@ -215,16 +215,28 @@ jobs:
           git checkout "${GITHUB_REF_NAME}" || git checkout -
           git stash pop || true
 
-          # jsDelivr without @ tracks latest GitHub Release — bump a semver tag
+          # jsDelivr 无 @ 跟随 latest GitHub Release（semver）。必须比旧 tag 更大。
+          # 用 run_number，避免 v1.0.0-N 被当成预发布而排在 v1.0.83 后面。
           TAG="v1.0.$(( ${{ github.run_number }} ))"
+          MASTER_SHA="$(git rev-parse origin/master)"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG exists"
-          else
-            gh release create "$TAG" --target master --title "NewDevice stable ${TAG}" --notes "Sileo: ${FIXED_SRC}" || true
+            echo "release $TAG exists — retarget to master ${MASTER_SHA}"
+            gh release delete "$TAG" --yes || true
+            git push origin ":refs/tags/${TAG}" || true
           fi
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/debs/${DEB_NAME}" || true
+          gh release create "$TAG" --target "$MASTER_SHA" --latest \
+            --title "NewDevice ${DEB_NAME} (${TAG})" \
+            --notes "Sileo 固定源：${FIXED_SRC}"
+          # Purge bare + versioned CDN paths
+          for p in Packages Release "debs/${DEB_NAME}" debs/NewDevice.deb index.html; do
+            curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/${p}" || true
+            curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@${TAG#v}/stable/${p}" || true
+          done
+          sleep 3
+          echo "CDN Packages (bare):"
+          curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" | head -n 20 || true
+          echo "CDN Packages (@${TAG#v}):"
+          curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@${TAG#v}/stable/Packages" | head -n 20 || true
 
 
       - name: Build Sileo apt repo artifact
