@@ -99,35 +99,38 @@ jobs:
           ar t "$OUT"
           dpkg-deb -I "$OUT" | head -n 25
 
-      - name: Publish deb to downloads/ + apt/ (fixed jsDelivr source)
-        if: github.ref == 'refs/heads/master'
+      # Sileo URL is .../stable — publish there (also mirror apt/ for Pages).
+      # Run on feature branches too so fixes reach the CDN without waiting for a manual master merge.
+      - name: Publish deb to downloads/ + stable/ (fixed jsDelivr source)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable'
           DEB="$(ls dist/*.deb | head -n1)"
           DEB_NAME="$(basename "$DEB")"
-          mkdir -p downloads apt/debs
+          mkdir -p downloads stable/debs apt/debs
           rm -f downloads/com.local.newdevice_*.deb downloads/NewDevice.deb
-          rm -f apt/debs/*.deb
+          rm -f stable/debs/*.deb apt/debs/*.deb
           cp "$DEB" "downloads/$DEB_NAME"
           cp "$DEB" downloads/NewDevice.deb
+          cp "$DEB" "stable/debs/$DEB_NAME"
+          cp "$DEB" stable/debs/NewDevice.deb
           cp "$DEB" "apt/debs/$DEB_NAME"
           cp "$DEB" apt/debs/NewDevice.deb
 
           python3 - "$FIXED_SRC" "$DEB" <<'PY'
-          import hashlib, datetime, sys, re
+          import hashlib, datetime, sys, re, shutil
           from pathlib import Path
           fixed, deb_path = sys.argv[1], Path(sys.argv[2])
           data = deb_path.read_bytes()
           size = len(data)
-          # version from control via dpkg-deb -f if needed; parse filename
           m = re.search(r'_(\d+\.\d+\.\d+-\d+)_', deb_path.name)
           ver = m.group(1) if m else '0'
           rev = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
           packages = (
               "Package: com.local.newdevice\n"
               "Name: NewDevice\n"
-              "Description: One-tap new device identity for Dopamine iOS 15-18.\n"
+              "Description: One-tap new device identity for Dopamine iOS 15-18 (incl. 18.x).\n"
               "Maintainer: Local Dev\n"
               "Author: Local Dev\n"
               "Section: Tweaks\n"
@@ -142,11 +145,8 @@ jobs:
               f"SHA256: {hashlib.sha256(data).hexdigest()}\n"
               f"X-Rev: {rev}\n\n"
           )
-          root = Path('apt')
-          (root / 'Packages').write_text(packages)
-          pkg = (root / 'Packages').read_bytes()
           now = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')
-          (root / 'Release').write_text(
+          release = (
               f"Date: {now}\n"
               "Origin: NewDevice\n"
               "Label: NewDevice\n"
@@ -157,30 +157,75 @@ jobs:
               "Components: main\n"
               "Description: NewDevice Sileo source\n"
               f"Comment: ci-{rev}\n"
-              f"MD5Sum:\n {hashlib.md5(pkg).hexdigest()} {len(pkg)} Packages\n"
-              f"SHA1:\n {hashlib.sha1(pkg).hexdigest()} {len(pkg)} Packages\n"
-              f"SHA256:\n {hashlib.sha256(pkg).hexdigest()} {len(pkg)} Packages\n"
           )
-          (root / '.jsdelivr_refresh').write_text(f'{rev}\n')
-          (root / 'README.md').write_text(
-              "# Sileo 固定源\n\n只用这一条：\n\n```\n"
-              f"{fixed}\n```\n"
-          )
-          print('apt updated', ver, size)
+          readme = f"# Sileo 固定源\n\n只用这一条：\n\n```\n{fixed}\n```\n"
+          for root_name in ('stable', 'apt'):
+              root = Path(root_name)
+              root.mkdir(parents=True, exist_ok=True)
+              (root / 'Packages').write_text(packages)
+              pkg = (root / 'Packages').read_bytes()
+              (root / 'Release').write_text(
+                  release
+                  + f"MD5Sum:\n {hashlib.md5(pkg).hexdigest()} {len(pkg)} Packages\n"
+                  + f"SHA1:\n {hashlib.sha1(pkg).hexdigest()} {len(pkg)} Packages\n"
+                  + f"SHA256:\n {hashlib.sha256(pkg).hexdigest()} {len(pkg)} Packages\n"
+              )
+              (root / '.jsdelivr_refresh').write_text(f'{rev}\n')
+              (root / 'README.md').write_text(readme)
+          print('stable+apt updated', ver, size)
           PY
+
+          # Keep a simple landing page under stable/
+          cat > stable/index.html <<HTML
+          <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>NewDevice</title></head>
+          <body><h1>NewDevice</h1><p>Sileo source:</p>
+          <p><code>${FIXED_SRC}</code></p>
+          <p><a href="debs/${DEB_NAME}">${DEB_NAME}</a></p></body></html>
+          HTML
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/*.deb apt/Packages apt/Release apt/.jsdelivr_refresh apt/README.md apt/debs/*.deb
+
+          # Snapshot published trees, then commit onto master (non-FF safe)
+          rm -rf /tmp/nd-pub-stable /tmp/nd-pub-apt /tmp/nd-pub-dl
+          cp -a stable /tmp/nd-pub-stable
+          cp -a apt /tmp/nd-pub-apt
+          cp -a downloads /tmp/nd-pub-dl
+          git fetch origin master
+          git stash push -u -m "pre-publish-stash" || true
+          git checkout -B _publish-stable origin/master
+          rm -rf stable apt downloads
+          cp -a /tmp/nd-pub-stable stable
+          cp -a /tmp/nd-pub-apt apt
+          cp -a /tmp/nd-pub-dl downloads
+          git add downloads/*.deb \
+            stable/Packages stable/Release stable/.jsdelivr_refresh stable/README.md stable/index.html stable/debs/*.deb \
+            apt/Packages apt/Release apt/.jsdelivr_refresh apt/README.md apt/debs/*.deb
+          # Drop obsolete debs from index dirs
+          git add -u stable/debs apt/debs downloads || true
           if git diff --cached --quiet; then
-            echo "apt/downloads already up to date"
-            exit 0
+            echo "stable/apt/downloads already up to date"
+          else
+            git commit -m "Update stable Sileo source ${FIXED_SRC} [skip ci]"
+            git push origin HEAD:master
           fi
-          git commit -m "Update apt fixed source ${FIXED_SRC} [skip ci]"
-          git push origin "HEAD:master"
-          # best-effort CDN purge
+          # Restore feature branch pointer for subsequent steps
+          git checkout "${GITHUB_REF_NAME}" || git checkout -
+          git stash pop || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/debs/${DEB_NAME}" || true
+
+          # jsDelivr without @ tracks latest GitHub Release — bump a semver tag
+          TAG="v1.0.$(( ${{ github.run_number }} ))"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists"
+          else
+            gh release create "$TAG" --target master --title "NewDevice stable ${TAG}" --notes "Sileo: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable" || true
+          fi
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
+
 
       - name: Build Sileo apt repo artifact
         run: |
