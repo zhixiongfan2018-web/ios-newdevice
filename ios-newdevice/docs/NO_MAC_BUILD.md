@@ -20,13 +20,15 @@ https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downl
 
 1. 生成 `.deb`
 2. 更新 `downloads/`（上面的 raw 直链）
-3. 同步 GitHub Pages Sileo 源（可选）
+3. 更新 apt 源索引（`repo/`）并打 release 标签，供固定源 `@latest` 拉取
 
-### Sileo 源（可选）
+### Sileo 固定源（推荐）
 
-`https://zhixiongfan2018-web.github.io/ios-newdevice/`
+```
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/repo
+```
 
-国内若打不开 Pages，请用上面的 **raw 直链**。
+只用这一条链接，不要再用 `@master` 或不断换 `@v1.0.xx`。国内 CDN 上 `@latest` 可用；若刷新失败，请用上面的 **raw 直链** 装 deb。
 
 ## 其他可选
 

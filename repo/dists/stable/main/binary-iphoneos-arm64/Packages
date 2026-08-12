@@ -4,7 +4,7 @@ Description: One-tap new device identity (Sileo-safe build).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
-Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@v1.0.25/repo/
+Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/repo/
 Architecture: iphoneos-arm64
 Version: 1.0.0-23
 Installed-Size: 496
