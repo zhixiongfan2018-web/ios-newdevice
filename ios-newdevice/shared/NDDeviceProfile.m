@@ -217,6 +217,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.BootTime = 0;
     p.DeviceColor = @"";
     p.DiskCapacity = 0;
+    p.PhysicalMemory = 0;
+    p.Brightness = -1;
     p.AdvertisingTrackingEnabled = YES;
     p.Model = @"";
     p.ProductType = @"";
@@ -318,6 +320,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     });
     p.DeviceColor = colors[arc4random_uniform((uint32_t)colors.count)];
     p.DiskCapacity = [NDDeviceCatalog diskBytesForProductType:dev[@"ProductType"]];
+    p.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:dev[@"ProductType"]];
+    p.Brightness = 0.35f + (arc4random_uniform(50) / 100.0f);
     p.AdvertisingTrackingEnabled = YES;
 
     p.Model = dev[@"Model"];
@@ -339,16 +343,110 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     return p;
 }
 
++ (BOOL)NDStringLooksBase64:(NSString *)s {
+    if (![s isKindOfClass:[NSString class]] || s.length < 8) return NO;
+    NSString *compact = [[s stringByReplacingOccurrencesOfString:@" " withString:@""]
+                         stringByReplacingOccurrencesOfString:@"\n" withString:@""];
+    if (compact.length < 8 || (compact.length % 4) != 0) return NO;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="];
+    return [compact rangeOfCharacterFromSet:allowed.invertedSet].location == NSNotFound;
+}
+
++ (BOOL)NDStringLooksLikeUUID:(NSString *)s {
+    return [[NSUUID alloc] initWithUUIDString:s] != nil;
+}
+
++ (BOOL)NDStringLooksLikeMAC:(NSString *)s {
+    if (s.length < 11) return NO;
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" options:0 error:nil];
+    return [re numberOfMatchesInString:s options:0 range:NSMakeRange(0, s.length)] == 1;
+}
+
++ (BOOL)NDStringLooksPlaintextIdentity:(NSString *)s forKey:(NSString *)key {
+    if (![s isKindOfClass:[NSString class]] || !s.length) return NO;
+    if ([key isEqualToString:@"IDFA"] || [key isEqualToString:@"IDFV"] || [key isEqualToString:@"UUID"]) {
+        return [self NDStringLooksLikeUUID:s];
+    }
+    if ([key isEqualToString:@"WiFiMAC"] || [key isEqualToString:@"BTMAC"] || [key isEqualToString:@"BSSID"] ||
+        [key isEqualToString:@"WifiAddress"] || [key isEqualToString:@"BlueAddress"] || [key isEqualToString:@"BluetoothAddress"]) {
+        return [self NDStringLooksLikeMAC:s];
+    }
+    if ([key isEqualToString:@"UDID"]) {
+        NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+        return s.length == 40 && [s rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+    }
+    if ([key isEqualToString:@"Serial"] || [key isEqualToString:@"SerialNumber"] || [key isEqualToString:@"SerialNum"]) {
+        // Apple serial-ish: alphanumeric, typically 10–12
+        if (s.length < 8 || s.length > 16) return NO;
+        NSCharacterSet *ok = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"];
+        return [s.uppercaseString rangeOfCharacterFromSet:ok.invertedSet].location == NSNotFound;
+    }
+    if ([key isEqualToString:@"SystemVer"] || [key isEqualToString:@"SystemVersion"] || [key isEqualToString:@"ProductVersion"]) {
+        return [s rangeOfString:@"."].location != NSNotFound && s.length < 16;
+    }
+    if ([key isEqualToString:@"SSID"] || [key isEqualToString:@"Name"] || [key isEqualToString:@"Build"] || [key isEqualToString:@"BuildVersion"]) {
+        // Reject typical AES-ciphertext Base64 (high density of +/)
+        if ([self NDStringLooksBase64:s] && s.length >= 16 && ![s containsString:@" "] && ![s containsString:@"-"]) {
+            NSData *raw = [[NSData alloc] initWithBase64EncodedString:[s stringByReplacingOccurrencesOfString:@" " withString:@""] options:0];
+            if (raw.length >= 16 && (raw.length % 16) == 0) {
+                // If not printable UTF-8 short string, treat as cipher
+                NSString *decoded = [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding];
+                if (!decoded.length) return NO;
+            }
+        }
+        return s.length < 64;
+    }
+    return YES;
+}
+
++ (BOOL)dictionaryLooksLikeEncryptedAMGFaker:(NSDictionary *)dict {
+    if (![dict isKindOfClass:[NSDictionary class]] || !dict.count) return NO;
+    NSArray *probeKeys = @[@"IDFA", @"IDFV", @"UDID", @"WifiAddress", @"BlueAddress", @"SerialNumber", @"SystemVer", @"SSID"];
+    NSInteger cipherHits = 0;
+    NSInteger considered = 0;
+    for (NSString *key in probeKeys) {
+        id v = dict[key];
+        if (![v isKindOfClass:[NSString class]] || ![v length]) continue;
+        considered++;
+        NSString *s = v;
+        NSString *compact = [[s stringByReplacingOccurrencesOfString:@" " withString:@""]
+                             stringByReplacingOccurrencesOfString:@"\n" withString:@""];
+        NSData *raw = [[NSData alloc] initWithBase64EncodedString:compact options:0];
+        BOOL sizedLikeAES = raw.length >= 16 && (raw.length % 16) == 0;
+        BOOL notPlain = ![self NDStringLooksPlaintextIdentity:s forKey:key];
+        if (sizedLikeAES && notPlain) cipherHits++;
+    }
+    return considered >= 3 && cipherHits >= 2;
+}
+
++ (BOOL)dictionaryHasImportableIdentity:(NSDictionary *)dict {
+    if (![dict isKindOfClass:[NSDictionary class]]) return NO;
+    if ([self dictionaryLooksLikeEncryptedAMGFaker:dict]) return NO;
+    NSDictionary *n = [self normalizedImportDictionary:dict];
+    NSArray *keys = @[@"IDFA", @"IDFV", @"UDID", @"Serial", @"WiFiMAC", @"BTMAC", @"IMEI", @"DeviceToken", @"SSID"];
+    for (NSString *k in keys) {
+        NSString *v = n[k];
+        if ([v isKindOfClass:[NSString class]] && v.length && [self NDStringLooksPlaintextIdentity:v forKey:k]) {
+            return YES;
+        }
+    }
+    // Numeric geo / version alone is not enough
+    return NO;
+}
+
 + (NSDictionary *)normalizedImportDictionary:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]]) return @{};
     NSMutableDictionary *d = [dict mutableCopy];
 
-    // Record name
-    if (!d[@"name"] && d[@"Name"]) d[@"name"] = d[@"Name"];
+    // Record name — only accept plaintext names (folder/description usually better)
+    if (!d[@"name"] && d[@"Name"] && [self NDStringLooksPlaintextIdentity:d[@"Name"] forKey:@"Name"]) {
+        d[@"name"] = d[@"Name"];
+    }
     if (!d[@"name"] && d[@"RecordName"]) d[@"name"] = d[@"RecordName"];
     if (!d[@"name"] && d[@"RecordID"]) d[@"name"] = d[@"RecordID"];
+    if (!d[@"name"] && d[@"title"]) d[@"name"] = d[@"title"];
 
-    // Identity aliases used by AMG / AWZ / CTW exports
+    // Identity aliases used by AMG / AWZ / CTW exports (faker.plist keys)
     if (!d[@"Serial"] && d[@"SerialNum"]) d[@"Serial"] = d[@"SerialNum"];
     if (!d[@"Serial"] && d[@"SerialNumber"]) d[@"Serial"] = d[@"SerialNumber"];
     if (!d[@"WiFiMAC"] && d[@"MAC"]) d[@"WiFiMAC"] = d[@"MAC"];
@@ -356,6 +454,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"WiFiMAC"] && d[@"WiFiAddress"]) d[@"WiFiMAC"] = d[@"WiFiAddress"];
     if (!d[@"BTMAC"] && d[@"BluetoothAddress"]) d[@"BTMAC"] = d[@"BluetoothAddress"];
     if (!d[@"BTMAC"] && d[@"BTAddress"]) d[@"BTMAC"] = d[@"BTAddress"];
+    if (!d[@"BTMAC"] && d[@"BlueAddress"]) d[@"BTMAC"] = d[@"BlueAddress"];
     if (!d[@"SystemVer"] && d[@"SystemVersion"]) d[@"SystemVer"] = d[@"SystemVersion"];
     if (!d[@"SystemVer"] && d[@"ProductVersion"]) d[@"SystemVer"] = d[@"ProductVersion"];
     if (!d[@"Build"] && d[@"BuildVersion"]) d[@"Build"] = d[@"BuildVersion"];
@@ -365,6 +464,29 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"HardwareMachine"] && d[@"ProductType"]) d[@"HardwareMachine"] = d[@"ProductType"];
     if (!d[@"IMEI"] && d[@"InternationalMobileEquipmentIdentity"]) d[@"IMEI"] = d[@"InternationalMobileEquipmentIdentity"];
     if (!d[@"IMEI2"] && d[@"InternationalMobileEquipmentIdentity2"]) d[@"IMEI2"] = d[@"InternationalMobileEquipmentIdentity2"];
+
+    // Disk / RAM / brightness / uptime (AMG faker.plist)
+    if (!d[@"DiskCapacity"] && d[@"DiskSpace"]) d[@"DiskCapacity"] = d[@"DiskSpace"];
+    if (!d[@"DiskCapacity"] && d[@"TotalDiskCapacity"]) d[@"DiskCapacity"] = d[@"TotalDiskCapacity"];
+    if (!d[@"PhysicalMemory"] && d[@"Memory"]) d[@"PhysicalMemory"] = d[@"Memory"];
+    if (!d[@"PhysicalMemory"] && d[@"PhysicalMemorySize"]) d[@"PhysicalMemory"] = d[@"PhysicalMemorySize"];
+    if (!d[@"Brightness"] && d[@"ScreenBrightness"]) d[@"Brightness"] = d[@"ScreenBrightness"];
+
+    // SystemUptime: either unix boot time or uptime seconds
+    if (!d[@"BootTime"] && d[@"SystemUptime"]) {
+        double v = [d[@"SystemUptime"] doubleValue];
+        if (v > 1000000000.0) {
+            d[@"BootTime"] = @(v);
+        } else if (v > 0 && v < 1000000000.0 && ![d[@"SystemUptime"] isKindOfClass:[NSString class]]) {
+            d[@"BootTime"] = @([[NSDate date] timeIntervalSince1970] - v);
+        } else if ([d[@"SystemUptime"] isKindOfClass:[NSString class]] && [self NDStringLooksPlaintextIdentity:d[@"SystemUptime"] forKey:@"Build"]) {
+            // numeric string
+            double sv = [d[@"SystemUptime"] doubleValue];
+            if (sv > 1000000000.0) d[@"BootTime"] = @(sv);
+            else if (sv > 0) d[@"BootTime"] = @([[NSDate date] timeIntervalSince1970] - sv);
+        }
+    }
+    if (!d[@"BootTime"] && d[@"kern.boottime"]) d[@"BootTime"] = d[@"kern.boottime"];
 
     // Nested profile dict (some backups wrap under "profile")
     if (d[@"profile"] && [d[@"profile"] isKindOfClass:[NSDictionary class]] && !d[@"IDFA"] && !d[@"UDID"]) {
@@ -412,6 +534,12 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.BootTime = dict[@"BootTime"] ? [dict[@"BootTime"] doubleValue] : 0;
     p.DeviceColor = dict[@"DeviceColor"] ?: @"";
     p.DiskCapacity = dict[@"DiskCapacity"] ? [dict[@"DiskCapacity"] unsignedLongLongValue] : 0;
+    p.PhysicalMemory = dict[@"PhysicalMemory"] ? [dict[@"PhysicalMemory"] unsignedLongLongValue] : 0;
+    if (dict[@"Brightness"] != nil) {
+        p.Brightness = [dict[@"Brightness"] floatValue];
+    } else {
+        p.Brightness = -1;
+    }
     p.AdvertisingTrackingEnabled = dict[@"AdvertisingTrackingEnabled"] ? [dict[@"AdvertisingTrackingEnabled"] boolValue] : YES;
 
     p.Model = dict[@"Model"] ?: @"";
@@ -475,6 +603,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"BootTime": @(self.BootTime),
         @"DeviceColor": self.DeviceColor ?: @"",
         @"DiskCapacity": @(self.DiskCapacity),
+        @"PhysicalMemory": @(self.PhysicalMemory),
+        @"Brightness": @(self.Brightness),
         @"AdvertisingTrackingEnabled": @(self.AdvertisingTrackingEnabled),
         @"Model": self.Model ?: @"",
         @"ProductType": self.ProductType ?: @"",

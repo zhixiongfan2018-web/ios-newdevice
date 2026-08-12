@@ -118,14 +118,29 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 
 ### 从 AMG 导入数据
 
-可以。AMG 的身份参数 plist 与 NewDevice 高度兼容：
+可以。真实 AMG 导出目录（例如 `+1… 2026-…/`）通常包含：
 
-1. 确保设备上仍有目录：`/var/mobile/AMG/`（AMG 卸载后若未删数据也可）。  
-2. 打开 NewDevice → **记录** → **导入** → **从 AMG 目录导入**。  
-3. 或填单个 plist 路径导入；`SerialNum` / `MAC` / `SystemVersion` 等别名会自动映射。  
-4. **不会**自动迁移 AMG 的 App 全息备份包；导入后请在「应用」重新勾选目标 App，需要时再一键新机/切换以重建备份。
+| 文件/目录 | 含义 |
+|---|---|
+| `faker.plist` | 身份参数（IDFA/UDID/MAC/SSID/坐标/…）；**部分版本落盘为 AES 密文** |
+| `selectApp.plist` | 目标 App bundle id 列表 |
+| `description.plist` | 记录标题 / App 显示名 |
+| `ifaddrs.plist` | 网卡/DNS 指纹（旁路保存；`en0` MAC 由 WiFiMAC 伪造） |
+| `com.*` / `net.*` | App 全息沙盒（Documents/Library） |
+| `AppGroup/` | App Group 全息 |
+| `Pasteboard/` | 剪贴板备份（若有） |
+
+导入行为：
+
+1. 把导出放到设备 `/var/mobile/AMG/`（或解压后的同级目录）。  
+2. NewDevice → **记录** → **导入** → **从 AMG 目录导入**。  
+3. 优先读 `faker.plist`；明文则映射 `BlueAddress`/`DiskSpace`/`SystemUptime`/`Memory` 等别名。  
+4. **密文 faker**：生成随机身份，仍导入全息 App + AppGroup，并写 `amg-import-note.txt`。  
+5. `selectApp.plist` 会合并进「应用」目标列表；切换记录时会还原全息与 App Group。
 
 脚本：`http://127.0.0.1:8080/cmd?fun=importAMGRecords`（可选 `&dir=/path`）。
+
+**仍弱于 AMG / 待优化**：`ifaddrs` 完整 IP/DNS 伪造、基带 IMEI、完整 Keychain 跨组、密文 faker 解密（需 AMG 运行时密钥，导出包本身不可逆）。
 
 ## 自测清单
 

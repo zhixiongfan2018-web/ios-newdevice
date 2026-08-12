@@ -47,7 +47,7 @@
     NSError *err = nil;
     NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:@"/var/mobile/AMG" error:&err];
     NSString *msg = n
-        ? [NSString stringWithFormat:@"已导入 %lu 条身份记录。\n注意：AMG 的 App 全息备份目录不会自动迁移，需在「应用」里重新勾选目标 App。", (unsigned long)n]
+        ? [NSString stringWithFormat:@"已导入 %lu 条记录（含 faker 身份 / 全息 App / AppGroup / selectApp）。\n若 faker.plist 为加密导出，会生成随机身份并仍迁移 App 数据；详见记录目录 amg-import-note.txt。", (unsigned long)n]
         : (err.localizedDescription ?: @"未找到可导入的 AMG 记录");
     UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
@@ -71,30 +71,38 @@
 }
 
 - (void)importProfile {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导入记录" message:@"粘贴 profile plist 绝对路径，或使用 Files 拷到 /var/mobile/Documents/ 后填写路径" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"导入" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG 目录导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromAMG];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 plist 路径导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromPathPrompt];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)importFromPathPrompt {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导入记录" message:@"支持 NewDevice / AMG 参数 plist（自动映射 SerialNum、MAC 等别名）" preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"/var/mobile/Documents/record.plist";
+        tf.placeholder = @"/var/mobile/AMG/某记录/profile.plist";
         tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
     }];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *path = a.textFields.firstObject.text ?: @"";
-        NDDeviceProfile *p = [NDDeviceProfile profileAtPath:path];
+        NSError *e = nil;
+        NDDeviceProfile *p = [[NDRecordStore shared] importProfileAtPath:path preferredName:nil error:&e];
         if (!p) {
-            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:@"无法读取 plist" preferredStyle:UIAlertControllerStyleAlert];
+            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:e.localizedDescription ?: @"无法读取 plist" preferredStyle:UIAlertControllerStyleAlert];
             [err addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:err animated:YES completion:nil];
             return;
         }
-        if (!p.name.length) p.name = [[NSDate date] description];
-        NSError *e = nil;
-        if ([[NDRecordStore shared] saveProfile:p error:&e]) {
-            [self reload];
-        } else {
-            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:e.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
-            [err addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:err animated:YES completion:nil];
-        }
+        [self reload];
+        UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"已导入" message:p.name preferredStyle:UIAlertControllerStyleAlert];
+        [ok addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ok animated:YES completion:nil];
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }

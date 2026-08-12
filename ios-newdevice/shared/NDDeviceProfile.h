@@ -25,6 +25,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSTimeInterval BootTime; // unix seconds
 @property (nonatomic, copy) NSString *DeviceColor; // e.g. Black / White / Blue
 @property (nonatomic, assign) uint64_t DiskCapacity; // bytes
+@property (nonatomic, assign) uint64_t PhysicalMemory; // bytes; 0 = derive from ProductType
+@property (nonatomic, assign) float Brightness; // 0..1; <0 = do not spoof
 @property (nonatomic, assign) BOOL AdvertisingTrackingEnabled;
 
 @property (nonatomic, copy) NSString *Model;
@@ -50,6 +52,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable instancetype)profileAtPath:(NSString *)path;
 /// Normalize AMG / AWZ / CTW-style keys into NewDevice profile keys.
 + (NSDictionary *)normalizedImportDictionary:(NSDictionary *)dict;
+/// YES when values look like AMG on-disk AES ciphertext (Base64 blobs), not plaintext identity.
++ (BOOL)dictionaryLooksLikeEncryptedAMGFaker:(NSDictionary *)dict;
+/// YES when dict has at least one usable plaintext identity field after normalization.
++ (BOOL)dictionaryHasImportableIdentity:(NSDictionary *)dict;
 
 - (NSDictionary *)toDictionary;
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;

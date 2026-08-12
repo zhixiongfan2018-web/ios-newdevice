@@ -18,6 +18,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Restore app sandboxes from record folder.
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
+/// Import AMG holographic trees (bundleId/Documents|Library + AppGroup) into a NewDevice record.
+- (void)importAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName;
+
+/// Restore App Group containers previously imported/backed up under Records/<name>/AppGroup.
+- (BOOL)restoreAppGroupsForRecord:(NSString *)recordName;
+
 /// Best-effort Keychain export/import for given access groups (plist under backup).
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;

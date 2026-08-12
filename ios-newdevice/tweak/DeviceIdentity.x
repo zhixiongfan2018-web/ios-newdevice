@@ -80,7 +80,7 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
 
         if (st.config.fakeDeviceModel) {
             if ([k isEqualToString:@"PhysicalMemory"]) {
-                uint64_t mem = [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
+                uint64_t mem = p.PhysicalMemory > 0 ? p.PhysicalMemory : [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
                 if (mem > 0) return CFBridgingRetain(@(mem));
             }
             if (([k isEqualToString:@"TotalDiskCapacity"] || [k isEqualToString:@"DiskCapacity"]) && p.DiskCapacity > 0) {

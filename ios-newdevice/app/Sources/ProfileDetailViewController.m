@@ -28,7 +28,7 @@
 
 - (void)rebuild {
     NSDictionary *d = [self.profile toDictionary];
-    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"AdvertisingTrackingEnabled",@"Model",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
+    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"AdvertisingTrackingEnabled",@"Model",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
     NSMutableArray *rows = [NSMutableArray array];
     for (NSString *k in keys) {
         [rows addObject:@[k, [NSString stringWithFormat:@"%@", d[k] ?: @""]]];
@@ -68,7 +68,7 @@
     [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *newVal = a.textFields.firstObject.text ?: @"";
         NSMutableDictionary *d = [[self.profile toDictionary] mutableCopy];
-        if ([@[@"Latitude",@"Longitude",@"Altitude",@"BootTime",@"DiskCapacity"] containsObject:key]) {
+        if ([@[@"Latitude",@"Longitude",@"Altitude",@"BootTime",@"DiskCapacity",@"PhysicalMemory",@"Brightness"] containsObject:key]) {
             d[key] = @([newVal doubleValue]);
         } else if ([key isEqualToString:@"AdvertisingTrackingEnabled"]) {
             d[key] = @([newVal boolValue] || [newVal isEqualToString:@"1"] || [newVal.lowercaseString isEqualToString:@"yes"] || [newVal.lowercaseString isEqualToString:@"true"]);

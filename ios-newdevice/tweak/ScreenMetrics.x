@@ -41,6 +41,13 @@ static CGFloat NDSpoofScale(void) {
     CGFloat s = NDSpoofScale();
     return s > 0 ? s : %orig;
 }
+- (CGFloat)brightness {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.Brightness >= 0.0f && st.profile.Brightness <= 1.0f) {
+        return st.profile.Brightness;
+    }
+    return %orig;
+}
 %end
 
 %hook UIDevice

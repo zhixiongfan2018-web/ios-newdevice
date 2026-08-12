@@ -291,6 +291,16 @@
             return;
         }
 
+        if ([fun isEqualToString:@"importAMGRecords"]) {
+            NSString *dir = query[@"dir"] ?: @"/var/mobile/AMG";
+            NSError *err = nil;
+            NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir error:&err];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
         [[NDRecordStore shared] writeResultCode:0];
         done(@"unknown fun", 404);
     });
