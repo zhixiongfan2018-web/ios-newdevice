@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-58
+Version: 1.0.0-78
 Architecture: iphoneos-arm64
-Description: Full-chain audit fixes: Keychain staging, config flags, content-aware AMG_tar.
+Description: Built-in tar.gz extract for AMG import when device has no tar.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
