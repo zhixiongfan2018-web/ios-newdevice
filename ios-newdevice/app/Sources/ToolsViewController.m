@@ -4,6 +4,7 @@
 #import "NDRecordStore.h"
 #import "NDRecordStore+ImportExport.h"
 #import "NDAppDataManager.h"
+#import "NDOperationService.h"
 #import "NDPaths.h"
 #import "ProbeViewController.h"
 #import <spawn.h>
@@ -162,14 +163,25 @@ extern char **environ;
 }
 
 - (void)runImportKind:(NSString *)kind path:(NSString *)path {
-    NSError *err = nil;
     BOOL kc = [NDConfig shared].importKeychainWithData;
-    NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:path kind:kind importKeychain:kc error:&err];
-    NSUInteger appCount = [NDConfig shared].targetApps.count;
-    NSString *msg = n
-        ? [NSString stringWithFormat:@"已导入 %lu 条记录（Keychain：%@）\nApp 环境：%lu 个目标应用\n%@\n\n请到「记录」点选导入的环境，再到「应用」确认勾选。", (unsigned long)n, kc ? @"开" : @"关", (unsigned long)appCount, path]
-        : (err.localizedDescription ?: @"未找到可导入数据");
-    [self alert:n ? @"导入完成" : @"导入结果" message:msg];
+    BOOL isAMG = [kind.lowercaseString containsString:@"amg"] || [kind.lowercaseString containsString:@"media"];
+    NSString *fun = isAMG ? @"importAMGRecords" : ([kind.lowercaseString containsString:@"awz"] ? @"importAWZ" : @"importIGrimace");
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"请稍候…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        [[NDOperationService shared] runAsync:fun query:@{@"dir": path ?: @"", @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    NSUInteger appCount = [NDConfig shared].targetApps.count;
+                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
+                    NSString *msg = (code == 200)
+                        ? [NSString stringWithFormat:@"导入完成（Keychain：%@）\nApp 环境：%lu 个\n%@\n\n%@\n\n%@\n\n请确认目标 App 已安装；Venmo 需装好后再点选记录写入沙盒。",
+                           kc ? @"开" : @"关", (unsigned long)appCount, path ?: @"", holo, body ?: @""]
+                        : (body.length ? body : @"未找到可导入数据");
+                    [self alert:(code == 200) ? @"导入完成" : @"导入结果" message:msg];
+                }];
+            });
+        }];
+    }];
 }
 
 - (void)exportOwnData {

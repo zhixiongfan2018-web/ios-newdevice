@@ -112,6 +112,7 @@ extern char **environ;
 
 - (BOOL)copyItem:(NSString *)src to:(NSString *)dst error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:src]) return YES;
     if ([fm fileExistsAtPath:dst]) {
         if (![fm removeItemAtPath:dst error:error]) return NO;
     }
@@ -119,8 +120,30 @@ extern char **environ;
     if (![fm fileExistsAtPath:parent]) {
         if (![fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:error]) return NO;
     }
-    if (![fm fileExistsAtPath:src]) return YES;
-    return [fm copyItemAtPath:src toPath:dst error:error];
+    NSError *copyErr = nil;
+    if ([fm copyItemAtPath:src toPath:dst error:&copyErr]) return YES;
+    // Fallback: cp -a (more reliable for large AMG trees / weird attrs on Dopamine)
+    for (NSString *cp in @[@"/var/jb/usr/bin/cp", @"/usr/bin/cp", @"/bin/cp"]) {
+        if (![fm isExecutableFileAtPath:cp]) continue;
+        [self runCommand:cp arguments:@[@"-a", src, dst]];
+        if ([fm fileExistsAtPath:dst]) return YES;
+    }
+    if (error) *error = copyErr;
+    return NO;
+}
+
+- (unsigned long long)byteSizeAtPath:(NSString *)path {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return 0;
+    if (!isDir) return [[fm attributesOfItemAtPath:path error:nil] fileSize];
+    unsigned long long total = 0;
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:path];
+    for (NSString *rel in en) {
+        NSDictionary *attrs = [en fileAttributes];
+        if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) total += [attrs fileSize];
+    }
+    return total;
 }
 
 - (BOOL)clearDataForApps:(NSArray<NSString *> *)bundleIds error:(NSError **)error {
@@ -204,23 +227,54 @@ extern char **environ;
 
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *missing = [NSMutableArray array];
+    NSMutableArray<NSString *> *restored = [NSMutableArray array];
     for (NSString *bid in bundleIds) {
-        NSString *container = [self containerPathForBundleId:bid];
-        if (!container) continue;
         NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-        if (![fm fileExistsAtPath:backupRoot]) {
-            // no backup: clear instead
-            [self clearDataForApps:@[bid] error:nil];
+        BOOL hasBackup = [fm fileExistsAtPath:backupRoot];
+        // Only act on apps that actually have staged holographic data.
+        // (Do NOT clear just because selectApp lists an id — that wiped live apps
+        // when FanDuel/etc. had no folder, and also hurt Venmo if staging lagged.)
+        if (!hasBackup) continue;
+
+        NSString *container = [self containerPathForBundleId:bid];
+        if (!container) {
+            [missing addObject:bid];
+            NSLog(@"[NewDevice] restore skip %@: app not installed / no data container", bid);
             continue;
         }
-        for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+        for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
             NSString *src = [backupRoot stringByAppendingPathComponent:sub];
+            if (![fm fileExistsAtPath:src]) continue;
             NSString *dst = [container stringByAppendingPathComponent:sub];
             [self copyItem:src to:dst error:nil];
         }
+        // Root-level files under bid backup (rare AMG layouts)
+        NSArray *kids = [fm contentsOfDirectoryAtPath:backupRoot error:nil] ?: @[];
+        static NSSet *knownSubs;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            knownSubs = [NSSet setWithArray:@[@"Documents", @"Library", @"tmp", @"SystemData"]];
+        });
+        for (NSString *kid in kids) {
+            if ([kid hasPrefix:@"."]) continue;
+            if ([knownSubs containsObject:kid]) continue;
+            if ([kid.lowercaseString hasPrefix:@"keychain"]) continue;
+            NSString *src = [backupRoot stringByAppendingPathComponent:kid];
+            [self copyItem:src to:[container stringByAppendingPathComponent:kid] error:nil];
+        }
         [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
+        unsigned long long n = [self byteSizeAtPath:backupRoot];
+        [restored addObject:[NSString stringWithFormat:@"%@ (%llu bytes)", bid, n]];
+        NSLog(@"[NewDevice] restored %@ -> %@ (%llu bytes)", bid, container, n);
     }
     [self restoreAppGroupsForRecord:recordName];
+    if (missing.count && error && !*error) {
+        *error = [NSError errorWithDomain:@"NDAppDataManager" code:40 userInfo:@{
+            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"以下 App 未安装，无法写入沙盒：%@\n已暂存到记录，请先安装后再点选该记录。", [missing componentsJoinedByString:@", "]]
+        }];
+    }
+    (void)restored;
     return YES;
 }
 
@@ -582,6 +636,18 @@ extern char **environ;
                 NSString *src = [leaf stringByAppendingPathComponent:sub];
                 if (![fm fileExistsAtPath:src]) continue;
                 [self copyItem:src to:[live stringByAppendingPathComponent:sub] error:nil];
+            }
+            // AMG often parks sqlite / misc files at AppGroup container root
+            NSArray *kids = [fm contentsOfDirectoryAtPath:leaf error:nil] ?: @[];
+            for (NSString *kid in kids) {
+                if ([kid hasPrefix:@"."]) continue;
+                if ([kid isEqualToString:@"Documents"] || [kid isEqualToString:@"Library"] || [kid isEqualToString:@"tmp"]) continue;
+                if ([kid isEqualToString:@"nd-group-id.plist"]) continue;
+                NSString *src = [leaf stringByAppendingPathComponent:kid];
+                BOOL kidDir = NO;
+                [fm fileExistsAtPath:src isDirectory:&kidDir];
+                if (kidDir) continue; // only lift root files; nested trees handled above
+                [self copyItem:src to:[live stringByAppendingPathComponent:kid] error:nil];
             }
         }
     }

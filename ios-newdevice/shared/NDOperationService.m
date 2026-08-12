@@ -49,8 +49,18 @@
 }
 
 - (void)prepareTargets:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
+    [self prepareTargetsForDestination:nil block:block];
+}
+
+- (void)prepareTargetsForDestination:(NSString *)destination
+                               block:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
     NSString *prev = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
-    NSArray *apps = [self appsForSwitchTo:prev previous:prev];
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self appsForSwitchTo:prev previous:prev]];
+    // Include destination App env BEFORE kill/restore (imported Venmo etc.)
+    if (destination.length) {
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:destination]) [set addObject:b];
+    }
+    NSArray *apps = set.array;
     [[NDAppDataManager shared] terminateApps:apps];
     block(apps, prev);
 }
@@ -67,14 +77,21 @@
         [cfg save];
     }
     if (cfg.holographicBackup && apps.count) {
-        if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+        // CRITICAL: never backup when re-selecting the same record — that overwrites
+        // freshly imported holographic trees (e.g. Venmo 22MB) with empty live sandboxes.
+        BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
+        if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"]) {
             [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
         }
         if ([current isEqualToString:@"原始机器"]) {
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
         } else {
-            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
+            NSError *restoreErr = nil;
+            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:&restoreErr];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
+            if (restoreErr) {
+                NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
+            }
         }
     } else if (apps.count) {
         [[NDAppDataManager shared] clearDataForApps:apps error:nil];
@@ -181,12 +198,27 @@
 
         if ([fun isEqualToString:@"setRecord"]) {
             NSString *name = query[@"recordName"] ?: @"";
-            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+            [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
                 if (success) [self afterSwitchFrom:previousRecord to:name apps:apps];
+                NSString *msg = name;
+                if (success) {
+                    NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
+                    NSMutableArray *missing = [NSMutableArray array];
+                    for (NSString *b in bids) {
+                        NSString *backup = [NDPaths appsBackupDirForRecord:name bundleId:b];
+                        BOOL has = [[NSFileManager defaultManager] fileExistsAtPath:backup];
+                        if (has && ![[NDAppDataManager shared] containerPathForBundleId:b]) [missing addObject:b];
+                    }
+                    if (missing.count) {
+                        msg = [NSString stringWithFormat:@"%@\n未安装无法写入: %@", name, [missing componentsJoinedByString:@", "]];
+                    }
+                } else {
+                    msg = err.localizedDescription ?: name;
+                }
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
-                done(name, success ? 200 : 500);
+                done(msg, success ? 200 : 500);
             }];
             return;
         }
@@ -337,7 +369,29 @@
             NSError *err = nil;
             BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
             NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
-            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            // Auto-apply last imported record so Venmo/etc. land in live sandboxes immediately
+            NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
+            if (n > 0 && applyName.length) {
+                dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                __block NSString *applyMsg = @"";
+                [self prepareTargetsForDestination:applyName block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                    NSError *swErr = nil;
+                    if ([[NDRecordStore shared] switchToRecord:applyName error:&swErr]) {
+                        [self afterSwitchFrom:previousRecord to:applyName apps:apps];
+                        applyMsg = [NSString stringWithFormat:@"applied:%@", applyName];
+                    } else {
+                        applyMsg = swErr.localizedDescription ?: @"apply failed";
+                    }
+                    dispatch_semaphore_signal(sem);
+                }];
+                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(180 * NSEC_PER_SEC)));
+                body = [NSString stringWithFormat:@"%lu\n%@\n%@\n%@", (unsigned long)n,
+                        [[NDRecordStore shared] lastImportHoloSummary] ?: @"",
+                        applyMsg,
+                        err.localizedDescription ?: @""];
+            } else {
+                body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            }
             [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
             done(body, (n > 0 || !err) ? 200 : 500);
             return;

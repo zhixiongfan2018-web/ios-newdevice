@@ -5,6 +5,13 @@
 #import "NDAppDataManager.h"
 #import <notify.h>
 
+@interface NDRecordStore ()
+@property (nonatomic, copy, readwrite) NSArray<NSString *> *lastImportedRecordNames;
+@property (nonatomic, copy, readwrite) NSString *lastImportHoloSummary;
+@property (nonatomic, strong) NSMutableArray<NSString *> *importingNames;
+@property (nonatomic, strong) NSMutableArray<NSString *> *importingHoloLines;
+@end
+
 @implementation NDRecordStore
 
 + (instancetype)shared {
@@ -505,6 +512,9 @@
         return 0;
     }
 
+    if (!self.importingNames) self.importingNames = [NSMutableArray array];
+    if (!self.importingHoloLines) self.importingHoloLines = [NSMutableArray array];
+
     static NSSet *metaPlists;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -656,10 +666,53 @@
             [self mergeTargetApps:toMerge.array];
         }
 
-        // Keychain: stage only during holographic import. Live restore happens on record switch.
+        if (self.importingNames && ![self.importingNames containsObject:saved.name]) {
+            [self.importingNames addObject:saved.name];
+        }
+        // Summarize staged holographic apps (e.g. Venmo Documents/Library)
+        NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
+        NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        NSMutableArray *bits = [NSMutableArray array];
+        for (NSString *bid in staged) {
+            NSString *p = [appsRoot stringByAppendingPathComponent:bid];
+            BOOL d = NO;
+            if (![fm fileExistsAtPath:p isDirectory:&d] || !d) continue;
+            unsigned long long bytes = 0;
+            NSDirectoryEnumerator *en = [fm enumeratorAtPath:p];
+            for (NSString *rel in en) {
+                NSDictionary *attrs = [en fileAttributes];
+                if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) bytes += [attrs fileSize];
+            }
+            [bits addObject:[NSString stringWithFormat:@"%@ %lluKB", bid, bytes / 1024]];
+        }
+        if (bits.count && self.importingHoloLines) {
+            [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → %@", saved.name, [bits componentsJoinedByString:@", "]]];
+        }
+
+        // Keychain: stage only during holographic import. Live restore happens on record switch / auto-apply.
     }
     if (imported) [self notifyReload];
     return imported;
+}
+
+- (void)beginImportSession {
+    self.importingNames = [NSMutableArray array];
+    self.importingHoloLines = [NSMutableArray array];
+    self.lastImportedRecordNames = @[];
+    self.lastImportHoloSummary = nil;
+}
+
+- (void)endImportSession {
+    self.lastImportedRecordNames = [self.importingNames copy] ?: @[];
+    if (self.importingHoloLines.count) {
+        self.lastImportHoloSummary = [self.importingHoloLines componentsJoinedByString:@"\n"];
+    } else if (self.lastImportedRecordNames.count) {
+        self.lastImportHoloSummary = @"（记录已导入，但 apps/ 下没有沙盒数据）";
+    } else {
+        self.lastImportHoloSummary = nil;
+    }
+    self.importingNames = nil;
+    self.importingHoloLines = nil;
 }
 
 - (void)writeResultCode:(NSInteger)code {

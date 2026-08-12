@@ -51,17 +51,26 @@
 }
 
 - (void)importFromAMG {
-    NSError *err = nil;
     NSString *dir = [NDRecordStore resolvedAMGImportPath];
     BOOL kc = [NDConfig shared].importKeychainWithData;
-    NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
-    NSString *msg = n
-        ? [NSString stringWithFormat:@"已从 %@ 导入 %lu 条（Keychain：%@）。\n提示：请用 AMG「导出」到 /var/mobile/AMG_tar，不要只拷运行时 /var/mobile/AMG（faker 落盘为密文，无需也不应手工解密）。", dir, (unsigned long)n, kc ? @"开" : @"关"]
-        : (err.localizedDescription ?: @"未找到可导入的 AMG 记录");
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
-    [self reload];
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"解压并写入 App 沙盒…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
+                    NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
+                    NSString *msg = (code == 200)
+                        ? [NSString stringWithFormat:@"已导入：%@\n\n暂存沙盒：\n%@\n\n已自动切换并尝试写入目标 App。\n若 Venmo 仍为空：请确认已安装 Venmo，然后重新点选该记录。\n\n%@", names.length ? names : body, holo.length ? holo : @"（无）", dir]
+                        : (body.length ? body : ( @"导入失败"));
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:a animated:YES completion:nil];
+                    [self reload];
+                }];
+            });
+        }];
+    }];
 }
 
 - (void)exportCurrent {

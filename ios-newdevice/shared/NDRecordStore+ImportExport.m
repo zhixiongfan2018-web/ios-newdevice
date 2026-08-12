@@ -86,6 +86,7 @@
         return 0;
     }
 
+    [self beginImportSession];
     NSUInteger total = 0;
 
     // 1) Folder trees
@@ -167,6 +168,7 @@
 
     [fm removeItemAtPath:scratchRoot error:nil];
 
+    [self endImportSession];
     if (total == 0 && error && !*error) {
         *error = [NSError errorWithDomain:@"NDRecordStore" code:31 userInfo:@{NSLocalizedDescriptionKey: @"未找到可导入的 AMG 记录。请使用 AMG「导出 AMG 数据」得到的包放到 /var/mobile/AMG_tar，不要只拷运行时目录 /var/mobile/AMG（其中 faker.plist 为落盘密文）。"}];
     }

@@ -34,6 +34,13 @@ NS_ASSUME_NONNULL_BEGIN
 /// Bundle IDs for a record's App environment (selectApp.plist + apps/ folders).
 - (NSArray<NSString *> *)appBundleIdsForRecord:(NSString *)name;
 
+/// Names imported by the most recent AMG import (for auto-activate / UI summary).
+@property (nonatomic, copy, readonly) NSArray<NSString *> *lastImportedRecordNames;
+/// Human-readable holographic staging summary from last import (apps + bytes).
+@property (nonatomic, copy, readonly, nullable) NSString *lastImportHoloSummary;
+- (void)beginImportSession;
+- (void)endImportSession;
+
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;
 
