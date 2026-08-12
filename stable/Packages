@@ -6,12 +6,12 @@ Author: Local Dev
 Section: Tweaks
 Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/
 Architecture: iphoneos-arm64
-Version: 1.0.0-98
+Version: 1.0.0-99
 Installed-Size: 512
-Filename: debs/com.local.newdevice_1.0.0-98_iphoneos-arm64.deb
-Size: 322380
-MD5sum: 745ffdd29b04a4ad491b5215d9c3fdba
-SHA1: 0dd70b80d58a997694ed5e508280ac58d798cf67
-SHA256: 38cb6bca44b1cede22603580b5a7f13101a3dee563aa4c75383c886961574cb6
-X-Rev: 1786565834
+Filename: debs/com.local.newdevice_1.0.0-99_iphoneos-arm64.deb
+Size: 322376
+MD5sum: 45321cdd96e53d0879e4ab5f4ea7adf4
+SHA1: 7c5ad73d3b7c85620f69c9e15756feaef8c84a39
+SHA256: c12a467d54d1c144a2dc60d0dec42ad281211708a38c9ffc15584799f04ac7bc
+X-Rev: 1786567572
 
