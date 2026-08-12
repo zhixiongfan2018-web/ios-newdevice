@@ -9,20 +9,15 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages-and-deb
+  group: build-deb
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 60
-    environment:
-      name: github-pages
-      url: ${{ steps.pages.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,7 +154,7 @@ jobs:
             <p>推荐直链（raw，手机浏览器可下）：</p>
             <p class="box"><code>https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb</code></p>
             <p>Sileo 固定源：</p>
-            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/apt</code></p>
+            <p class="box"><code>https://zhixiongfan2018-web.github.io/ios-newdevice/</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>
@@ -173,17 +168,10 @@ jobs:
           echo "----- Release -----"
           cat "$REPO_ROOT/Release"
 
-      - name: Setup Pages
-        if: github.ref == 'refs/heads/master'
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/master'
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload Sileo site artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: sileo-site
           path: sileo-site
-
-      - name: Deploy to GitHub Pages
-        id: pages
-        if: github.ref == 'refs/heads/master'
-        uses: actions/deploy-pages@v4
+          if-no-files-found: error
+          retention-days: 14

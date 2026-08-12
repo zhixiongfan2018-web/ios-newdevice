@@ -1,0 +1,59 @@
+name: Deploy apt to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - "cursor/fixed-sileo-source-461d"
+    paths:
+      - "apt/**"
+      - ".github/workflows/deploy-apt-pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-apt
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare site from apt/
+        run: |
+          set -euo pipefail
+          rm -rf site
+          cp -a apt site
+          # Never ship compressed indexes (CDN/Sileo ghosts)
+          rm -f site/Packages.gz site/Packages.bz2 site/Packages.xz site/Packages.lzma site/Packages.zst
+          test -f site/Release
+          test -f site/Packages
+          test -f site/debs/com.local.newdevice_1.0.0-23_iphoneos-arm64.deb
+          grep -q 'Architectures:' site/Release
+          ls -la site site/debs
+          echo "----- Release -----"
+          cat site/Release
+          echo "----- Packages -----"
+          cat site/Packages
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        uses: actions/deploy-pages@v4

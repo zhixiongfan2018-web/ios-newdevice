@@ -25,10 +25,10 @@ https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downl
 ### Sileo 固定源（推荐）
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/apt
+https://zhixiongfan2018-web.github.io/ios-newdevice/
 ```
 
-不要用旧的 `/repo` 路径（jsDelivr 有幽灵 `Packages.gz`）。若刷新仍失败，用上面的 **raw 直链** 装 deb。
+不要用 jsDelivr 的 `@latest` / `@master`（Sileo 无法添加带 `@` 的源）。若刷新仍失败，用上面的 **raw 直链** 装 deb。
 
 ## 其他可选
 
