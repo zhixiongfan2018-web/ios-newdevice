@@ -4,14 +4,14 @@ Description: One-tap new device identity for Dopamine iOS 15-18 (incl. 18.x).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
-Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/
+Homepage: https://zhixiongfan2018-web.github.io/ios-newdevice/
 Architecture: iphoneos-arm64
-Version: 1.0.0-92
+Version: 1.0.0-93
 Installed-Size: 512
-Filename: debs/com.local.newdevice_1.0.0-92_iphoneos-arm64.deb
-Size: 319446
-MD5sum: 68114bf57ec8cead30a11faab9eff1d4
-SHA1: 707f1d59e05525854de779906c56a59919455d82
-SHA256: 9806d76a8be9eae2079b2a1b35cd837b81b7141f78be07e94931821bd028914f
-X-Rev: 1786564381
+Filename: debs/com.local.newdevice_1.0.0-93_iphoneos-arm64.deb
+Size: 150404
+MD5sum: 2fee2e0b86eb5bf88e2ff3cd88a3c57e
+SHA1: fb0bddb69d169bc57a56bdab75ecc04403ce52aa
+SHA256: 94e1cc1e52838f504e7cfd75d92cf1dbde15c0ddd7320585e103af0e08255900
+X-Rev: 1786565179
 
