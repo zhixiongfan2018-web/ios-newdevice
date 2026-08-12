@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-107
+Version: 1.0.0-109
 Architecture: iphoneos-arm64
-Description: Fix App environment restore on AMG import (compile + selectApp merge).
+Description: Auto-restore Venmo/app sandboxes after AMG import; stop reselect wipe.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

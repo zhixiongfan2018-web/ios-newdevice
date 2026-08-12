@@ -670,7 +670,6 @@
             [self.importingNames addObject:saved.name];
         }
         // Summarize staged holographic apps (e.g. Venmo Documents/Library)
-        NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
         NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
         NSMutableArray *bits = [NSMutableArray array];
         for (NSString *bid in staged) {
