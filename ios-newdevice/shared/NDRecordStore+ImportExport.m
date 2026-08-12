@@ -14,16 +14,24 @@
 + (NSString *)iGrimaceImportPath { return @"/var/mobile/iGrimace"; }
 + (NSString *)awzImportPath { return @"/var/mobile/importdata"; }
 
++ (BOOL)NDIsContainerFolderName:(NSString *)name {
+    if (!name.length || [name hasPrefix:@"."]) return YES;
+    NSString *lower = name.lowercaseString;
+    return [lower isEqualToString:@"import"] || [lower isEqualToString:@"export"]
+        || [lower isEqualToString:@"debs"] || [lower isEqualToString:@"amg"]
+        || [lower isEqualToString:@"amg_tar"] || [lower isEqualToString:@"newdevice"];
+}
+
 + (BOOL)NDDirectoryLooksImportable:(NSString *)dir {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return NO;
     NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
     for (NSString *entry in entries) {
-        if ([entry hasPrefix:@"."]) continue;
+        if ([self NDIsContainerFolderName:entry]) continue;
         NSString *lower = entry.lowercaseString;
         if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".tar"] || [lower hasSuffix:@".zip"]) return YES;
-        if ([lower hasSuffix:@".plist"]) return YES;
+        if ([lower hasSuffix:@".plist"] && ![lower isEqualToString:@"description.plist"] && ![lower isEqualToString:@"selectapp.plist"]) return YES;
         NSString *full = [dir stringByAppendingPathComponent:entry];
         BOOL entryDir = NO;
         if (![fm fileExistsAtPath:full isDirectory:&entryDir] || !entryDir) continue;
@@ -37,12 +45,12 @@
 
 + (NSString *)resolvedAMGImportPath {
     // Prefer directories that actually contain importable content.
-    // Media/NewDevice/import is the Aisi-visible user folder.
+    // Never scan parent Media/AMG or Media/NewDevice — their import/export children
+    // used to be mistaken for machine records.
     NSArray *candidates = @[
         [NDPaths mediaImportDir],
         [self amgMediaImportPath],
         [self amgTarPath],
-        @"/var/mobile/Media/AMG",
         // Runtime tree last — faker often at-rest ciphertext; only use if nothing else
         @"/var/mobile/AMG",
     ];

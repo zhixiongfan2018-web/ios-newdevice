@@ -18,7 +18,38 @@
     return store;
 }
 
++ (BOOL)isReservedRecordFolderName:(NSString *)name {
+    if (!name.length || [name hasPrefix:@"."]) return YES;
+    static NSSet *reserved;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        reserved = [NSSet setWithArray:@[
+            @"import", @"export",
+            @"debs", @"stable", @"apt", @"downloads",
+            @"config", @"settings", @"records",
+            @"amg", @"amg_tar", @"igrimace", @"importdata",
+            @"nd-export-stage", @"nd-extract",
+            @"使用说明.txt",
+        ]];
+    });
+    return [reserved containsObject:name.lowercaseString];
+}
+
+- (void)purgeAccidentalImportExportRecords {
+    // Older builds mistakenly imported Media/.../import|export as records.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *name in @[@"import", @"export"]) {
+        NSString *profile = [NDPaths profilePathForRecord:name];
+        if (![fm fileExistsAtPath:profile]) continue;
+        if ([[self currentRecordName] isEqualToString:name]) {
+            [self setCurrentRecordName:@"原始机器"];
+        }
+        [fm removeItemAtPath:[NDPaths recordDir:name] error:nil];
+    }
+}
+
 - (void)ensureOriginalRecord {
+    [self purgeAccidentalImportExportRecords];
     NSString *path = [NDPaths profilePathForRecord:@"原始机器"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
         NDDeviceProfile *p = [NDDeviceProfile originalProfile];
@@ -292,7 +323,7 @@
     if (!p.name.length || [p.name isEqualToString:@"unnamed"]) {
         p.name = [[path lastPathComponent] stringByDeletingPathExtension];
     }
-    if ([p.name isEqualToString:@"原始机器"] || [p.name isEqualToString:@"config"] || [p.name isEqualToString:@"settings"]) {
+    if ([p.name isEqualToString:@"原始机器"] || [[self class] isReservedRecordFolderName:p.name]) {
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:22 userInfo:@{NSLocalizedDescriptionKey: @"Skipped reserved name"}];
         return nil;
     }
@@ -310,8 +341,8 @@
 
 - (NSString *)uniqueRecordName:(NSString *)preferred {
     NSString *base = preferred.length ? preferred : [[NSDate date] description];
-    if ([base isEqualToString:@"原始机器"] || [base isEqualToString:@"config"] || [base isEqualToString:@"settings"]) {
-        base = [base stringByAppendingString:@"-import"];
+    if ([base isEqualToString:@"原始机器"] || [[self class] isReservedRecordFolderName:base]) {
+        base = [base stringByAppendingString:@"-record"];
     }
     if (![self profileNamed:base]) return base;
     NSInteger suffix = 2;
@@ -354,6 +385,7 @@
     NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
     for (NSString *entry in entries) {
         if ([entry hasPrefix:@"."]) continue;
+        if ([[self class] isReservedRecordFolderName:entry]) continue;
         NSString *full = [dir stringByAppendingPathComponent:entry];
         BOOL entryIsDir = NO;
         [fm fileExistsAtPath:full isDirectory:&entryIsDir];
@@ -361,6 +393,7 @@
         if (!entryIsDir) {
             if (![[entry pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
             if ([metaPlists containsObject:entry.lowercaseString]) continue;
+            if ([[self class] isReservedRecordFolderName:[entry stringByDeletingPathExtension]]) continue;
             if ([self importProfileAtPath:full preferredName:[entry stringByDeletingPathExtension] error:nil]) {
                 imported++;
             }
@@ -371,6 +404,11 @@
         NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
         if ([desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
             recordName = desc[@"title"];
+        }
+        if ([[self class] isReservedRecordFolderName:recordName]) {
+            // Keep folder-name fallback only when title is a reserved container label
+            recordName = entry;
+            if ([[self class] isReservedRecordFolderName:recordName]) continue;
         }
 
         NSMutableArray<NSString *> *candidates = [NSMutableArray array];
@@ -387,6 +425,25 @@
             if (![candidates containsObject:p]) [candidates addObject:p];
         }
 
+        // Detect holographic / side-car payload (apps, AppGroup, Pasteboard)
+        BOOL hasHolo = NO;
+        if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:@"AppGroup"]] ||
+            [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"Pasteboard"]] ||
+            [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"apps"]]) {
+            hasHolo = YES;
+        }
+        if (!hasHolo) {
+            for (NSString *f in inner) {
+                if ([f hasPrefix:@"."] || [[f pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
+                BOOL nestedDir = NO;
+                NSString *nested = [full stringByAppendingPathComponent:f];
+                if ([fm fileExistsAtPath:nested isDirectory:&nestedDir] && nestedDir) {
+                    // bundle-id style folder
+                    if ([f containsString:@"."]) { hasHolo = YES; break; }
+                }
+            }
+        }
+
         NDDeviceProfile *saved = nil;
         BOOL fakerEncrypted = NO;
         for (NSString *plistPath in candidates) {
@@ -399,7 +456,10 @@
             if (saved) break;
         }
 
+        // Do NOT invent a record for empty container folders (this created bogus "import"/"export").
         if (!saved) {
+            if (!hasHolo && !fakerEncrypted) continue;
+            if (!hasHolo) continue; // ciphertext-only with no app data: skip
             NSString *unique = [self uniqueRecordName:recordName];
             NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:unique preferredModel:nil preferredSystem:nil];
             if ([self saveProfile:fresh error:nil]) {
