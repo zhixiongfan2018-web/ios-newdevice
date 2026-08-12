@@ -216,6 +216,17 @@ jobs:
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/debs/${DEB_NAME}" || true
 
+          # jsDelivr without @ tracks latest GitHub Release — bump a semver tag
+          TAG="v1.0.$(( ${{ github.run_number }} ))"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists"
+          else
+            gh release create "$TAG" --target master --title "NewDevice stable ${TAG}" --notes "Sileo: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable" || true
+          fi
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
+
+
       - name: Build Sileo apt repo artifact
         run: |
           set -euo pipefail
