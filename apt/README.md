@@ -1,9 +1,15 @@
 # Sileo 固定源（iOS 18 / Dopamine）
 
-只用这一条（不要带 `@`）：
+Sileo 添加（**不要带 `@`**）：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/v1.0.31/apt
 ```
 
-目标系统：**iOS 15–18**（含 18.x）。安装最新包 → Respring → 打开 NewDevice → 勾选 App 并强杀重开。
+或直接装 deb：
+
+```
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/v1.0.31/downloads/NewDevice.deb
+```
+
+目标系统：**iOS 15–18**（含 18.x / 18.5）。装 **1.0.0-45** → Respring → 打开 NewDevice → 勾选 App → 强杀重开。

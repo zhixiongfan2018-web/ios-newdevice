@@ -5,7 +5,7 @@
 **Sileo 固定源（只用这一条，不要带 `@`）：**
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/v1.0.31/apt
 ```
 
 带 `@latest` / `@master` 的链接 Sileo **无法添加**。请删掉旧源后只加上面这条。
