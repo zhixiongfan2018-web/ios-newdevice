@@ -1,7 +1,7 @@
 # NewDevice（类 AMG 一键新机）
 
 越狱端套件：管理 App + `newdeviced` 守护进程 + Substrate/ElleKit Tweak。  
-目标环境：**Dopamine rootless / iOS 15–16**。
+目标环境：**Dopamine rootless / iOS 15–18**（含 iOS 18.x）。
 
 用途：本机隐私隔离、多环境测试、自动化脚本联调。请遵守当地法律与各 App 服务条款。
 

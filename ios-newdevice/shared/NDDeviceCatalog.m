@@ -4,6 +4,7 @@
 
 + (NSArray<NSDictionary *> *)deviceModels {
     return @[
+        @{@"Model": @"iPhone SE (3rd generation)", @"ProductType": @"iPhone14,6", @"HardwareMachine": @"iPhone14,6"},
         @{@"Model": @"iPhone 13", @"ProductType": @"iPhone14,5", @"HardwareMachine": @"iPhone14,5"},
         @{@"Model": @"iPhone 13 Pro", @"ProductType": @"iPhone14,2", @"HardwareMachine": @"iPhone14,2"},
         @{@"Model": @"iPhone 14", @"ProductType": @"iPhone14,7", @"HardwareMachine": @"iPhone14,7"},
@@ -11,16 +12,20 @@
         @{@"Model": @"iPhone 15", @"ProductType": @"iPhone15,4", @"HardwareMachine": @"iPhone15,4"},
         @{@"Model": @"iPhone 15 Pro", @"ProductType": @"iPhone16,1", @"HardwareMachine": @"iPhone16,1"},
         @{@"Model": @"iPhone 15 Pro Max", @"ProductType": @"iPhone16,2", @"HardwareMachine": @"iPhone16,2"},
+        @{@"Model": @"iPhone 16", @"ProductType": @"iPhone17,3", @"HardwareMachine": @"iPhone17,3"},
+        @{@"Model": @"iPhone 16 Pro", @"ProductType": @"iPhone17,1", @"HardwareMachine": @"iPhone17,1"},
+        @{@"Model": @"iPhone 16 Pro Max", @"ProductType": @"iPhone17,2", @"HardwareMachine": @"iPhone17,2"},
         @{@"Model": @"iPhone 12", @"ProductType": @"iPhone13,2", @"HardwareMachine": @"iPhone13,2"},
         @{@"Model": @"iPhone 11", @"ProductType": @"iPhone12,1", @"HardwareMachine": @"iPhone12,1"},
-        @{@"Model": @"iPhone X", @"ProductType": @"iPhone10,3", @"HardwareMachine": @"iPhone10,3"},
     ];
 }
 
 + (NSArray<NSString *> *)systemVersions {
+    // Real device is often iOS 18.x (Dopamine). Include 17/18 so spoofed versions match modern apps.
     return @[
-        @"15.0", @"15.1", @"15.4.1", @"15.7.1",
-        @"16.0", @"16.1.1", @"16.3.1", @"16.5", @"16.6.1", @"16.7.2",
+        @"17.0", @"17.1.1", @"17.4.1", @"17.5.1", @"17.6.1",
+        @"18.0", @"18.1", @"18.2.1", @"18.3.1", @"18.4", @"18.5",
+        @"16.7.2", @"16.6.1",
     ];
 }
 
