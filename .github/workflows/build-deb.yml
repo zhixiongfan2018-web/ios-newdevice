@@ -80,27 +80,109 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish deb to downloads/ (raw.githubusercontent.com)
+      - name: Repack deb as data.tar.gz (iOS dpkg compatible)
+        run: |
+          set -euo pipefail
+          DEB="$(ls dist/*.deb | head -n1)"
+          rm -rf /tmp/nd-repack && mkdir -p /tmp/nd-repack
+          dpkg-deb -x "$DEB" /tmp/nd-repack
+          dpkg-deb -e "$DEB" /tmp/nd-repack/DEBIAN
+          chmod 755 /tmp/nd-repack/DEBIAN/postinst /tmp/nd-repack/DEBIAN/prerm || true
+          # Ensure no firmware Depends
+          if grep -qi '^Depends:' /tmp/nd-repack/DEBIAN/control; then
+            grep -vi '^Depends:' /tmp/nd-repack/DEBIAN/control > /tmp/nd-repack/DEBIAN/control.new
+            mv /tmp/nd-repack/DEBIAN/control.new /tmp/nd-repack/DEBIAN/control
+          fi
+          OUT="dist/$(basename "$DEB")"
+          dpkg-deb -Zgzip -b /tmp/nd-repack "$OUT.new"
+          mv "$OUT.new" "$OUT"
+          ar t "$OUT"
+          dpkg-deb -I "$OUT" | head -n 25
+
+      - name: Publish deb to downloads/ + apt/ (fixed jsDelivr source)
         if: github.ref == 'refs/heads/master'
         run: |
           set -euo pipefail
-          mkdir -p downloads
-          rm -f downloads/com.local.newdevice_*.deb downloads/NewDevice.deb
+          FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt'
           DEB="$(ls dist/*.deb | head -n1)"
-          cp "$DEB" downloads/
+          DEB_NAME="$(basename "$DEB")"
+          mkdir -p downloads apt/debs
+          rm -f downloads/com.local.newdevice_*.deb downloads/NewDevice.deb
+          rm -f apt/debs/*.deb
+          cp "$DEB" "downloads/$DEB_NAME"
           cp "$DEB" downloads/NewDevice.deb
-          ls -la downloads
+          cp "$DEB" "apt/debs/$DEB_NAME"
+          cp "$DEB" apt/debs/NewDevice.deb
+
+          python3 - "$FIXED_SRC" "$DEB" <<'PY'
+          import hashlib, datetime, sys, re
+          from pathlib import Path
+          fixed, deb_path = sys.argv[1], Path(sys.argv[2])
+          data = deb_path.read_bytes()
+          size = len(data)
+          # version from control via dpkg-deb -f if needed; parse filename
+          m = re.search(r'_(\d+\.\d+\.\d+-\d+)_', deb_path.name)
+          ver = m.group(1) if m else '0'
+          rev = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+          packages = (
+              "Package: com.local.newdevice\n"
+              "Name: NewDevice\n"
+              "Description: One-tap new device identity for Dopamine iOS 15-18.\n"
+              "Maintainer: Local Dev\n"
+              "Author: Local Dev\n"
+              "Section: Tweaks\n"
+              f"Homepage: {fixed}/\n"
+              "Architecture: iphoneos-arm64\n"
+              f"Version: {ver}\n"
+              "Installed-Size: 512\n"
+              f"Filename: debs/{deb_path.name}\n"
+              f"Size: {size}\n"
+              f"MD5sum: {hashlib.md5(data).hexdigest()}\n"
+              f"SHA1: {hashlib.sha1(data).hexdigest()}\n"
+              f"SHA256: {hashlib.sha256(data).hexdigest()}\n"
+              f"X-Rev: {rev}\n\n"
+          )
+          root = Path('apt')
+          (root / 'Packages').write_text(packages)
+          pkg = (root / 'Packages').read_bytes()
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')
+          (root / 'Release').write_text(
+              f"Date: {now}\n"
+              "Origin: NewDevice\n"
+              "Label: NewDevice\n"
+              "Suite: stable\n"
+              "Version: 1.0\n"
+              "Codename: stable\n"
+              "Architectures: iphoneos-arm iphoneos-arm64\n"
+              "Components: main\n"
+              "Description: NewDevice Sileo source\n"
+              f"Comment: ci-{rev}\n"
+              f"MD5Sum:\n {hashlib.md5(pkg).hexdigest()} {len(pkg)} Packages\n"
+              f"SHA1:\n {hashlib.sha1(pkg).hexdigest()} {len(pkg)} Packages\n"
+              f"SHA256:\n {hashlib.sha256(pkg).hexdigest()} {len(pkg)} Packages\n"
+          )
+          (root / '.jsdelivr_refresh').write_text(f'{rev}\n')
+          (root / 'README.md').write_text(
+              "# Sileo 固定源\n\n只用这一条：\n\n```\n"
+              f"{fixed}\n```\n"
+          )
+          print('apt updated', ver, size)
+          PY
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/*.deb
+          git add downloads/*.deb apt/Packages apt/Release apt/.jsdelivr_refresh apt/README.md apt/debs/*.deb
           if git diff --cached --quiet; then
-            echo "downloads/ already up to date"
+            echo "apt/downloads already up to date"
             exit 0
           fi
-          git commit -m "Update downloads deb for raw.githubusercontent.com [skip ci]"
+          git commit -m "Update apt fixed source ${FIXED_SRC} [skip ci]"
           git push origin "HEAD:master"
+          # best-effort CDN purge
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt/Packages" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt/Release" || true
 
-      - name: Build Sileo apt repo
+      - name: Build Sileo apt repo artifact
         run: |
           set -euo pipefail
           REPO_ROOT="$PWD/sileo-site"
