@@ -4,10 +4,7 @@
 #import "NDConfig.h"
 #import "NDAppDataManager.h"
 #import "NDDeviceProfile.h"
-#import <spawn.h>
-#import <sys/wait.h>
-
-extern char **environ;
+#import "NDArchiveExtract.h"
 
 @implementation NDRecordStore (ImportExport)
 
@@ -59,48 +56,6 @@ extern char **environ;
     return emptyPreferred ?: [self amgTarPath];
 }
 
-- (BOOL)NDSpawn:(const char *)path args:(char *const[])argv {
-    pid_t pid = 0;
-    if (posix_spawn(&pid, path, NULL, NULL, argv, environ) != 0) return NO;
-    if (pid > 0) {
-        int status = 0;
-        waitpid(pid, &status, 0);
-        return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    }
-    return NO;
-}
-
-- (BOOL)NDExtractArchive:(NSString *)archive toDirectory:(NSString *)dest {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    [fm createDirectoryAtPath:dest withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *lower = archive.lowercaseString;
-    const char *tarBins[] = { "/var/jb/usr/bin/tar", "/usr/bin/tar", "/bin/tar", NULL };
-    const char *unzipBins[] = { "/var/jb/usr/bin/unzip", "/usr/bin/unzip", NULL };
-
-    if ([lower hasSuffix:@".zip"]) {
-        for (const char **b = unzipBins; *b; b++) {
-            NSString *bin = [NSString stringWithUTF8String:*b];
-            if (![fm fileExistsAtPath:bin]) continue;
-            char *argv[] = { (char *)*b, "-o", (char *)archive.fileSystemRepresentation, "-d", (char *)dest.fileSystemRepresentation, NULL };
-            if ([self NDSpawn:*b args:argv]) return YES;
-        }
-        return NO;
-    }
-
-    for (const char **b = tarBins; *b; b++) {
-        NSString *bin = [NSString stringWithUTF8String:*b];
-        if (![fm fileExistsAtPath:bin]) continue;
-        if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"]) {
-            char *argv[] = { (char *)*b, "-xzf", (char *)archive.fileSystemRepresentation, "-C", (char *)dest.fileSystemRepresentation, NULL };
-            if ([self NDSpawn:*b args:argv]) return YES;
-        } else if ([lower hasSuffix:@".tar"]) {
-            char *argv[] = { (char *)*b, "-xf", (char *)archive.fileSystemRepresentation, "-C", (char *)dest.fileSystemRepresentation, NULL };
-            if ([self NDSpawn:*b args:argv]) return YES;
-        }
-    }
-    return NO;
-}
-
 - (NSUInteger)NDImportUnpackedTree:(NSString *)dir
                      importKeychain:(BOOL)importKeychain
                               error:(NSError **)error {
@@ -134,8 +89,12 @@ extern char **environ;
 
     // 2) Archives in AMG_tar (skip if same basename already present as folder)
     NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
-    NSString *scratchRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-amg-import"];
-    [fm createDirectoryAtPath:scratchRoot withIntermediateDirectories:YES attributes:nil error:nil];
+    // Prefer Media path (writable via Aisi / AFC); fall back to tmp
+    NSString *scratchRoot = @"/var/mobile/Media/AMG/.nd-extract";
+    if (![fm createDirectoryAtPath:scratchRoot withIntermediateDirectories:YES attributes:nil error:nil]) {
+        scratchRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-amg-import"];
+        [fm createDirectoryAtPath:scratchRoot withIntermediateDirectories:YES attributes:nil error:nil];
+    }
 
     for (NSString *entry in entries) {
         NSString *lower = entry.lowercaseString;
@@ -153,9 +112,10 @@ extern char **environ;
         NSString *archive = [dir stringByAppendingPathComponent:entry];
         NSString *dest = [scratchRoot stringByAppendingPathComponent:base];
         [fm removeItemAtPath:dest error:nil];
-        if (![self NDExtractArchive:archive toDirectory:dest]) {
-            if (error && !*error) {
-                *error = [NSError errorWithDomain:@"NDRecordStore" code:32 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"无法解压: %@", entry]}];
+        NSError *exErr = nil;
+        if (!NDExtractArchiveToDirectory(archive, dest, &exErr)) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"NDRecordStore" code:32 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"无法解压 %@\n%@\n建议：在电脑解压后，把记录文件夹直接放进\n/var/mobile/Media/AMG/import/", entry, exErr.localizedDescription ?: @""]}];
             }
             continue;
         }
