@@ -29,27 +29,28 @@
 
     UINavigationController *home = [[UINavigationController alloc] initWithRootViewController:[HomeViewController new]];
     home.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"首页"
-                                                    image:[UIImage systemImageNamed:@"house"]
-                                            selectedImage:[UIImage systemImageNamed:@"house.fill"]];
+                                                    image:[UIImage systemImageNamed:@"square.stack.3d.up"]
+                                            selectedImage:[UIImage systemImageNamed:@"square.stack.3d.up.fill"]];
 
     UINavigationController *recs = [[UINavigationController alloc] initWithRootViewController:[RecordsViewController new]];
     recs.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"记录"
-                                                    image:[UIImage systemImageNamed:@"list.bullet"]
-                                            selectedImage:[UIImage systemImageNamed:@"list.bullet"]];
+                                                    image:[UIImage systemImageNamed:@"list.bullet.rectangle"]
+                                            selectedImage:[UIImage systemImageNamed:@"list.bullet.rectangle.fill"]];
 
     UINavigationController *apps = [[UINavigationController alloc] initWithRootViewController:[AppsViewController new]];
     apps.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"应用"
-                                                    image:[UIImage systemImageNamed:@"square.grid.2x2"]
-                                            selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
+                                                    image:[UIImage systemImageNamed:@"apps.iphone"]
+                                            selectedImage:[UIImage systemImageNamed:@"apps.iphone"]];
 
     UINavigationController *set = [[UINavigationController alloc] initWithRootViewController:[SettingsViewController new]];
     set.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置"
-                                                   image:[UIImage systemImageNamed:@"gearshape"]
-                                           selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
+                                                   image:[UIImage systemImageNamed:@"slider.horizontal.3"]
+                                           selectedImage:[UIImage systemImageNamed:@"slider.horizontal.3"]];
 
     for (UINavigationController *nav in @[home, recs, apps, set]) {
         nav.navigationBar.prefersLargeTitles = YES;
         nav.navigationBar.tintColor = [NDTheme accent];
+        nav.view.backgroundColor = [NDTheme canvas];
     }
 
     tab.viewControllers = @[home, recs, apps, set];

@@ -28,6 +28,8 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     [super viewDidLoad];
     self.title = @"设置";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     [[NDConfig shared] reload];
 }
