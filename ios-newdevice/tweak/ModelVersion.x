@@ -73,6 +73,13 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     }
     return %orig;
 }
+- (NSString *)isoCountryCode {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.config.fakeCarrier) {
+        return @"us";
+    }
+    return %orig;
+}
 %end
 
 %hook CTTelephonyNetworkInfo

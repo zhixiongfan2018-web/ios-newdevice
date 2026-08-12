@@ -95,6 +95,11 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             if (p.SystemVer.length) map[@"ProductVersion"] = p.SystemVer;
             if (p.Build.length) map[@"BuildVersion"] = p.Build;
         }
+        // US locale identity hints (when spoofing carrier / device)
+        if (st.config.fakeCarrier) {
+            map[@"RegionInfo"] = @"US";
+            map[@"RegionCode"] = @"US";
+        }
 
         NSString *val = map[k];
         if (val.length) {

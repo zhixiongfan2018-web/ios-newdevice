@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0-47
 Architecture: iphoneos-arm64
-Description: One-tap new device identity (Sileo-safe build). Expanded realistic pools + sandbox runtime fixes.
+Description: One-tap new device identity (Sileo-safe build). US carriers/GPS pools + sandbox runtime fixes.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

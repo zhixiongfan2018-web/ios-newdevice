@@ -5,10 +5,13 @@ NS_ASSUME_NONNULL_BEGIN
 @interface NDDeviceCatalog : NSObject
 + (NSArray<NSDictionary *> *)deviceModels; // Model, ProductType, HardwareMachine
 + (NSArray<NSString *> *)systemVersions;
-+ (NSArray<NSDictionary *> *)carriers; // Carrier, MCC, MNC
++ (NSArray<NSDictionary *> *)carriers; // Carrier, MCC, MNC (US)
 + (NSArray<NSString *> *)radioAccessTypes;
-+ (NSArray<NSDictionary *> *)chinaCityCoordinates; // city, lat, lon
-+ (NSDictionary *)randomChinaCoordinate; // lat, lon, city
++ (NSArray<NSDictionary *> *)usCityCoordinates; // city, lat, lon
++ (NSDictionary *)randomUSCoordinate; // lat, lon, city, country
+/// @deprecated Use usCityCoordinates / randomUSCoordinate (US locale pools).
++ (NSArray<NSDictionary *> *)chinaCityCoordinates;
++ (NSDictionary *)randomChinaCoordinate;
 @end
 
 NS_ASSUME_NONNULL_END

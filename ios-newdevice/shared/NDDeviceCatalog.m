@@ -59,7 +59,7 @@
         @"17.2", @"17.2.1", @"17.3", @"17.3.1",
         @"17.4", @"17.4.1", @"17.5", @"17.5.1",
         @"17.6", @"17.6.1", @"17.7", @"17.7.1", @"17.7.2",
-        // iOS 18 (Dopamine-era)
+        // iOS 18
         @"18.0", @"18.0.1", @"18.1", @"18.1.1",
         @"18.2", @"18.2.1", @"18.3", @"18.3.1", @"18.3.2",
         @"18.4", @"18.4.1", @"18.5",
@@ -67,94 +67,115 @@
 }
 
 + (NSArray<NSDictionary *> *)carriers {
+    // United States PLMN (MCC 310/311/312/316). Names match common CTCarrier.carrierName values.
     return @[
-        // 中国移动
-        @{@"Carrier": @"中国移动", @"MCC": @"460", @"MNC": @"00"},
-        @{@"Carrier": @"中国移动", @"MCC": @"460", @"MNC": @"02"},
-        @{@"Carrier": @"中国移动", @"MCC": @"460", @"MNC": @"04"},
-        @{@"Carrier": @"中国移动", @"MCC": @"460", @"MNC": @"07"},
-        @{@"Carrier": @"中国移动", @"MCC": @"460", @"MNC": @"08"},
-        // 中国联通
-        @{@"Carrier": @"中国联通", @"MCC": @"460", @"MNC": @"01"},
-        @{@"Carrier": @"中国联通", @"MCC": @"460", @"MNC": @"06"},
-        @{@"Carrier": @"中国联通", @"MCC": @"460", @"MNC": @"09"},
-        // 中国电信
-        @{@"Carrier": @"中国电信", @"MCC": @"460", @"MNC": @"03"},
-        @{@"Carrier": @"中国电信", @"MCC": @"460", @"MNC": @"05"},
-        @{@"Carrier": @"中国电信", @"MCC": @"460", @"MNC": @"11"},
-        // 中国广电
-        @{@"Carrier": @"中国广电", @"MCC": @"460", @"MNC": @"15"},
+        // AT&T
+        @{@"Carrier": @"AT&T", @"MCC": @"310", @"MNC": @"410"},
+        @{@"Carrier": @"AT&T", @"MCC": @"310", @"MNC": @"150"},
+        @{@"Carrier": @"AT&T", @"MCC": @"310", @"MNC": @"170"},
+        @{@"Carrier": @"AT&T", @"MCC": @"310", @"MNC": @"380"},
+        @{@"Carrier": @"AT&T", @"MCC": @"310", @"MNC": @"030"},
+        // Verizon
+        @{@"Carrier": @"Verizon", @"MCC": @"311", @"MNC": @"480"},
+        @{@"Carrier": @"Verizon", @"MCC": @"310", @"MNC": @"004"},
+        @{@"Carrier": @"Verizon", @"MCC": @"310", @"MNC": @"012"},
+        @{@"Carrier": @"Verizon", @"MCC": @"311", @"MNC": @"110"},
+        @{@"Carrier": @"Verizon", @"MCC": @"311", @"MNC": @"270"},
+        // T-Mobile
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"260"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"160"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"200"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"210"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"220"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"240"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"250"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"310"},
+        @{@"Carrier": @"T-Mobile", @"MCC": @"311", @"MNC": @"490"},
+        // US Cellular
+        @{@"Carrier": @"US Cellular", @"MCC": @"311", @"MNC": @"580"},
+        @{@"Carrier": @"US Cellular", @"MCC": @"311", @"MNC": @"220"},
+        // Common MVNOs (still report parent PLMN on many devices)
+        @{@"Carrier": @"Cricket", @"MCC": @"310", @"MNC": @"150"},
+        @{@"Carrier": @"Metro by T-Mobile", @"MCC": @"310", @"MNC": @"260"},
+        @{@"Carrier": @"Visible", @"MCC": @"311", @"MNC": @"480"},
+        @{@"Carrier": @"Mint Mobile", @"MCC": @"310", @"MNC": @"260"},
+        @{@"Carrier": @"Google Fi", @"MCC": @"310", @"MNC": @"260"},
     ];
 }
 
 + (NSArray<NSString *> *)radioAccessTypes {
-    // Weighted toward modern RATs; no bare "WiFi" (that value is not a CT RAT string)
-    return @[@"LTE", @"LTE", @"LTE", @"NR", @"NR", @"NRNSA", @"WCDMA"];
+    // US networks are overwhelmingly LTE / 5G NR
+    return @[@"LTE", @"LTE", @"LTE", @"NR", @"NR", @"NR", @"NRNSA"];
 }
 
-+ (NSArray<NSDictionary *> *)chinaCityCoordinates {
-    // Landmark-ish urban centers (not ocean/desert). Small jitter applied in randomChinaCoordinate.
++ (NSArray<NSDictionary *> *)usCityCoordinates {
+    // Major US metro centers. Small urban jitter applied in randomUSCoordinate.
     return @[
-        @{@"city": @"北京", @"lat": @39.9042, @"lon": @116.4074},
-        @{@"city": @"上海", @"lat": @31.2304, @"lon": @121.4737},
-        @{@"city": @"广州", @"lat": @23.1291, @"lon": @113.2644},
-        @{@"city": @"深圳", @"lat": @22.5431, @"lon": @114.0579},
-        @{@"city": @"成都", @"lat": @30.5728, @"lon": @104.0668},
-        @{@"city": @"杭州", @"lat": @30.2741, @"lon": @120.1551},
-        @{@"city": @"重庆", @"lat": @29.5630, @"lon": @106.5516},
-        @{@"city": @"武汉", @"lat": @30.5928, @"lon": @114.3055},
-        @{@"city": @"西安", @"lat": @34.3416, @"lon": @108.9398},
-        @{@"city": @"南京", @"lat": @32.0603, @"lon": @118.7969},
-        @{@"city": @"苏州", @"lat": @31.2989, @"lon": @120.5853},
-        @{@"city": @"天津", @"lat": @39.3434, @"lon": @117.3616},
-        @{@"city": @"长沙", @"lat": @28.2282, @"lon": @112.9388},
-        @{@"city": @"郑州", @"lat": @34.7466, @"lon": @113.6253},
-        @{@"city": @"青岛", @"lat": @36.0671, @"lon": @120.3826},
-        @{@"city": @"大连", @"lat": @38.9140, @"lon": @121.6147},
-        @{@"city": @"厦门", @"lat": @24.4798, @"lon": @118.0894},
-        @{@"city": @"福州", @"lat": @26.0745, @"lon": @119.2965},
-        @{@"city": @"济南", @"lat": @36.6512, @"lon": @117.1201},
-        @{@"city": @"合肥", @"lat": @31.8206, @"lon": @117.2272},
-        @{@"city": @"昆明", @"lat": @25.0389, @"lon": @102.7183},
-        @{@"city": @"贵阳", @"lat": @26.6470, @"lon": @106.6302},
-        @{@"city": @"南宁", @"lat": @22.8170, @"lon": @108.3669},
-        @{@"city": @"海口", @"lat": @20.0440, @"lon": @110.1999},
-        @{@"city": @"沈阳", @"lat": @41.8057, @"lon": @123.4315},
-        @{@"city": @"长春", @"lat": @43.8171, @"lon": @125.3235},
-        @{@"city": @"哈尔滨", @"lat": @45.8038, @"lon": @126.5349},
-        @{@"city": @"石家庄", @"lat": @38.0428, @"lon": @114.5149},
-        @{@"city": @"太原", @"lat": @37.8706, @"lon": @112.5489},
-        @{@"city": @"南昌", @"lat": @28.6820, @"lon": @115.8579},
-        @{@"city": @"宁波", @"lat": @29.8683, @"lon": @121.5440},
-        @{@"city": @"无锡", @"lat": @31.4912, @"lon": @120.3119},
-        @{@"city": @"东莞", @"lat": @23.0207, @"lon": @113.7518},
-        @{@"city": @"佛山", @"lat": @23.0215, @"lon": @113.1214},
-        @{@"city": @"珠海", @"lat": @22.2710, @"lon": @113.5767},
-        @{@"city": @"中山", @"lat": @22.5170, @"lon": @113.3927},
-        @{@"city": @"惠州", @"lat": @23.1115, @"lon": @114.4152},
-        @{@"city": @"温州", @"lat": @27.9949, @"lon": @120.6994},
-        @{@"city": @"金华", @"lat": @29.0790, @"lon": @119.6474},
-        @{@"city": @"嘉兴", @"lat": @30.7461, @"lon": @120.7555},
-        @{@"city": @"常州", @"lat": @31.8107, @"lon": @119.9741},
-        @{@"city": @"徐州", @"lat": @34.2058, @"lon": @117.2841},
-        @{@"city": @"扬州", @"lat": @32.3942, @"lon": @119.4129},
-        @{@"city": @"洛阳", @"lat": @34.6197, @"lon": @112.4540},
-        @{@"city": @"烟台", @"lat": @37.4638, @"lon": @121.4479},
-        @{@"city": @"潍坊", @"lat": @36.7069, @"lon": @119.1619},
-        @{@"city": @"临沂", @"lat": @35.1041, @"lon": @118.3564},
-        @{@"city": @"保定", @"lat": @38.8739, @"lon": @115.4646},
-        @{@"city": @"廊坊", @"lat": @39.5239, @"lon": @116.7055},
-        @{@"city": @"乌鲁木齐", @"lat": @43.8256, @"lon": @87.6168},
-        @{@"city": @"兰州", @"lat": @36.0611, @"lon": @103.8343},
-        @{@"city": @"银川", @"lat": @38.4872, @"lon": @106.2309},
-        @{@"city": @"西宁", @"lat": @36.6171, @"lon": @101.7782},
-        @{@"city": @"呼和浩特", @"lat": @40.8424, @"lon": @111.7492},
-        @{@"city": @"拉萨", @"lat": @29.6525, @"lon": @91.1721},
+        @{@"city": @"New York, NY", @"lat": @40.7128, @"lon": @-74.0060},
+        @{@"city": @"Los Angeles, CA", @"lat": @34.0522, @"lon": @-118.2437},
+        @{@"city": @"Chicago, IL", @"lat": @41.8781, @"lon": @-87.6298},
+        @{@"city": @"Houston, TX", @"lat": @29.7604, @"lon": @-95.3698},
+        @{@"city": @"Phoenix, AZ", @"lat": @33.4484, @"lon": @-112.0740},
+        @{@"city": @"Philadelphia, PA", @"lat": @39.9526, @"lon": @-75.1652},
+        @{@"city": @"San Antonio, TX", @"lat": @29.4241, @"lon": @-98.4936},
+        @{@"city": @"San Diego, CA", @"lat": @32.7157, @"lon": @-117.1611},
+        @{@"city": @"Dallas, TX", @"lat": @32.7767, @"lon": @-96.7970},
+        @{@"city": @"San Jose, CA", @"lat": @37.3382, @"lon": @-121.8863},
+        @{@"city": @"Austin, TX", @"lat": @30.2672, @"lon": @-97.7431},
+        @{@"city": @"Jacksonville, FL", @"lat": @30.3322, @"lon": @-81.6557},
+        @{@"city": @"Fort Worth, TX", @"lat": @32.7555, @"lon": @-97.3308},
+        @{@"city": @"Columbus, OH", @"lat": @39.9612, @"lon": @-82.9988},
+        @{@"city": @"Charlotte, NC", @"lat": @35.2271, @"lon": @-80.8431},
+        @{@"city": @"San Francisco, CA", @"lat": @37.7749, @"lon": @-122.4194},
+        @{@"city": @"Indianapolis, IN", @"lat": @39.7684, @"lon": @-86.1581},
+        @{@"city": @"Seattle, WA", @"lat": @47.6062, @"lon": @-122.3321},
+        @{@"city": @"Denver, CO", @"lat": @39.7392, @"lon": @-104.9903},
+        @{@"city": @"Washington, DC", @"lat": @38.9072, @"lon": @-77.0369},
+        @{@"city": @"Boston, MA", @"lat": @42.3601, @"lon": @-71.0589},
+        @{@"city": @"El Paso, TX", @"lat": @31.7619, @"lon": @-106.4850},
+        @{@"city": @"Nashville, TN", @"lat": @36.1627, @"lon": @-86.7816},
+        @{@"city": @"Detroit, MI", @"lat": @42.3314, @"lon": @-83.0458},
+        @{@"city": @"Oklahoma City, OK", @"lat": @35.4676, @"lon": @-97.5164},
+        @{@"city": @"Portland, OR", @"lat": @45.5152, @"lon": @-122.6784},
+        @{@"city": @"Las Vegas, NV", @"lat": @36.1699, @"lon": @-115.1398},
+        @{@"city": @"Memphis, TN", @"lat": @35.1495, @"lon": @-90.0490},
+        @{@"city": @"Louisville, KY", @"lat": @38.2527, @"lon": @-85.7585},
+        @{@"city": @"Baltimore, MD", @"lat": @39.2904, @"lon": @-76.6122},
+        @{@"city": @"Milwaukee, WI", @"lat": @43.0389, @"lon": @-87.9065},
+        @{@"city": @"Albuquerque, NM", @"lat": @35.0844, @"lon": @-106.6504},
+        @{@"city": @"Tucson, AZ", @"lat": @32.2226, @"lon": @-110.9747},
+        @{@"city": @"Fresno, CA", @"lat": @36.7378, @"lon": @-119.7871},
+        @{@"city": @"Sacramento, CA", @"lat": @38.5816, @"lon": @-121.4944},
+        @{@"city": @"Mesa, AZ", @"lat": @33.4152, @"lon": @-111.8315},
+        @{@"city": @"Kansas City, MO", @"lat": @39.0997, @"lon": @-94.5786},
+        @{@"city": @"Atlanta, GA", @"lat": @33.7490, @"lon": @-84.3880},
+        @{@"city": @"Miami, FL", @"lat": @25.7617, @"lon": @-80.1918},
+        @{@"city": @"Raleigh, NC", @"lat": @35.7796, @"lon": @-78.6382},
+        @{@"city": @"Omaha, NE", @"lat": @41.2565, @"lon": @-95.9345},
+        @{@"city": @"Minneapolis, MN", @"lat": @44.9778, @"lon": @-93.2650},
+        @{@"city": @"Cleveland, OH", @"lat": @41.4993, @"lon": @-81.6944},
+        @{@"city": @"Tampa, FL", @"lat": @27.9506, @"lon": @-82.4572},
+        @{@"city": @"Orlando, FL", @"lat": @28.5383, @"lon": @-81.3792},
+        @{@"city": @"St. Louis, MO", @"lat": @38.6270, @"lon": @-90.1994},
+        @{@"city": @"Pittsburgh, PA", @"lat": @40.4406, @"lon": @-79.9959},
+        @{@"city": @"Cincinnati, OH", @"lat": @39.1031, @"lon": @-84.5120},
+        @{@"city": @"Salt Lake City, UT", @"lat": @40.7608, @"lon": @-111.8910},
+        @{@"city": @"Honolulu, HI", @"lat": @21.3069, @"lon": @-157.8583},
+        @{@"city": @"Anchorage, AK", @"lat": @61.2181, @"lon": @-149.9003},
+        @{@"city": @"New Orleans, LA", @"lat": @29.9511, @"lon": @-90.0715},
+        @{@"city": @"Richmond, VA", @"lat": @37.5407, @"lon": @-77.4360},
+        @{@"city": @"Buffalo, NY", @"lat": @42.8864, @"lon": @-78.8784},
+        @{@"city": @"Rochester, NY", @"lat": @43.1566, @"lon": @-77.6088},
+        @{@"city": @"Providence, RI", @"lat": @41.8240, @"lon": @-71.4128},
+        @{@"city": @"Hartford, CT", @"lat": @41.7658, @"lon": @-72.6734},
+        @{@"city": @"Boise, ID", @"lat": @43.6150, @"lon": @-116.2023},
+        @{@"city": @"Des Moines, IA", @"lat": @41.5868, @"lon": @-93.6250},
+        @{@"city": @"Madison, WI", @"lat": @43.0731, @"lon": @-89.4012},
     ];
 }
 
-+ (NSDictionary *)randomChinaCoordinate {
-    NSArray *cities = [self chinaCityCoordinates];
++ (NSDictionary *)randomUSCoordinate {
+    NSArray *cities = [self usCityCoordinates];
     NSDictionary *c = cities[arc4random_uniform((uint32_t)cities.count)];
     // ~±0.04° ≈ 3–4km urban jitter
     double jitterLat = ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
@@ -163,7 +184,18 @@
         @"lat": @([c[@"lat"] doubleValue] + jitterLat),
         @"lon": @([c[@"lon"] doubleValue] + jitterLon),
         @"city": c[@"city"] ?: @"",
+        @"country": @"US",
     };
+}
+
+#pragma mark - Compatibility aliases
+
++ (NSArray<NSDictionary *> *)chinaCityCoordinates {
+    return [self usCityCoordinates];
+}
+
++ (NSDictionary *)randomChinaCoordinate {
+    return [self randomUSCoordinate];
 }
 
 @end

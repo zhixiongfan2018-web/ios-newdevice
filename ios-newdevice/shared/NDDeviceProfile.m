@@ -229,7 +229,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         }
     }
     NSDictionary *carrier = [NDDeviceCatalog carriers][arc4random_uniform((uint32_t)[NDDeviceCatalog carriers].count)];
-    NSDictionary *coord = [NDDeviceCatalog randomChinaCoordinate];
+    NSDictionary *coord = [NDDeviceCatalog randomUSCoordinate];
 
     p.IDFA = NDRandomUUID();
     p.IDFV = NDRandomUUID();
