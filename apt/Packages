@@ -1,17 +1,17 @@
 Package: com.local.newdevice
 Name: NewDevice
-Description: One-tap new device identity (Sileo-safe build). Target-app spoof fix.
+Description: One-tap new device identity for Dopamine iOS 15-18 (incl. 18.x).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
 Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt/
 Architecture: iphoneos-arm64
-Version: 1.0.0-43
+Version: 1.0.0-45
 Installed-Size: 512
-Filename: debs/com.local.newdevice_1.0.0-43_iphoneos-arm64.deb
-Size: 149020
-MD5sum: 863f5e138887a3159b3e94f30f82d43d
-SHA1: 271a74ef5bb193b1b94a20abb50e9ce2498e15fb
-SHA256: fb167ff195ab965e45728b019294a16142893b8b9386b64a3357edbf404f4713
-X-Rev: 1786549935
+Filename: debs/com.local.newdevice_1.0.0-45_iphoneos-arm64.deb
+Size: 150398
+MD5sum: c4d8899208143a26cdb77998cea4eca4
+SHA1: 2a5db030092385e47979521de325b512010c8ae5
+SHA256: de364c2bf8f0b77b41ec161484700c86beb0f860673dead3e4f69e3cd9f5601e
+X-Rev: 1786550167
 
