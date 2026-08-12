@@ -139,6 +139,21 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
                 map[@"DeviceColor"] = p.DeviceColor;
                 map[@"DeviceEnclosureColor"] = p.DeviceColor;
             }
+            NSDictionary *metrics = [NDDeviceCatalog displayMetricsForProductType:p.ProductType];
+            if (metrics) {
+                double w = [metrics[@"w"] doubleValue];
+                double h = [metrics[@"h"] doubleValue];
+                double scale = [metrics[@"scale"] doubleValue];
+                if ([k isEqualToString:@"main-screen-width"] || [k isEqualToString:@"MainScreenWidth"]) {
+                    return CFBridgingRetain(@(w * scale));
+                }
+                if ([k isEqualToString:@"main-screen-height"] || [k isEqualToString:@"MainScreenHeight"]) {
+                    return CFBridgingRetain(@(h * scale));
+                }
+                if ([k isEqualToString:@"main-screen-scale"] || [k isEqualToString:@"MainScreenScale"] || [k isEqualToString:@"MainScreenPitch"]) {
+                    return CFBridgingRetain(@(scale));
+                }
+            }
         }
         if (st.config.fakeSystemVer || st.identityHost) {
             if (p.SystemVer.length) map[@"ProductVersion"] = p.SystemVer;
@@ -149,6 +164,27 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             map[@"RegionInfo"] = @"US";
             map[@"RegionCode"] = @"US";
         }
+        if (p.WiFiMAC.length) {
+            map[@"EthernetMacAddress"] = p.WiFiMAC;
+        }
+        if (p.Serial.length) {
+            map[@"MLBSerialNumber"] = p.Serial;
+            map[@"BasebandSerialNumber"] = p.Serial;
+        }
+        if (p.UDID.length >= 16) {
+            map[@"UniqueChipID"] = [p.UDID substringToIndex:16];
+            map[@"ArcPrimaryDeviceUUID"] = p.UDID;
+        }
+        if (p.UUID.length) {
+            map[@"UserAssignedUniqueID"] = p.UUID;
+        }
+        if (p.OpenUDID.length) {
+            map[@"OpenUDID"] = p.OpenUDID;
+        }
+        if (p.ProductType.length) {
+            map[@"RegulatoryModelNumber"] = p.ProductType;
+            map[@"ModelNumber"] = p.ProductType;
+        }
 
         NSString *val = map[k];
         if (val.length) {
@@ -156,6 +192,13 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         }
     }
     return orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL;
+}
+
+typedef CFTypeRef (*MGCopyAnswerErrFunc)(CFStringRef, void *);
+static MGCopyAnswerErrFunc orig_MGCopyAnswerWithError;
+static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
+    CFTypeRef v = hooked_MGCopyAnswer(key);
+    return v;
 }
 
 %ctor {
@@ -166,6 +209,10 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         void *sym = dlsym(gestalt, "MGCopyAnswer");
         if (sym) {
             MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+        }
+        void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+        if (symErr) {
+            MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
         }
     }
 }

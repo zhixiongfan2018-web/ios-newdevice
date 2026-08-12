@@ -54,11 +54,17 @@ static void NDApplyIfaceFingerprint(struct ifaddrs *ifa, NSDictionary *iface) {
     NSString *ipv4 = iface[@"ipv4"];
     NSString *mask = iface[@"submask"] ?: @"255.255.255.0";
     NSString *ipv6 = iface[@"ipv6"];
+    NSString *dst = iface[@"dst"];
     if (ifa->ifa_addr) {
         if (ifa->ifa_addr->sa_family == AF_INET && [ipv4 isKindOfClass:[NSString class]]) {
             [NDIfaddrsFingerprint applyIPv4:ipv4 mask:mask toSockaddr:ifa->ifa_addr netmask:ifa->ifa_netmask];
         } else if (ifa->ifa_addr->sa_family == AF_INET6 && [ipv6 isKindOfClass:[NSString class]]) {
             [NDIfaddrsFingerprint applyIPv6:ipv6 toSockaddr:ifa->ifa_addr];
+        }
+    }
+    if (ifa->ifa_dstaddr && [dst isKindOfClass:[NSString class]] && dst.length) {
+        if (ifa->ifa_dstaddr->sa_family == AF_INET) {
+            [NDIfaddrsFingerprint applyIPv4:dst toDstaddr:ifa->ifa_dstaddr];
         }
     }
 }

@@ -84,6 +84,11 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     }
     return %orig;
 }
+- (BOOL)allowsVOIP {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.config.fakeCarrier) return YES;
+    return %orig;
+}
 %end
 
 %hook CTTelephonyNetworkInfo
@@ -107,10 +112,27 @@ static NSString *NDMappedRadioAccess(NSString *r) {
             }
             return out;
         }
-        // Fallback single-service dict when orig is empty
         return @{@"0000000100000001": mapped};
     }
     return %orig;
+}
+
+- (CTCarrier *)subscriberCellularProvider {
+    NDTweakState *st = [NDTweakState shared];
+    CTCarrier *orig = %orig;
+    if ([st shouldSpoof] && st.config.fakeCarrier && orig) return orig; // property hooks on CTCarrier cover fields
+    return orig;
+}
+
+- (NSDictionary *)serviceSubscriberCellularProviders {
+    NDTweakState *st = [NDTweakState shared];
+    NSDictionary *orig = %orig;
+    if (![st shouldSpoof] || !st.config.fakeCarrier) return orig;
+    if (![orig isKindOfClass:[NSDictionary class]] || !orig.count) {
+        // Fabricate a single-service map so probes see spoofed carrier via CTCarrier hooks
+        return orig ?: @{};
+    }
+    return orig; // values are CTCarrier instances; their getters are hooked
 }
 %end
 

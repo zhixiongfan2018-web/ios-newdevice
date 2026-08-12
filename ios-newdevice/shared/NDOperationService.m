@@ -246,6 +246,24 @@
             return;
         }
 
+        if ([fun isEqualToString:@"getAMGFaker"] || [fun isEqualToString:@"exportAMGFaker"]) {
+            NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+            NSString *dir = query[@"dir"] ?: query[@"saveFilePath"];
+            if (p && dir.length) {
+                [p writeAMGFakerToDirectory:dir error:&error];
+                NSString *ifaSrc = [NDPaths ifaddrsPathForRecord:p.name];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:ifaSrc]) {
+                    [[NSFileManager defaultManager] copyItemAtPath:ifaSrc toPath:[dir stringByAppendingPathComponent:@"ifaddrs.plist"] error:nil];
+                }
+                NSArray *apps = [NDConfig shared].targetApps ?: @[];
+                [apps writeToFile:[dir stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+            }
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toAMGFakerDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
+            [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
+            done(body ?: @"", p ? 200 : 500);
+            return;
+        }
+
         if ([fun isEqualToString:@"getRecordParam"]) {
             NSString *name = query[@"recordName"] ?: @"";
             NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];

@@ -59,7 +59,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)dictionaryHasImportableIdentity:(NSDictionary *)dict;
 
 - (NSDictionary *)toDictionary;
+/// Plaintext AMG-compatible faker.plist dictionary (WifiAddress/BlueAddress/…).
+- (NSDictionary *)toAMGFakerDictionary;
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)writeAMGFakerToDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
 
 @end
 

@@ -648,6 +648,41 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     };
 }
 
+- (NSDictionary *)toAMGFakerDictionary {
+    // Plaintext AMG faker.plist key names (importable by NewDevice + readable by humans)
+    NSMutableDictionary *d = [@{
+        @"IDFA": self.IDFA ?: @"",
+        @"IDFV": self.IDFV ?: @"",
+        @"UDID": self.UDID ?: @"",
+        @"SerialNumber": self.Serial ?: @"",
+        @"WifiAddress": self.WiFiMAC ?: @"",
+        @"BlueAddress": self.BTMAC ?: @"",
+        @"SSID": self.SSID ?: @"",
+        @"BSSID": self.BSSID ?: @"",
+        @"DeviceToken": self.DeviceToken ?: @"",
+        @"SystemVer": self.SystemVer ?: @"",
+        @"BuildVersion": self.Build ?: @"",
+        @"Name": self.DeviceName.length ? self.DeviceName : (self.Model ?: @""),
+        @"DiskSpace": @(self.DiskCapacity),
+        @"Memory": @(self.PhysicalMemory),
+        @"Brightness": @(self.Brightness >= 0 ? self.Brightness : 0.5),
+        @"SystemUptime": @(self.BootTime),
+        @"Latitude": @(self.Latitude),
+        @"Longitude": @(self.Longitude),
+        @"IMEI": self.IMEI ?: @"",
+        @"IMEI2": self.IMEI2 ?: @"",
+        @"OpenUDID": self.OpenUDID ?: @"",
+        @"UUID": self.UUID ?: @"",
+        @"DeviceModel": self.Model ?: @"",
+        @"ProductType": self.ProductType ?: @"",
+        @"TimeZone": self.TimeZone ?: @"",
+        @"Carrier": self.Carrier ?: @"",
+        @"MCC": self.MCC ?: @"",
+        @"MNC": self.MNC ?: @"",
+    } mutableCopy];
+    return d;
+}
+
 - (BOOL)writeToPath:(NSString *)path error:(NSError **)error {
     NSDictionary *dict = [self toDictionary];
     NSString *dir = [path stringByDeletingLastPathComponent];
@@ -663,6 +698,26 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         }
         return NO;
     }
+    return YES;
+}
+
+- (BOOL)writeAMGFakerToDirectory:(NSString *)dir error:(NSError **)error {
+    if (!dir.length) {
+        if (error) *error = [NSError errorWithDomain:@"NDDeviceProfile" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Empty directory"}];
+        return NO;
+    }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    NSDictionary *faker = [self toAMGFakerDictionary];
+    if (![faker writeToFile:[dir stringByAppendingPathComponent:@"faker.plist"] atomically:YES]) {
+        if (error) *error = [NSError errorWithDomain:@"NDDeviceProfile" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write faker.plist"}];
+        return NO;
+    }
+    NSDictionary *desc = @{
+        @"title": self.name ?: @"export",
+        @"appName": @[],
+    };
+    [desc writeToFile:[dir stringByAppendingPathComponent:@"description.plist"] atomically:YES];
     return YES;
 }
 

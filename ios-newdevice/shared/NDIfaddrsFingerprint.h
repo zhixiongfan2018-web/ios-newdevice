@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSDictionary *)synthesizeFromProfileWiFiMAC:(NSString *)mac;
 + (BOOL)applyIPv4:(NSString *)ip mask:(NSString *)mask toSockaddr:(struct sockaddr *_Nullable)addr netmask:(struct sockaddr *_Nullable)netmask;
 + (BOOL)applyIPv6:(NSString *)ip toSockaddr:(struct sockaddr *_Nullable)addr;
++ (BOOL)applyIPv4:(NSString *)ip toDstaddr:(struct sockaddr *_Nullable)dst;
 @end
 
 NS_ASSUME_NONNULL_END

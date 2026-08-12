@@ -286,13 +286,13 @@ extern char **environ;
             }
         }
 
-        // Also try certificates tied to the bundle (attributes only; private keys may refuse export)
+        // Also try certificates tied to the bundle (DER when exportable)
         {
             NSDictionary *query = @{
                 (__bridge id)kSecClass: (__bridge id)kSecClassCertificate,
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
                 (__bridge id)kSecReturnAttributes: @YES,
-                (__bridge id)kSecReturnRef: @NO,
+                (__bridge id)kSecReturnData: @YES,
             };
             CFTypeRef result = NULL;
             if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) == errSecSuccess && result) {
@@ -305,6 +305,10 @@ extern char **environ;
                     copy[@"class"] = @"certificate";
                     copy[@"label"] = label;
                     if (accessGroup.length) copy[@"accessGroup"] = accessGroup;
+                    NSData *der = item[(__bridge id)kSecValueData];
+                    if ([der isKindOfClass:[NSData class]] && der.length) {
+                        copy[@"data"] = [der base64EncodedStringWithOptions:0];
+                    }
                     [items addObject:copy];
                 }
             } else if (result) {
@@ -361,8 +365,22 @@ extern char **environ;
 
         for (NSDictionary *item in items) {
             NSString *cls = item[@"class"] ?: @"generic";
-            if ([cls isEqualToString:@"certificate"]) continue; // attributes-only; skip reimport
             NSData *data = [[NSData alloc] initWithBase64EncodedString:item[@"data"] ?: @"" options:0];
+            if ([cls isEqualToString:@"certificate"]) {
+                if (!data.length) continue;
+                NSMutableDictionary *add = [@{
+                    (__bridge id)kSecClass: (__bridge id)kSecClassCertificate,
+                    (__bridge id)kSecValueData: data,
+                } mutableCopy];
+                if (item[@"label"]) add[(__bridge id)kSecAttrLabel] = item[@"label"];
+                if (item[@"accessGroup"]) add[(__bridge id)kSecAttrAccessGroup] = item[@"accessGroup"];
+                OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+                if (st == errSecMissingEntitlement && item[@"accessGroup"]) {
+                    [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
+                    SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+                }
+                continue;
+            }
             if (!data.length) continue;
             CFStringRef secClass = [cls isEqualToString:@"internet"] ? kSecClassInternetPassword : kSecClassGenericPassword;
             NSMutableDictionary *del = [@{

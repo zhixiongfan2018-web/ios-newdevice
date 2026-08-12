@@ -3,6 +3,8 @@
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
 #import "NDTheme.h"
+#import "NDPaths.h"
+#import "NDConfig.h"
 #import "ProfileDetailViewController.h"
 
 @interface RecordsViewController ()
@@ -36,8 +38,11 @@
     [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG 导入 (/var/mobile/AMG)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self importFromAMG];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录 (NewDevice)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportCurrent];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出 AMG 目录 (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self exportAMGFolder];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:sheet animated:YES completion:nil];
@@ -67,6 +72,34 @@
         return;
     }
     UIActivityViewController *av = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+    [self presentViewController:av animated:YES completion:nil];
+}
+
+- (void)exportAMGFolder {
+    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+    if (!p || [p.name isEqualToString:@"原始机器"]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"无法导出" message:@"请先切换到非「原始机器」记录" preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"AMG-export-%@", p.name]];
+    [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
+    NSError *err = nil;
+    if (![p writeAMGFakerToDirectory:dir error:&err]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导出失败" message:err.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    // Attach ifaddrs + selectApp when present
+    NSString *ifaSrc = [NDPaths ifaddrsPathForRecord:p.name];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:ifaSrc]) {
+        [[NSFileManager defaultManager] copyItemAtPath:ifaSrc toPath:[dir stringByAppendingPathComponent:@"ifaddrs.plist"] error:nil];
+    }
+    NSArray *apps = [NDConfig shared].targetApps ?: @[];
+    [apps writeToFile:[dir stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+    UIActivityViewController *av = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:dir]] applicationActivities:nil];
     [self presentViewController:av animated:YES completion:nil];
 }
 

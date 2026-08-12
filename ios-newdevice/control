@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-53
+Version: 1.0.0-54
 Architecture: iphoneos-arm64
-Description: DNS deep spoof, CommCenter IMEI surfaces, fuller Keychain holo.
+Description: Locale/DeviceToken/OpenUDID, rich ifaddrs, AMG faker export, probe.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
