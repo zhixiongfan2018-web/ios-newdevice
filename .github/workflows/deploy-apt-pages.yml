@@ -54,8 +54,8 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable</code></p>
-            <p>本站仅为镜像；官方源以上述 jsDelivr 为准。</p>
+            <p><code>https://zhixiongfan.top/stable</code></p>
+            <p>本站仅为镜像；官方源以 zhixiongfan.top 为准。</p>
           </body>
           </html>
           HTML

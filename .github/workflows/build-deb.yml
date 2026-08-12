@@ -101,14 +101,15 @@ jobs:
 
       # Sileo URL is .../stable — publish there (also mirror apt/ for Pages).
       # Run on feature branches too so fixes reach the CDN without waiting for a manual master merge.
-      - name: Publish deb to downloads/ + stable/ (fixed jsDelivr source)
+      - name: Publish deb to downloads/ + stable/ (fixed zhixiongfan.top source)
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Sileo 固定源（无 @）。禁止改成 Pages 或其它地址。
-          FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable'
+          # Sileo 固定源（无 @）。官方域名；服务器需反代 /stable → GitHub master/stable。
+          # 配置见 deploy/nginx-zhixiongfan.top-stable.conf — 不要改回 jsDelivr。
+          FIXED_SRC='https://zhixiongfan.top/stable'
           DEB="$(ls dist/*.deb | head -n1)"
           DEB_NAME="$(basename "$DEB")"
           mkdir -p downloads stable/debs apt/debs
@@ -236,20 +237,11 @@ jobs:
           gh release create "$TAG" --target "$MASTER_SHA" --latest \
             --title "NewDevice ${DEB_NAME} (${TAG})" \
             --notes "Sileo 固定源：${FIXED_SRC}"
-          # jsDelivr: wait for version list (~10m), then ONE repo purge + Packages.
-          # Spamming path purges causes throttle and pins bare URL on old X-Rev.
-          echo "Waiting 11m for jsDelivr version list before purge..."
-          sleep 660
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice" || true
-          sleep 2
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
-          sleep 5
-          echo "CDN Packages (bare):"
-          curl -sSI "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" | tr -d '\r' | grep -iE 'x-jsd-version|HTTP/' || true
-          curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" | head -n 20 || true
-          echo "CDN Packages (@${TAG#v}):"
-          curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@${TAG#v}/stable/Packages" | head -n 20 || true
+          # Optional jsDelivr mirror purge (official source is zhixiongfan.top — do not spam).
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice" >/dev/null || true
+          echo "Official Sileo source: ${FIXED_SRC}"
+          echo "Verify GitHub raw (backend for zhixiongfan.top/stable):"
+          curl -sS "https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/stable/Packages" | head -n 20 || true
 
 
       - name: Build Sileo apt repo artifact
@@ -304,7 +296,7 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable</code></p>
+            <p class="box"><code>https://zhixiongfan.top/stable</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>

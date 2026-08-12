@@ -5,9 +5,11 @@
 **Sileo 固定源（只用这一条）：**
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
+https://zhixiongfan.top/stable
 ```
 
-请删掉其它旧源。添加后刷新 → 安装 → Respring。
+请删掉其它旧源（含 jsDelivr）。添加后刷新 → 安装 → Respring。
+
+服务器反代配置：[`deploy/nginx-zhixiongfan.top-stable.conf`](deploy/nginx-zhixiongfan.top-stable.conf)。
 
 完整说明：[`ios-newdevice/README.md`](ios-newdevice/README.md)。

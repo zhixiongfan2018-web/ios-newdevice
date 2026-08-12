@@ -3,7 +3,7 @@
 只用这一条：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
+https://zhixiongfan.top/stable
 ```
 
 不要用其它链接。

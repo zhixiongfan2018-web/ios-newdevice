@@ -3,7 +3,7 @@
 只用这一条：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
+https://zhixiongfan.top/stable
 ```
 
-禁止改成 GitHub Pages 或其它地址。
+服务器需配置 nginx 反代（见 `deploy/nginx-zhixiongfan.top-stable.conf`）。
