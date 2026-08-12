@@ -139,7 +139,7 @@ extern char **environ;
     if (!isDir) return [[fm attributesOfItemAtPath:path error:nil] fileSize];
     unsigned long long total = 0;
     NSDirectoryEnumerator *en = [fm enumeratorAtPath:path];
-    for (NSString *rel in en) {
+    while ([en nextObject]) {
         NSDictionary *attrs = [en fileAttributes];
         if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) total += [attrs fileSize];
     }
