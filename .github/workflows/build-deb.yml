@@ -9,10 +9,12 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: build-deb
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -318,3 +320,54 @@ jobs:
           path: sileo-site
           if-no-files-found: error
           retention-days: 14
+
+  # GITHUB_TOKEN pushes to master do NOT trigger deploy-apt-pages.yml.
+  # Deploy Pages from this workflow so Sileo URL always gets the new deb.
+  deploy-pages:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - name: Checkout master (published stable/)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Prepare site from stable/
+        run: |
+          set -euo pipefail
+          rm -rf site
+          cp -a stable site
+          rm -f site/Packages.gz site/Packages.bz2 site/Packages.xz site/Packages.lzma site/Packages.zst
+          test -f site/Packages
+          test -f site/Release
+          ls site/debs/com.local.newdevice_*.deb | head -n1 | grep -q .
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>NewDevice</title></head>
+          <body>
+            <h1>NewDevice</h1>
+            <p>Sileo 固定源（只用这一条）：</p>
+            <p><code>https://zhixiongfan2018-web.github.io/ios-newdevice</code></p>
+            <p>域名 zhixiongfan.top/stable 需先配 nginx，否则会超时无法添加。</p>
+          </body>
+          </html>
+          HTML
+          echo "----- Packages -----"
+          cat site/Packages
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        uses: actions/deploy-pages@v4

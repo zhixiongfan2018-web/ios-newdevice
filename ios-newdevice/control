@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-101
+Version: 1.0.0-102
 Architecture: iphoneos-arm64
-Description: Sileo source GitHub Pages (zhixiongfan.top needs nginx first).
+Description: Deploy Sileo source on GitHub Pages from build workflow.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
