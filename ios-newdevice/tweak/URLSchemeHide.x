@@ -13,6 +13,8 @@ static BOOL NDIsJBURLScheme(NSString *scheme) {
             @"cydia", @"sileo", @"zbra", @"zebra", @"filza", @"undecimus",
             @"activator", @"preferences", @"app-prefs", @"dopamine", @"palera1n",
             @"trollstore", @"apple-magnifier", @"santander", @"shadow",
+            @"ellekit", @"substitute", @"ssh", @"mobileterminal", @"newterm",
+            @"crackerxi", @"flex", @"icy", @"installer", @"apt-repo",
         ];
     });
     for (NSString *b in banned) {

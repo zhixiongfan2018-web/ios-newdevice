@@ -219,6 +219,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.DiskCapacity = 0;
     p.PhysicalMemory = 0;
     p.Brightness = -1;
+    p.BatteryLevel = -1;
+    p.ICCID = @"";
     p.AdvertisingTrackingEnabled = YES;
     p.Model = @"";
     p.DeviceName = @"";
@@ -323,6 +325,9 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.DiskCapacity = [NDDeviceCatalog diskBytesForProductType:dev[@"ProductType"]];
     p.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:dev[@"ProductType"]];
     p.Brightness = 0.35f + (arc4random_uniform(50) / 100.0f);
+    p.BatteryLevel = 0.25f + (arc4random_uniform(70) / 100.0f);
+    p.ICCID = [NSString stringWithFormat:@"8901%016llu", ((unsigned long long)arc4random() << 32) | arc4random()];
+    if (p.ICCID.length > 20) p.ICCID = [p.ICCID substringToIndex:20];
     p.AdvertisingTrackingEnabled = YES;
 
     p.Model = dev[@"Model"];
@@ -490,6 +495,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         double b = [d[@"Brightness"] doubleValue];
         if (b > 1.0 && b <= 100.0) d[@"Brightness"] = @(b / 100.0);
     }
+    if (!d[@"ICCID"] && d[@"IntegratedCircuitCardIdentifier"]) d[@"ICCID"] = d[@"IntegratedCircuitCardIdentifier"];
+    if (!d[@"ICCID"] && d[@"SimICCID"]) d[@"ICCID"] = d[@"SimICCID"];
+    if (!d[@"BatteryLevel"] && d[@"Battery"]) d[@"BatteryLevel"] = d[@"Battery"];
+    if (d[@"BatteryLevel"] != nil) {
+        double b = [d[@"BatteryLevel"] doubleValue];
+        if (b > 1.0 && b <= 100.0) d[@"BatteryLevel"] = @(b / 100.0);
+    }
 
     // SystemUptime: either unix boot time or uptime seconds
     if (!d[@"BootTime"] && d[@"SystemUptime"]) {
@@ -559,6 +571,12 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     } else {
         p.Brightness = -1;
     }
+    if (dict[@"BatteryLevel"] != nil) {
+        p.BatteryLevel = [dict[@"BatteryLevel"] floatValue];
+    } else {
+        p.BatteryLevel = -1;
+    }
+    p.ICCID = dict[@"ICCID"] ?: @"";
     p.AdvertisingTrackingEnabled = dict[@"AdvertisingTrackingEnabled"] ? [dict[@"AdvertisingTrackingEnabled"] boolValue] : YES;
 
     p.Model = dict[@"Model"] ?: @"";
@@ -631,6 +649,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"DiskCapacity": @(self.DiskCapacity),
         @"PhysicalMemory": @(self.PhysicalMemory),
         @"Brightness": @(self.Brightness),
+        @"BatteryLevel": @(self.BatteryLevel),
+        @"ICCID": self.ICCID ?: @"",
         @"AdvertisingTrackingEnabled": @(self.AdvertisingTrackingEnabled),
         @"Model": self.Model ?: @"",
         @"DeviceName": self.DeviceName ?: @"",
@@ -666,6 +686,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"DiskSpace": @(self.DiskCapacity),
         @"Memory": @(self.PhysicalMemory),
         @"Brightness": @(self.Brightness >= 0 ? self.Brightness : 0.5),
+        @"BatteryLevel": @(self.BatteryLevel >= 0 ? self.BatteryLevel : 0.6),
+        @"ICCID": self.ICCID ?: @"",
         @"SystemUptime": @(self.BootTime),
         @"Latitude": @(self.Latitude),
         @"Longitude": @(self.Longitude),

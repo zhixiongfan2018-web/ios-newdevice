@@ -108,6 +108,7 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | ifaddrs IP / MAC / DNS | ✅ 多网卡合成 + `getifaddrs` + DNS 深层 |
 | Locale / 语言 | ✅ `en_US` |
 | DeviceToken / OpenUDID / UUID | ✅ APNs 回调 + UserDefaults 键 |
+| Battery / ICCID | ✅ UIDevice 电量 + Gestalt ICCID（非写卡） |
 | canOpenURL 隐藏 | ✅ cydia/sileo/… |
 | dyld 计数 / getenv | ✅ 深度防越狱 |
 | 剪贴板全息 | ✅ 切换时备份/还原（可关） |

@@ -181,6 +181,10 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if (p.OpenUDID.length) {
             map[@"OpenUDID"] = p.OpenUDID;
         }
+        if (p.ICCID.length) {
+            map[@"IntegratedCircuitCardIdentifier"] = p.ICCID;
+            map[@"ICCID"] = p.ICCID;
+        }
         if (p.ProductType.length) {
             map[@"RegulatoryModelNumber"] = p.ProductType;
             map[@"ModelNumber"] = p.ProductType;

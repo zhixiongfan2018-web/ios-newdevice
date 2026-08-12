@@ -130,6 +130,23 @@ local AMG = {
         local res, code = http.request("http://127.0.0.1:8080/cmd?fun=getAllRecordNames&saveFilePath=" .. all_record_file)
         if code == 200 and Check_NewDevice_Result() then return all_record_file end
     end),
+
+    Import_AMG = (function(dir)
+        Check_NewDevice()
+        local q = "importAMGRecords"
+        if dir and #dir > 0 then q = q .. "&dir=" .. dir end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) or 0 end
+        return 0
+    end),
+
+    Export_Faker = (function(dir)
+        Check_NewDevice()
+        local out = dir
+        if not out or #out == 0 then out = userPath() .. "/lua/AMG_Export" end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=exportAMGFaker&dir=" .. out)
+        if code == 200 and Check_NewDevice_Result() then return out end
+    end),
 }
 
 -- example

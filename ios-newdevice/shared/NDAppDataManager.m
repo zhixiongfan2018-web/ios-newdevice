@@ -140,6 +140,11 @@ extern char **environ;
                 NSString *path = [container stringByAppendingPathComponent:sub];
                 [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
             }
+            // Wipe WebKit/WebsiteData trees (WKWebsiteDataStore on-disk)
+            for (NSString *sub in @[@"Library/WebKit", @"Library/Caches/WebKit", @"Library/HTTPStorages"]) {
+                NSString *path = [container stringByAppendingPathComponent:sub];
+                if ([fm fileExistsAtPath:path]) [fm removeItemAtPath:path error:nil];
+            }
         }
 
         // Also clear App Group containers when discoverable

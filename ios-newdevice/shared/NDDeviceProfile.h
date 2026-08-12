@@ -27,6 +27,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) uint64_t DiskCapacity; // bytes
 @property (nonatomic, assign) uint64_t PhysicalMemory; // bytes; 0 = derive from ProductType
 @property (nonatomic, assign) float Brightness; // 0..1; <0 = do not spoof
+@property (nonatomic, assign) float BatteryLevel; // 0..1; <0 = do not spoof
+@property (nonatomic, copy) NSString *ICCID;
 @property (nonatomic, assign) BOOL AdvertisingTrackingEnabled;
 
 @property (nonatomic, copy) NSString *Model;
