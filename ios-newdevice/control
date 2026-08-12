@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-103
+Version: 1.0.0-104
 Architecture: iphoneos-arm64
-Description: Deploy Sileo source on GitHub Pages from build workflow.
+Description: Robust built-in .tar.gz extract for AMG imports (abs paths/pax).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
