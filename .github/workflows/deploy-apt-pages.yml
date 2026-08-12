@@ -54,8 +54,8 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p><code>https://zhixiongfan.top/stable</code></p>
-            <p>本站仅为镜像；官方源以 zhixiongfan.top 为准。</p>
+            <p><code>https://zhixiongfan2018-web.github.io/ios-newdevice</code></p>
+            <p>域名 zhixiongfan.top/stable 需先配 nginx，否则会超时无法添加。</p>
           </body>
           </html>
           HTML

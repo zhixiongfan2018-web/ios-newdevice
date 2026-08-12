@@ -107,9 +107,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Sileo 固定源（无 @）。官方域名；服务器需反代 /stable → GitHub master/stable。
-          # 配置见 deploy/nginx-zhixiongfan.top-stable.conf — 不要改回 jsDelivr。
-          FIXED_SRC='https://zhixiongfan.top/stable'
+          # Sileo 固定源（无 @）— 必须是能直接返回 Packages 的地址。
+          # zhixiongfan.top/stable 在 nginx 未配置前会 302 到 Dial，Sileo 会超时无法添加。
+          # 域名配好后可再切；当前用 GitHub Pages（稳定可加源）。
+          FIXED_SRC='https://zhixiongfan2018-web.github.io/ios-newdevice'
           DEB="$(ls dist/*.deb | head -n1)"
           DEB_NAME="$(basename "$DEB")"
           mkdir -p downloads stable/debs apt/debs
@@ -296,7 +297,7 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p class="box"><code>https://zhixiongfan.top/stable</code></p>
+            <p class="box"><code>https://zhixiongfan2018-web.github.io/ios-newdevice</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>
