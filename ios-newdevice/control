@@ -1,6 +1,6 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-89
+Version: 1.0.0-90
 Architecture: iphoneos-arm64
 Description: Official Sileo source jsDelivr /stable; Media/NewDevice + export-own-data.
 Maintainer: Local Dev
