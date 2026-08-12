@@ -2,6 +2,7 @@
 #import "NDPaths.h"
 #import "NDConfig.h"
 #import "NDRuntimeState.h"
+#import "NDAppDataManager.h"
 #import <notify.h>
 
 @implementation NDRecordStore
@@ -232,6 +233,22 @@
     return [self switchToOriginal:error];
 }
 
+- (BOOL)switchToPrevious:(NSError **)error {
+    NSArray *names = [self allRecordNames];
+    if (!names.count) return [self switchToOriginal:error];
+    NSString *current = [self currentRecordName] ?: @"原始机器";
+    NSUInteger idx = [names indexOfObject:current];
+    NSUInteger start = (idx == NSNotFound || idx == 0) ? (names.count - 1) : (idx - 1);
+    for (NSUInteger n = 0; n < names.count; n++) {
+        NSUInteger i = (start + names.count - n) % names.count;
+        NDDeviceProfile *p = [self profileNamed:names[i]];
+        if (p.enabled || [names[i] isEqualToString:@"原始机器"]) {
+            return [self switchToRecord:names[i] error:error];
+        }
+    }
+    return [self switchToOriginal:error];
+}
+
 - (BOOL)switchToFirst:(NSError **)error {
     NSArray *names = [self allRecordNames];
     for (NSString *name in names) {
@@ -252,9 +269,224 @@
     return YES;
 }
 
+- (NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(NSString *)name error:(NSError **)error {
+    NSDictionary *raw = [NSDictionary dictionaryWithContentsOfFile:path];
+    if (![raw isKindOfClass:[NSDictionary class]]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:20 userInfo:@{NSLocalizedDescriptionKey: @"Unable to read profile plist"}];
+        return nil;
+    }
+    if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:raw]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:24 userInfo:@{NSLocalizedDescriptionKey: @"AMG faker.plist is encrypted on disk; identity values cannot be imported. Holographic app data can still be imported from the record folder."}];
+        return nil;
+    }
+    if (![NDDeviceProfile dictionaryHasImportableIdentity:raw] && !raw[@"Model"] && !raw[@"ProductType"]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:21 userInfo:@{NSLocalizedDescriptionKey: @"Plist has no identity fields"}];
+        return nil;
+    }
+    NDDeviceProfile *p = [NDDeviceProfile profileFromDictionary:raw];
+    if (!p) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:20 userInfo:@{NSLocalizedDescriptionKey: @"Unable to parse profile plist"}];
+        return nil;
+    }
+    if (name.length) p.name = name;
+    if (!p.name.length || [p.name isEqualToString:@"unnamed"]) {
+        p.name = [[path lastPathComponent] stringByDeletingPathExtension];
+    }
+    if ([p.name isEqualToString:@"原始机器"] || [p.name isEqualToString:@"config"] || [p.name isEqualToString:@"settings"]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:22 userInfo:@{NSLocalizedDescriptionKey: @"Skipped reserved name"}];
+        return nil;
+    }
+    if ([self profileNamed:p.name]) {
+        NSString *base = p.name;
+        NSInteger suffix = 2;
+        while ([self profileNamed:[NSString stringWithFormat:@"%@-%ld", base, (long)suffix]]) {
+            suffix++;
+        }
+        p.name = [NSString stringWithFormat:@"%@-%ld", base, (long)suffix];
+    }
+    if (![self saveProfile:p error:error]) return nil;
+    return p;
+}
+
+- (NSString *)uniqueRecordName:(NSString *)preferred {
+    NSString *base = preferred.length ? preferred : [[NSDate date] description];
+    if ([base isEqualToString:@"原始机器"] || [base isEqualToString:@"config"] || [base isEqualToString:@"settings"]) {
+        base = [base stringByAppendingString:@"-import"];
+    }
+    if (![self profileNamed:base]) return base;
+    NSInteger suffix = 2;
+    while ([self profileNamed:[NSString stringWithFormat:@"%@-%ld", base, (long)suffix]]) {
+        suffix++;
+    }
+    return [NSString stringWithFormat:@"%@-%ld", base, (long)suffix];
+}
+
+- (void)mergeTargetApps:(NSArray *)apps {
+    if (![apps isKindOfClass:[NSArray class]] || !apps.count) return;
+    NDConfig *cfg = [NDConfig shared];
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+    for (id item in apps) {
+        if ([item isKindOfClass:[NSString class]] && [item length]) [set addObject:item];
+    }
+    cfg.targetApps = set.array;
+    [cfg save];
+}
+
+- (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError **)error {
+    if (!dir.length) dir = @"/var/mobile/AMG_tar";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:23 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"AMG directory not found: %@", dir]}];
+        return 0;
+    }
+
+    static NSSet *metaPlists;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        metaPlists = [NSSet setWithArray:@[
+            @"description.plist", @"selectapp.plist", @"ifaddrs.plist", @"info.plist",
+            @"config.plist", @"settings.plist"
+        ]];
+    });
+
+    NSUInteger imported = 0;
+    NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *entry in entries) {
+        if ([entry hasPrefix:@"."]) continue;
+        NSString *full = [dir stringByAppendingPathComponent:entry];
+        BOOL entryIsDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&entryIsDir];
+
+        if (!entryIsDir) {
+            if (![[entry pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
+            if ([metaPlists containsObject:entry.lowercaseString]) continue;
+            if ([self importProfileAtPath:full preferredName:[entry stringByDeletingPathExtension] error:nil]) {
+                imported++;
+            }
+            continue;
+        }
+
+        NSString *recordName = entry;
+        NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
+        if ([desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
+            recordName = desc[@"title"];
+        }
+
+        NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+        NSString *faker = [full stringByAppendingPathComponent:@"faker.plist"];
+        if ([fm fileExistsAtPath:faker]) [candidates addObject:faker];
+        NSString *profile = [full stringByAppendingPathComponent:@"profile.plist"];
+        if ([fm fileExistsAtPath:profile]) [candidates addObject:profile];
+        NSArray *inner = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+        for (NSString *f in inner) {
+            if (![[f pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
+            if ([metaPlists containsObject:f.lowercaseString]) continue;
+            if ([f.lowercaseString isEqualToString:@"faker.plist"] || [f.lowercaseString isEqualToString:@"profile.plist"]) continue;
+            NSString *p = [full stringByAppendingPathComponent:f];
+            if (![candidates containsObject:p]) [candidates addObject:p];
+        }
+
+        NDDeviceProfile *saved = nil;
+        BOOL fakerEncrypted = NO;
+        for (NSString *plistPath in candidates) {
+            NSDictionary *raw = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+            if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:raw]) {
+                fakerEncrypted = YES;
+                continue;
+            }
+            saved = [self importProfileAtPath:plistPath preferredName:recordName error:nil];
+            if (saved) break;
+        }
+
+        if (!saved) {
+            NSString *unique = [self uniqueRecordName:recordName];
+            NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:unique preferredModel:nil preferredSystem:nil];
+            if ([self saveProfile:fresh error:nil]) {
+                saved = fresh;
+                NSString *note = fakerEncrypted
+                    ? @"faker.plist here is AMG at-rest ciphertext (typical under /var/mobile/AMG). Do not decrypt — use AMG「导出」into /var/mobile/AMG_tar, or AMG.Get_Param() / NewDevice plaintext export. Holographic app data was still imported; identity was randomized."
+                    : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
+                [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
+                      atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            }
+        }
+        if (!saved) continue;
+
+        imported++;
+
+        id selectApps = [NSArray arrayWithContentsOfFile:[full stringByAppendingPathComponent:@"selectApp.plist"]];
+        if (![selectApps isKindOfClass:[NSArray class]]) {
+            NSDictionary *selectDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"selectApp.plist"]];
+            if ([selectDict[@"apps"] isKindOfClass:[NSArray class]]) selectApps = selectDict[@"apps"];
+        }
+        // description.appName may hold bundle ids or display names; merge string-looking bids
+        NSDictionary *descDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
+        NSMutableArray *toMerge = [NSMutableArray array];
+        if ([selectApps isKindOfClass:[NSArray class]]) [toMerge addObjectsFromArray:selectApps];
+        if ([descDict[@"appName"] isKindOfClass:[NSArray class]]) {
+            for (id item in descDict[@"appName"]) {
+                if ([item isKindOfClass:[NSString class]] && [item containsString:@"."]) [toMerge addObject:item];
+            }
+        }
+        if (toMerge.count) [self mergeTargetApps:toMerge];
+
+        // Side-copy metadata; skip ciphertext faker (identity already saved as profile.plist)
+        for (NSString *side in @[@"ifaddrs.plist", @"description.plist", @"selectApp.plist"]) {
+            NSString *src = [full stringByAppendingPathComponent:side];
+            if (![fm fileExistsAtPath:src]) continue;
+            NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:side];
+            [fm removeItemAtPath:dst error:nil];
+            [fm copyItemAtPath:src toPath:dst error:nil];
+        }
+        NSString *fakerSrc = [full stringByAppendingPathComponent:@"faker.plist"];
+        if ([fm fileExistsAtPath:fakerSrc]) {
+            NSDictionary *fakerRaw = [NSDictionary dictionaryWithContentsOfFile:fakerSrc];
+            if (![NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:fakerRaw]) {
+                NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"faker.plist"];
+                [fm removeItemAtPath:dst error:nil];
+                [fm copyItemAtPath:fakerSrc toPath:dst error:nil];
+            }
+        }
+        NSString *pbSrc = [full stringByAppendingPathComponent:@"Pasteboard"];
+        if ([fm fileExistsAtPath:pbSrc]) {
+            NSString *pbDst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"Pasteboard"];
+            [fm removeItemAtPath:pbDst error:nil];
+            [fm copyItemAtPath:pbSrc toPath:pbDst error:nil];
+        }
+
+        [[NDAppDataManager shared] importAMGHolographicFromDirectory:full intoRecord:saved.name];
+        // Merge apps discovered from holographic folders under Records/<name>/apps/
+        NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
+        NSArray *holoBids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        if (holoBids.count) [self mergeTargetApps:holoBids];
+
+        // Keychain: stage only during holographic import. Live restore happens on record switch
+        // via restoreApps → restoreKeychainHints (avoids multi-record import clobbering Keychain).
+    }
+    if (imported) [self notifyReload];
+    return imported;
+}
+
 - (void)writeResultCode:(NSInteger)code {
     [NDPaths ensureDirectories];
-    [[NSString stringWithFormat:@"%ld", (long)code] writeToFile:[NDPaths resultFilePath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSString *value = [NSString stringWithFormat:@"%ld", (long)code];
+    NSArray<NSString *> *paths = @[
+        [NDPaths resultFilePath],
+        // AMG drop-in scripts poll /var/mobile/amgResult.txt
+        @"/var/mobile/amgResult.txt",
+        [[NDPaths jbPrefix] stringByAppendingPathComponent:@"/var/mobile/amgResult.txt"],
+        @"/var/mobile/newdeviceResult.txt",
+    ];
+    NSMutableSet *unique = [NSMutableSet set];
+    for (NSString *path in paths) {
+        if (!path.length || [unique containsObject:path]) continue;
+        [unique addObject:path];
+        NSString *dir = [path stringByDeletingLastPathComponent];
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        [value writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [NDPaths makePathWorldReadable:path];
+    }
 }
 
 - (void)notifyReload {

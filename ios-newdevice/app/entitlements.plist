@@ -18,5 +18,13 @@
 	<true/>
 	<key>com.apple.private.skip-library-validation</key>
 	<true/>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>*</string>
+	</array>
+	<key>application-identifier</key>
+	<string>*</string>
+	<key>com.apple.token</key>
+	<true/>
 </dict>
 </plist>

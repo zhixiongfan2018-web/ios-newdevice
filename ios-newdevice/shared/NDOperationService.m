@@ -1,5 +1,6 @@
 #import "NDOperationService.h"
 #import "NDRecordStore.h"
+#import "NDRecordStore+ImportExport.h"
 #import "NDConfig.h"
 #import "NDAppDataManager.h"
 #import "NDAirplane.h"
@@ -22,10 +23,13 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         set = [NSSet setWithArray:@[
-            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"setRecord",
+            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"prevRecord", @"previousRecord", @"setRecord",
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
+            @"clearAppData", @"cleanApps", @"importAMGRecords",
+            @"importIGrimace", @"importAWZ", @"importAMGMedia",
+            @"exportAMGMedia", @"slimRecord",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -52,6 +56,19 @@
         }
     } else if (apps.count) {
         [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+    }
+
+    // AMG-style pasteboard holographic: always snapshot outgoing record when enabled
+    if (cfg.clearPasteboardOnSwitch) {
+        NDAppDataManager *adm = [NDAppDataManager shared];
+        if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+            [adm backupPasteboardToRecord:previous];
+        }
+        if ([current isEqualToString:@"原始机器"]) {
+            [adm clearGeneralPasteboard];
+        } else {
+            [adm restorePasteboardFromRecord:current];
+        }
     }
     if (cfg.smartAirplane) {
         [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
@@ -117,6 +134,26 @@
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(cur, success ? 200 : 500);
             }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"prevRecord"] || [fun isEqualToString:@"previousRecord"]) {
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                BOOL success = [[NDRecordStore shared] switchToPrevious:&err];
+                NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps];
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(cur, success ? 200 : 500);
+            }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"getRecordCount"]) {
+            NSUInteger count = [[NDRecordStore shared] allRecordNames].count;
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)count];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
             return;
         }
 
@@ -212,13 +249,32 @@
             return;
         }
 
+        if ([fun isEqualToString:@"getAMGFaker"] || [fun isEqualToString:@"exportAMGFaker"]) {
+            NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+            NSString *dir = query[@"dir"] ?: query[@"saveFilePath"];
+            if (p && dir.length) {
+                [p writeAMGFakerToDirectory:dir error:&error];
+                NSString *ifaSrc = [NDPaths ifaddrsPathForRecord:p.name];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:ifaSrc]) {
+                    [[NSFileManager defaultManager] copyItemAtPath:ifaSrc toPath:[dir stringByAppendingPathComponent:@"ifaddrs.plist"] error:nil];
+                }
+                NSArray *apps = [NDConfig shared].targetApps ?: @[];
+                [apps writeToFile:[dir stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+            }
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toAMGFakerDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
+            [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
+            done(body ?: @"", p ? 200 : 500);
+            return;
+        }
+
         if ([fun isEqualToString:@"getRecordParam"]) {
             NSString *name = query[@"recordName"] ?: @"";
             NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) [p writeToPath:savePath error:&error];
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
             [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
-            done(name, p ? 200 : 500);
+            done(body ?: @"", p ? 200 : 500);
             return;
         }
 
@@ -239,6 +295,74 @@
             }
             [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
             done(@"", ok ? 200 : 500);
+            return;
+        }
+
+        // AMG-style: clear target apps without generating a new identity
+        if ([fun isEqualToString:@"clearAppData"] || [fun isEqualToString:@"cleanApps"]) {
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                (void)previousRecord;
+                NSError *err = nil;
+                BOOL success = [[NDAppDataManager shared] clearDataForApps:apps error:&err];
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(success ? @"cleared" : @"", success ? 200 : 500);
+            }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"importAMGRecords"]) {
+            NSString *dir = query[@"dir"] ?: [NDRecordStore resolvedAMGImportPath];
+            NSError *err = nil;
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"importIGrimace"] || [fun isEqualToString:@"importAWZ"] || [fun isEqualToString:@"importAMGMedia"]) {
+            NSString *kind = @"AMG";
+            NSString *fallback = [NDRecordStore resolvedAMGImportPath];
+            if ([fun isEqualToString:@"importIGrimace"]) {
+                kind = @"iGrimace";
+                fallback = [NDRecordStore iGrimaceImportPath];
+            } else if ([fun isEqualToString:@"importAWZ"]) {
+                kind = @"AWZ";
+                fallback = [NDRecordStore awzImportPath];
+            }
+            NSString *dir = query[@"dir"] ?: fallback;
+            NSError *err = nil;
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:dir kind:kind importKeychain:kc error:&err];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"exportAMGMedia"]) {
+            NSString *dir = query[@"dir"] ?: [NDRecordStore amgTarPath];
+            BOOL slim = query[@"slim"] ? [query[@"slim"] boolValue] : [NDConfig shared].slimExportStripMedia;
+            NSError *err = nil;
+            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];
+            body = [NSString stringWithFormat:@"%lu\n%@", (unsigned long)n, dir];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"slimRecord"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName];
+            if (!name.length || [name isEqualToString:@"原始机器"]) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"no record", 400);
+                return;
+            }
+            NSUInteger n = [[NDAppDataManager shared] slimMediaInRecord:name];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
             return;
         }
 

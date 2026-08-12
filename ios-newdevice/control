@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0
+Version: 1.0.0-58
 Architecture: iphoneos-arm64
-Description: One-tap new device identity (Sileo-safe build).
+Description: Full-chain audit fixes: Keychain staging, config flags, content-aware AMG_tar.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

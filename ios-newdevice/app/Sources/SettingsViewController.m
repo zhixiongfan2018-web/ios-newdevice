@@ -11,6 +11,8 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     NDSettingRandomLocation,
     NDSettingSmartOffset,
     NDSettingSmartAirplane,
+    NDSettingAllowIPad,
+    NDSettingClearPasteboard,
     NDSettingJBBasic,
     NDSettingJBDeep,
     NDSettingHolo,
@@ -28,6 +30,8 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     [super viewDidLoad];
     self.title = @"设置";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     [[NDConfig shared] reload];
 }
@@ -54,7 +58,7 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
         cell.detailTextLabel.font = [NDTheme bodyFont];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         cell.detailTextLabel.numberOfLines = 0;
-        cell.detailTextLabel.text = @"深度防越狱可能导致目标 App 闪退。\n脚本 API：http://127.0.0.1:8080/cmd?fun=newRecord";
+        cell.detailTextLabel.text = @"深度防越狱可能闪退。\nAPI：http://127.0.0.1:8080/cmd?fun=newRecord\n额外：prevRecord / clearAppData / getRecordCount";
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         return cell;
     }
@@ -88,15 +92,18 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     NDConfig *c = [NDConfig shared];
     NSArray *titles = @[
         @"伪装设备机型", @"伪装系统版本", @"伪装运营商", @"伪装定位", @"随机位置",
-        @"智能偏移位置", @"智能飞行模式", @"基础防越狱检测", @"深度防越狱检测", @"全息备份"
+        @"智能偏移位置", @"智能飞行模式", @"允许伪装 iPad", @"剪贴板全息（切换备份/还原）",
+        @"基础防越狱检测", @"深度防越狱检测", @"全息备份"
     ];
     NSArray *subs = @[
-        @"ProductType / hw.machine", @"UIDevice systemVersion", @"运营商名与 MCC/MNC", @"CLLocation 坐标", @"一键新机时随机坐标",
-        @"在基准点附近微调", @"切换身份时开关飞行", @"隐藏常见越狱路径", @"更激进，可能闪退", @"按记录备份目标 App 数据"
+        @"ProductType / 分辨率 / 内存", @"UIDevice systemVersion", @"运营商 / ISO us", @"CLLocation + 时区", @"一键新机随机美国城市",
+        @"在基准点附近微调", @"切换身份时开关飞行", @"随机池包含 iPad（默认关）", @"一键新机/切换记录时清空",
+        @"隐藏路径 + URL Scheme", @"dyld / getenv / fork", @"按记录备份目标 App 数据"
     ];
     NSArray *values = @[
         @(c.fakeDeviceModel), @(c.fakeSystemVer), @(c.fakeCarrier), @(c.spoofLocation), @(c.randomLocation),
-        @(c.smartLocationOffset), @(c.smartAirplane), @(c.jailbreakHideBasic), @(c.jailbreakHideDeep), @(c.holographicBackup)
+        @(c.smartLocationOffset), @(c.smartAirplane), @(c.allowIPadSpoof), @(c.clearPasteboardOnSwitch),
+        @(c.jailbreakHideBasic), @(c.jailbreakHideDeep), @(c.holographicBackup)
     ];
     cell.textLabel.font = [NDTheme headlineFont];
     cell.textLabel.text = titles[indexPath.row];
@@ -118,6 +125,8 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
         case NDSettingRandomLocation: c.randomLocation = sw.on; break;
         case NDSettingSmartOffset: c.smartLocationOffset = sw.on; break;
         case NDSettingSmartAirplane: c.smartAirplane = sw.on; break;
+        case NDSettingAllowIPad: c.allowIPadSpoof = sw.on; break;
+        case NDSettingClearPasteboard: c.clearPasteboardOnSwitch = sw.on; break;
         case NDSettingJBBasic: c.jailbreakHideBasic = sw.on; break;
         case NDSettingJBDeep: c.jailbreakHideDeep = sw.on; break;
         case NDSettingHolo: c.holographicBackup = sw.on; break;

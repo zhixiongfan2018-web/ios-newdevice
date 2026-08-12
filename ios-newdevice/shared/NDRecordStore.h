@@ -23,8 +23,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (NDDeviceProfile *)createNewRecordAndActivate:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToOriginal:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToNext:(NSError * _Nullable * _Nullable)error;
+- (BOOL)switchToPrevious:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToFirst:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToRecord:(NSString *)name error:(NSError * _Nullable * _Nullable)error;
+
+/// Import AMG (or compatible) identity plists. Returns number imported.
+- (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
+- (nullable NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(nullable NSString *)name error:(NSError * _Nullable * _Nullable)error;
 
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;
