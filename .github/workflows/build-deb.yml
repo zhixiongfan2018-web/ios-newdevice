@@ -103,6 +103,8 @@ jobs:
       # Run on feature branches too so fixes reach the CDN without waiting for a manual master merge.
       - name: Publish deb to downloads/ + stable/ (fixed jsDelivr source)
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Sileo 固定源（无 @）。禁止改成 Pages 或其它地址。
@@ -211,18 +213,23 @@ jobs:
             git commit -m "Update stable Sileo source ${FIXED_SRC}"
             git push origin HEAD:master
           fi
-          # Restore feature branch pointer for subsequent steps
+          # Restore feature branch; keep dist/ from stash, drop published tree dirt
           git reset --hard
           git clean -fd
           git checkout -f "${GITHUB_REF_NAME}" || git checkout -f -
           git stash pop || true
+          git checkout -- stable apt downloads 2>/dev/null || true
+          git clean -fd stable apt downloads dist >/dev/null 2>&1 || true
+          # restore dist deb if clean removed it — copy back from published snapshot
+          mkdir -p dist
+          if ! ls dist/*.deb >/dev/null 2>&1; then
+            cp "/tmp/nd-pub-dl/${DEB_NAME}" "dist/${DEB_NAME}" || cp "downloads/${DEB_NAME}" "dist/${DEB_NAME}" || true
+          fi
           git fetch origin master
-          git rev-parse origin/master >/dev/null
+          MASTER_SHA="$(git rev-parse origin/master)"
 
           # jsDelivr 无 @ 跟随 latest GitHub Release（semver）。必须比旧 tag 更大。
-          # 用 run_number，避免 v1.0.0-N 被当成预发布而排在 v1.0.83 后面。
           TAG="v1.0.$(( ${{ github.run_number }} ))"
-          MASTER_SHA="$(git rev-parse origin/master)"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG exists — retarget to master ${MASTER_SHA}"
             gh release delete "$TAG" --yes || true
