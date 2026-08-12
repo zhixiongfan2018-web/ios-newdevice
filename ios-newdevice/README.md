@@ -113,14 +113,31 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | dyld 计数 / getenv | ✅ 深度防越狱 |
 | 剪贴板全息 | ✅ 切换时备份/还原（可关） |
 | Keychain 全息 | ✅ generic/internet/证书 DER（私钥仍可能拒） |
-| 记录导入导出 | ✅ AMG 目录导入 + 明文 faker 导出 |
+| 记录导入导出 | ✅ AMG Media + `/var/mobile/AMG` + 明文 faker 导出 |
+| 同时导入 Keychain | ✅ 工具页开关（默认开） |
+| 导入 iGrimace / AWZ | ✅ `/var/mobile/iGrimace`、`/var/mobile/importdata` |
+| 瘦身（清图片/视频） | ✅ 立刻瘦身 + 导出时自动瘦身（长按切换） |
+| 修复中文输入 / 国行联网 / 注销 | ✅ 工具页 |
 | 美国运营商 / GPS / 时区 | ✅ |
 | 结果文件 `amgResult.txt` | ✅ 同步写入 |
 | `prevRecord` / `getRecordCount` | ✅ |
 
 **边界**：modem NVRAM IMEI、Keychain 私钥材料、密文 AMG `faker.plist` 解密仍无法保证。
 
-额外 API：`clearAppData` / `cleanApps`（只清目标 App，不换身份）；`importAMGRecords`（从 `/var/mobile/AMG` 导入身份）。
+额外 API：`clearAppData` / `cleanApps`；`importAMGRecords` / `importAMGMedia` / `importIGrimace` / `importAWZ`；`exportAMGMedia`；`slimRecord`。
+
+### 工具页（对齐 AMG）
+
+NewDevice → **工具**：
+
+| 项 | 默认路径 |
+|---|---|
+| 导入其他数据（iGrimace） | `/var/mobile/iGrimace` |
+| 导入 AWZ 数据 | `/var/mobile/importdata` |
+| 同时导入 Keychain | 开关，导入时还原 `keychain-full.plist` |
+| 导入 AMG 数据 | `/var/mobile/Media/AMG/import`（不存在则回退 `/var/mobile/AMG`） |
+| 导出 AMG 数据 | `/var/mobile/Media/AMG/export` |
+| 瘦身 | 点按瘦身当前记录；长按切换「导出自动清除媒体」 |
 
 ### 从 AMG 导入数据
 
@@ -138,13 +155,13 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 
 导入行为：
 
-1. 把导出放到设备 `/var/mobile/AMG/`（或解压后的同级目录）。  
-2. NewDevice → **记录** → **导入** → **从 AMG 目录导入**。  
+1. 把导出放到 `/var/mobile/Media/AMG/import/` 或 `/var/mobile/AMG/`。  
+2. NewDevice → **工具** → **导入 AMG 数据**（或记录页旧入口）。  
 3. 优先读 `faker.plist`；明文则映射 `BlueAddress`/`DiskSpace`/`SystemUptime`/`Memory` 等别名。  
 4. **密文 faker**：生成随机身份，仍导入全息 App + AppGroup，并写 `amg-import-note.txt`。  
-5. `selectApp.plist` 会合并进「应用」目标列表；切换记录时会还原全息与 App Group。
+5. `selectApp.plist` 会合并进「应用」目标列表；「同时导入 Keychain」开启时尝试还原钥匙串。
 
-脚本：`http://127.0.0.1:8080/cmd?fun=importAMGRecords`（可选 `&dir=/path`）。
+脚本：`http://127.0.0.1:8080/cmd?fun=importAMGMedia`（可选 `&dir=`、`&keychain=1`）；导出 `fun=exportAMGMedia`；瘦身 `fun=slimRecord`。
 
 **仍弱于 AMG / 待优化**：modem NVRAM 级 IMEI、Keychain 私钥重放、密文 faker 解密（需 AMG 运行时密钥）。
 

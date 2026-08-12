@@ -34,6 +34,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
 
+/// Strip image/video files under a holographic apps backup (AMG 瘦身).
+- (NSUInteger)slimMediaInRecord:(NSString *)recordName;
+- (NSUInteger)slimMediaInDirectory:(NSString *)root;
+
 - (nullable NSString *)containerPathForBundleId:(NSString *)bundleId;
 
 @end

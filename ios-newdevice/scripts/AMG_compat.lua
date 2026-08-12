@@ -140,6 +140,48 @@ local AMG = {
         return 0
     end),
 
+    -- Media/AMG/import · iGrimace · AWZ（与 App「工具」页一致）
+    Import_AMG_Media = (function(dir)
+        Check_NewDevice()
+        local q = "importAMGMedia"
+        if dir and #dir > 0 then q = q .. "&dir=" .. dir end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) or 0 end
+        return 0
+    end),
+    Import_IGrimace = (function(dir)
+        Check_NewDevice()
+        local q = "importIGrimace"
+        if dir and #dir > 0 then q = q .. "&dir=" .. dir end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) or 0 end
+        return 0
+    end),
+    Import_AWZ = (function(dir)
+        Check_NewDevice()
+        local q = "importAWZ"
+        if dir and #dir > 0 then q = q .. "&dir=" .. dir end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) or 0 end
+        return 0
+    end),
+    Export_AMG_Media = (function(dir, slim)
+        Check_NewDevice()
+        local q = "exportAMGMedia"
+        if dir and #dir > 0 then q = q .. "&dir=" .. dir end
+        if slim ~= nil then q = q .. "&slim=" .. (slim and "1" or "0") end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return res end
+    end),
+    Slim = (function(record_name)
+        Check_NewDevice()
+        local q = "slimRecord"
+        if record_name and #record_name > 0 then q = q .. "&recordName=" .. record_name end
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=" .. q)
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) or 0 end
+        return 0
+    end),
+
     Export_Faker = (function(dir)
         Check_NewDevice()
         local out = dir

@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-55
+Version: 1.0.0-56
 Architecture: iphoneos-arm64
-Description: Battery/ICCID, WebKit wipe, locale/token, AMG faker export.
+Description: AMG Tools tab: iGrimace/AWZ/AMG Media import-export, Keychain toggle, slim.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

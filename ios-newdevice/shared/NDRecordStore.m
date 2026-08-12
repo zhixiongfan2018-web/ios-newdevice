@@ -437,6 +437,13 @@
         }
 
         [[NDAppDataManager shared] importAMGHolographicFromDirectory:full intoRecord:saved.name];
+        if ([NDConfig shared].importKeychainWithData) {
+            NSArray *apps = [NDConfig shared].targetApps ?: @[];
+            if (!apps.count && [selectApps isKindOfClass:[NSArray class]]) apps = selectApps;
+            if (apps.count) {
+                [[NDAppDataManager shared] restoreKeychainHintsForApps:apps fromRecord:saved.name];
+            }
+        }
     }
     if (imported) [self notifyReload];
     return imported;

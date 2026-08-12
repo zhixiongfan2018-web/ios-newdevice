@@ -1,5 +1,6 @@
 #import "NDOperationService.h"
 #import "NDRecordStore.h"
+#import "NDRecordStore+ImportExport.h"
 #import "NDConfig.h"
 #import "NDAppDataManager.h"
 #import "NDAirplane.h"
@@ -27,6 +28,8 @@
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
             @"clearAppData", @"cleanApps", @"importAMGRecords",
+            @"importIGrimace", @"importAWZ", @"importAMGMedia",
+            @"exportAMGMedia", @"slimRecord",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -310,10 +313,62 @@
         if ([fun isEqualToString:@"importAMGRecords"]) {
             NSString *dir = query[@"dir"] ?: @"/var/mobile/AMG";
             NSError *err = nil;
-            NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir error:&err];
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
             body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
             [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
             done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"importIGrimace"] || [fun isEqualToString:@"importAWZ"] || [fun isEqualToString:@"importAMGMedia"]) {
+            NSString *kind = @"AMG";
+            NSString *fallback = [NDRecordStore amgMediaImportPath];
+            if ([fun isEqualToString:@"importIGrimace"]) {
+                kind = @"iGrimace";
+                fallback = [NDRecordStore iGrimaceImportPath];
+            } else if ([fun isEqualToString:@"importAWZ"]) {
+                kind = @"AWZ";
+                fallback = [NDRecordStore awzImportPath];
+            }
+            NSString *dir = query[@"dir"] ?: fallback;
+            if ([fun isEqualToString:@"importAMGMedia"]) {
+                BOOL isDir = NO;
+                if (![[NSFileManager defaultManager] fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
+                    dir = @"/var/mobile/AMG";
+                }
+            }
+            NSError *err = nil;
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:dir kind:kind importKeychain:kc error:&err];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"exportAMGMedia"]) {
+            NSString *dir = query[@"dir"] ?: [NDRecordStore amgMediaExportPath];
+            BOOL slim = query[@"slim"] ? [query[@"slim"] boolValue] : [NDConfig shared].slimExportStripMedia;
+            NSError *err = nil;
+            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];
+            body = [NSString stringWithFormat:@"%lu\n%@", (unsigned long)n, dir];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"slimRecord"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName];
+            if (!name.length || [name isEqualToString:@"原始机器"]) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"no record", 400);
+                return;
+            }
+            NSUInteger n = [[NDAppDataManager shared] slimMediaInRecord:name];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
             return;
         }
 

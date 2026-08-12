@@ -30,6 +30,8 @@
     self.holographicBackup = YES;
     self.allowIPadSpoof = NO;
     self.clearPasteboardOnSwitch = YES;
+    self.importKeychainWithData = YES;
+    self.slimExportStripMedia = NO;
     self.targetApps = @[];
     self.preferredModels = @[];
     self.preferredSystems = @[];
@@ -48,6 +50,8 @@
     self.holographicBackup = dict[@"holographicBackup"] ? [dict[@"holographicBackup"] boolValue] : YES;
     self.allowIPadSpoof = dict[@"allowIPadSpoof"] ? [dict[@"allowIPadSpoof"] boolValue] : NO;
     self.clearPasteboardOnSwitch = dict[@"clearPasteboardOnSwitch"] ? [dict[@"clearPasteboardOnSwitch"] boolValue] : YES;
+    self.importKeychainWithData = dict[@"importKeychainWithData"] ? [dict[@"importKeychainWithData"] boolValue] : YES;
+    self.slimExportStripMedia = dict[@"slimExportStripMedia"] ? [dict[@"slimExportStripMedia"] boolValue] : NO;
     self.targetApps = dict[@"targetApps"] ?: @[];
     self.preferredModels = dict[@"preferredModels"] ?: @[];
     self.preferredSystems = dict[@"preferredSystems"] ?: @[];
@@ -93,6 +97,8 @@
         @"holographicBackup": @(self.holographicBackup),
         @"allowIPadSpoof": @(self.allowIPadSpoof),
         @"clearPasteboardOnSwitch": @(self.clearPasteboardOnSwitch),
+        @"importKeychainWithData": @(self.importKeychainWithData),
+        @"slimExportStripMedia": @(self.slimExportStripMedia),
         @"targetApps": self.targetApps ?: @[],
         @"preferredModels": self.preferredModels ?: @[],
         @"preferredSystems": self.preferredSystems ?: @[],

@@ -676,4 +676,31 @@ extern char **environ;
     [self clearGeneralPasteboard];
 }
 
+- (NSUInteger)slimMediaInRecord:(NSString *)recordName {
+    return [self slimMediaInDirectory:[NDPaths recordDir:recordName]];
+}
+
+- (NSUInteger)slimMediaInDirectory:(NSString *)root {
+    if (!root.length) return 0;
+    static NSSet *exts;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        exts = [NSSet setWithArray:@[
+            @"jpg", @"jpeg", @"png", @"gif", @"heic", @"heif", @"webp", @"bmp", @"tiff", @"tif",
+            @"mov", @"mp4", @"m4v", @"avi", @"mkv", @"3gp", @"webm"
+        ]];
+    });
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+    NSUInteger removed = 0;
+    NSString *rel = nil;
+    while ((rel = [en nextObject])) {
+        NSString *ext = rel.pathExtension.lowercaseString;
+        if (![exts containsObject:ext]) continue;
+        NSString *full = [root stringByAppendingPathComponent:rel];
+        if ([fm removeItemAtPath:full error:nil]) removed++;
+    }
+    return removed;
+}
+
 @end
