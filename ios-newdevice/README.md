@@ -101,9 +101,16 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | 脚本 API `8080/cmd` | ✅（含完整 `AMG.*` 兼容表） |
 | Serial / UDID / MAC / IDFA | ✅ |
 | **IMEI / SSID / BSSID** | ✅ 用户态（非基带） |
-| iPad 机型池 | ✅ |
+| iPad 机型池 | ✅（设置里「允许伪装 iPad」） |
+| 分辨率 / 内存 / 磁盘 | ✅ UIScreen + Gestalt / sysctl |
+| DeviceColor / DeviceClass | ✅ |
+| canOpenURL 隐藏 | ✅ cydia/sileo/… |
+| dyld 计数 / getenv | ✅ 深度防越狱 |
+| 剪贴板清空 | ✅ 切换记录时 |
+| 记录导入导出 | ✅ 记录页 |
 | 美国运营商 / GPS / 时区 | ✅ |
 | 结果文件 `amgResult.txt` | ✅ 同步写入 |
+| `prevRecord` / `getRecordCount` | ✅ |
 
 **边界**：基带级 IMEI、部分系统进程内标识、完整 Keychain 跨组迁移无法保证 100%。全息 Keychain 仅为可枚举 generic password 的尽力备份。
 

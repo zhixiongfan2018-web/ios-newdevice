@@ -22,7 +22,7 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         set = [NSSet setWithArray:@[
-            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"setRecord",
+            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"prevRecord", @"previousRecord", @"setRecord",
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
@@ -53,6 +53,21 @@
         }
     } else if (apps.count) {
         [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+    }
+    if (cfg.clearPasteboardOnSwitch) {
+        Class PB = NSClassFromString(@"UIPasteboard");
+        if (PB && [PB respondsToSelector:NSSelectorFromString(@"generalPasteboard")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id board = [PB performSelector:NSSelectorFromString(@"generalPasteboard")];
+#pragma clang diagnostic pop
+            if (board && [board respondsToSelector:NSSelectorFromString(@"setItems:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [board performSelector:NSSelectorFromString(@"setItems:") withObject:@[]];
+#pragma clang diagnostic pop
+            }
+        }
     }
     if (cfg.smartAirplane) {
         [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
@@ -118,6 +133,26 @@
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(cur, success ? 200 : 500);
             }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"prevRecord"] || [fun isEqualToString:@"previousRecord"]) {
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                BOOL success = [[NDRecordStore shared] switchToPrevious:&err];
+                NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps];
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(cur, success ? 200 : 500);
+            }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"getRecordCount"]) {
+            NSUInteger count = [[NDRecordStore shared] allRecordNames].count;
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)count];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
             return;
         }
 

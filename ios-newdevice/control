@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-48
+Version: 1.0.0-49
 Architecture: iphoneos-arm64
-Description: One-tap new device identity (AMG-aligned). US pools, IMEI/SSID, strong clear, sandbox runtime.
+Description: AMG-aligned new-device suite. US pools, IMEI/SSID/screen/mem, JB URL hide, strong clear.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

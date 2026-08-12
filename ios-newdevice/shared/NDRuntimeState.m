@@ -20,6 +20,8 @@
         @"jailbreakHideBasic": @(config.jailbreakHideBasic),
         @"jailbreakHideDeep": @(config.jailbreakHideDeep),
         @"holographicBackup": @(config.holographicBackup),
+        @"allowIPadSpoof": @(config.allowIPadSpoof),
+        @"clearPasteboardOnSwitch": @(config.clearPasteboardOnSwitch),
         @"targetApps": config.targetApps ?: @[],
         @"currentRecord": currentName ?: @"",
     } mutableCopy];

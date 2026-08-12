@@ -1,5 +1,7 @@
 #import "NDDeviceProfile.h"
 #import "NDDeviceCatalog.h"
+#import "NDDeviceCatalog+Metrics.h"
+#import "NDConfig.h"
 
 static NSString *NDRandomHex(NSUInteger length) {
     static const char *hex = "0123456789abcdef";
@@ -213,6 +215,9 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.OpenUDID = @"";
     p.TimeZone = @"";
     p.BootTime = 0;
+    p.DeviceColor = @"";
+    p.DiskCapacity = 0;
+    p.AdvertisingTrackingEnabled = YES;
     p.Model = @"";
     p.ProductType = @"";
     p.HardwareMachine = @"";
@@ -237,9 +242,18 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.createdAt = [NSDate date];
 
     NSDictionary *dev = nil;
-    NSArray *models = [NDDeviceCatalog deviceModels];
+    NSArray *allModels = [NDDeviceCatalog deviceModels];
+    BOOL allowPad = [NDConfig shared].allowIPadSpoof;
+    NSMutableArray *models = [NSMutableArray array];
+    for (NSDictionary *m in allModels) {
+        NSString *pt = m[@"ProductType"] ?: @"";
+        if (!allowPad && [pt hasPrefix:@"iPad"]) continue;
+        [models addObject:m];
+    }
+    if (!models.count) models = [allModels mutableCopy];
+
     if (model.length) {
-        for (NSDictionary *m in models) {
+        for (NSDictionary *m in allModels) {
             if ([m[@"Model"] isEqualToString:model] || [m[@"ProductType"] isEqualToString:model]) {
                 dev = m;
                 break;
@@ -297,6 +311,14 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.BSSID = wifi[@"BSSID"] ?: @"00:00:00:00:00:00";
     p.OpenUDID = NDRandomOpenUDID();
     p.BootTime = NDRandomBootTime();
+    static NSArray<NSString *> *colors;
+    static dispatch_once_t colorOnce;
+    dispatch_once(&colorOnce, ^{
+        colors = @[@"Black", @"White", @"Blue", @"Pink", @"Yellow", @"Green", @"Purple", @"NaturalTitanium", @"BlueTitanium", @"WhiteTitanium", @"BlackTitanium"];
+    });
+    p.DeviceColor = colors[arc4random_uniform((uint32_t)colors.count)];
+    p.DiskCapacity = [NDDeviceCatalog diskBytesForProductType:dev[@"ProductType"]];
+    p.AdvertisingTrackingEnabled = YES;
 
     p.Model = dev[@"Model"];
     p.ProductType = dev[@"ProductType"];
@@ -348,6 +370,9 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.OpenUDID = dict[@"OpenUDID"] ?: @"";
     p.TimeZone = dict[@"TimeZone"] ?: @"";
     p.BootTime = dict[@"BootTime"] ? [dict[@"BootTime"] doubleValue] : 0;
+    p.DeviceColor = dict[@"DeviceColor"] ?: @"";
+    p.DiskCapacity = dict[@"DiskCapacity"] ? [dict[@"DiskCapacity"] unsignedLongLongValue] : 0;
+    p.AdvertisingTrackingEnabled = dict[@"AdvertisingTrackingEnabled"] ? [dict[@"AdvertisingTrackingEnabled"] boolValue] : YES;
 
     p.Model = dict[@"Model"] ?: @"";
     p.ProductType = dict[@"ProductType"] ?: @"";
@@ -394,6 +419,9 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"OpenUDID": self.OpenUDID ?: @"",
         @"TimeZone": self.TimeZone ?: @"",
         @"BootTime": @(self.BootTime),
+        @"DeviceColor": self.DeviceColor ?: @"",
+        @"DiskCapacity": @(self.DiskCapacity),
+        @"AdvertisingTrackingEnabled": @(self.AdvertisingTrackingEnabled),
         @"Model": self.Model ?: @"",
         @"ProductType": self.ProductType ?: @"",
         @"HardwareMachine": self.HardwareMachine ?: @"",

@@ -9,6 +9,7 @@
 #import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
+#import "NDDeviceCatalog+Metrics.h"
 
 static NSString *NDMappedRadioAccess(NSString *r) {
     if (!r.length) return nil;
@@ -148,6 +149,18 @@ static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
             memcpy(oldp, &tv, sizeof(tv));
             *oldlenp = sizeof(tv);
             return 0;
+        }
+        if (st.config.fakeDeviceModel && (strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0)) {
+            uint64_t mem = [NDDeviceCatalog memoryBytesForProductType:st.profile.ProductType];
+            if (mem > 0) {
+                if (*oldlenp < sizeof(mem)) {
+                    *oldlenp = sizeof(mem);
+                    return 0;
+                }
+                memcpy(oldp, &mem, sizeof(mem));
+                *oldlenp = sizeof(mem);
+                return 0;
+            }
         }
     }
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);

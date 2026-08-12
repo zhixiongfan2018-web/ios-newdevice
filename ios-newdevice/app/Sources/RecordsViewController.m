@@ -20,10 +20,68 @@
     [super viewDidLoad];
     self.title = @"记录";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
+    UIBarButtonItem *reload = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
+    UIBarButtonItem *more = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showMore)];
+    self.navigationItem.rightBarButtonItems = @[reload, more];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"导入" style:UIBarButtonItemStylePlain target:self action:@selector(importProfile)];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 72;
+}
+
+- (void)showMore {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"记录" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self exportCurrent];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)exportCurrent {
+    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+    if (!p) return;
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", p.name ?: @"record"]];
+    NSError *err = nil;
+    if (![p writeToPath:path error:&err]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导出失败" message:err.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    UIActivityViewController *av = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+    [self presentViewController:av animated:YES completion:nil];
+}
+
+- (void)importProfile {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导入记录" message:@"粘贴 profile plist 绝对路径，或使用 Files 拷到 /var/mobile/Documents/ 后填写路径" preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"/var/mobile/Documents/record.plist";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *path = a.textFields.firstObject.text ?: @"";
+        NDDeviceProfile *p = [NDDeviceProfile profileAtPath:path];
+        if (!p) {
+            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:@"无法读取 plist" preferredStyle:UIAlertControllerStyleAlert];
+            [err addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:err animated:YES completion:nil];
+            return;
+        }
+        if (!p.name.length) p.name = [[NSDate date] description];
+        NSError *e = nil;
+        if ([[NDRecordStore shared] saveProfile:p error:&e]) {
+            [self reload];
+        } else {
+            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:e.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+            [err addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:err animated:YES completion:nil];
+        }
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

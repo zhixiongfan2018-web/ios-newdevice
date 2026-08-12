@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL jailbreakHideBasic;
 @property (nonatomic, assign) BOOL jailbreakHideDeep;
 @property (nonatomic, assign) BOOL holographicBackup;
+@property (nonatomic, assign) BOOL allowIPadSpoof; // AMG-style: include iPad in random pool
+@property (nonatomic, assign) BOOL clearPasteboardOnSwitch;
 @property (nonatomic, copy) NSArray<NSString *> *targetApps;
 @property (nonatomic, copy) NSArray<NSString *> *preferredModels;
 @property (nonatomic, copy) NSArray<NSString *> *preferredSystems;

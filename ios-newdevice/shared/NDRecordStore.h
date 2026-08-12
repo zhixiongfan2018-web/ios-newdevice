@@ -23,6 +23,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (NDDeviceProfile *)createNewRecordAndActivate:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToOriginal:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToNext:(NSError * _Nullable * _Nullable)error;
+- (BOOL)switchToPrevious:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToFirst:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToRecord:(NSString *)name error:(NSError * _Nullable * _Nullable)error;
 

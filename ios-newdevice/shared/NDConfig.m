@@ -28,6 +28,8 @@
     self.jailbreakHideBasic = NO;
     self.jailbreakHideDeep = NO;
     self.holographicBackup = YES;
+    self.allowIPadSpoof = NO;
+    self.clearPasteboardOnSwitch = YES;
     self.targetApps = @[];
     self.preferredModels = @[];
     self.preferredSystems = @[];
@@ -44,6 +46,8 @@
     self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : NO;
     self.jailbreakHideDeep = dict[@"jailbreakHideDeep"] ? [dict[@"jailbreakHideDeep"] boolValue] : NO;
     self.holographicBackup = dict[@"holographicBackup"] ? [dict[@"holographicBackup"] boolValue] : YES;
+    self.allowIPadSpoof = dict[@"allowIPadSpoof"] ? [dict[@"allowIPadSpoof"] boolValue] : NO;
+    self.clearPasteboardOnSwitch = dict[@"clearPasteboardOnSwitch"] ? [dict[@"clearPasteboardOnSwitch"] boolValue] : YES;
     self.targetApps = dict[@"targetApps"] ?: @[];
     self.preferredModels = dict[@"preferredModels"] ?: @[];
     self.preferredSystems = dict[@"preferredSystems"] ?: @[];
@@ -87,6 +91,8 @@
         @"jailbreakHideBasic": @(self.jailbreakHideBasic),
         @"jailbreakHideDeep": @(self.jailbreakHideDeep),
         @"holographicBackup": @(self.holographicBackup),
+        @"allowIPadSpoof": @(self.allowIPadSpoof),
+        @"clearPasteboardOnSwitch": @(self.clearPasteboardOnSwitch),
         @"targetApps": self.targetApps ?: @[],
         @"preferredModels": self.preferredModels ?: @[],
         @"preferredSystems": self.preferredSystems ?: @[],

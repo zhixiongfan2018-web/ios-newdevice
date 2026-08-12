@@ -232,6 +232,22 @@
     return [self switchToOriginal:error];
 }
 
+- (BOOL)switchToPrevious:(NSError **)error {
+    NSArray *names = [self allRecordNames];
+    if (!names.count) return [self switchToOriginal:error];
+    NSString *current = [self currentRecordName] ?: @"原始机器";
+    NSUInteger idx = [names indexOfObject:current];
+    NSUInteger start = (idx == NSNotFound || idx == 0) ? (names.count - 1) : (idx - 1);
+    for (NSUInteger n = 0; n < names.count; n++) {
+        NSUInteger i = (start + names.count - n) % names.count;
+        NDDeviceProfile *p = [self profileNamed:names[i]];
+        if (p.enabled || [names[i] isEqualToString:@"原始机器"]) {
+            return [self switchToRecord:names[i] error:error];
+        }
+    }
+    return [self switchToOriginal:error];
+}
+
 - (BOOL)switchToFirst:(NSError **)error {
     NSArray *names = [self allRecordNames];
     for (NSString *name in names) {

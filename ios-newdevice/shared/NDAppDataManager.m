@@ -168,6 +168,12 @@ extern char **environ;
                 }
             }
         }
+
+        // Global prefs / caches outside sandbox (AMG strong clear)
+        NSString *globalPref = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bid];
+        if ([fm fileExistsAtPath:globalPref]) [fm removeItemAtPath:globalPref error:nil];
+        NSString *cacheRoot = [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bid];
+        if ([fm fileExistsAtPath:cacheRoot]) [fm removeItemAtPath:cacheRoot error:nil];
     }
     return YES;
 }

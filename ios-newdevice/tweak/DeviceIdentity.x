@@ -5,6 +5,7 @@
 #import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
+#import "NDDeviceCatalog+Metrics.h"
 
 static NSUUID *NDUUIDFromString(NSString *s) {
     if (!s.length) return nil;
@@ -31,6 +32,13 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
     if ([st shouldSpoof] && st.profile.IDFA.length) {
         NSUUID *u = NDUUIDFromString(st.profile.IDFA);
         if (u) return u;
+    }
+    return %orig;
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof]) {
+        return st.profile.AdvertisingTrackingEnabled;
     }
     return %orig;
 }
@@ -67,8 +75,21 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if ([k isEqualToString:@"UniqueDeviceIDData"] && p.UDID.length) {
             NSData *data = NDHexDataFromUDID(p.UDID);
             if (data) return CFBridgingRetain(data);
-            // Fallback: UTF-8 only if hex decode fails
             return CFBridgingRetain([p.UDID dataUsingEncoding:NSUTF8StringEncoding]);
+        }
+
+        if (st.config.fakeDeviceModel) {
+            if ([k isEqualToString:@"PhysicalMemory"]) {
+                uint64_t mem = [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
+                if (mem > 0) return CFBridgingRetain(@(mem));
+            }
+            if (([k isEqualToString:@"TotalDiskCapacity"] || [k isEqualToString:@"DiskCapacity"]) && p.DiskCapacity > 0) {
+                return CFBridgingRetain(@(p.DiskCapacity));
+            }
+            if ([k isEqualToString:@"DeviceClassNumber"]) {
+                BOOL isPad = [p.ProductType hasPrefix:@"iPad"];
+                return CFBridgingRetain(@(isPad ? 2 : 1));
+            }
         }
 
         NSMutableDictionary *map = [NSMutableDictionary dictionary];
@@ -76,7 +97,6 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if (p.UDID.length) map[@"UniqueDeviceID"] = p.UDID;
         if (p.WiFiMAC.length) map[@"WifiAddress"] = p.WiFiMAC;
         if (p.BTMAC.length) map[@"BluetoothAddress"] = p.BTMAC;
-        // Userland IMEI (not baseband) — AMG-compatible identity fields
         if (p.IMEI.length) {
             map[@"InternationalMobileEquipmentIdentity"] = p.IMEI;
             map[@"InverseDeviceID"] = p.IMEI;
@@ -90,6 +110,7 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             if (p.ProductType.length) {
                 map[@"ProductType"] = p.ProductType;
                 map[@"HardwarePlatform"] = p.ProductType;
+                map[@"CompatibleProductType"] = p.ProductType;
             }
             if (p.HardwareMachine.length) {
                 map[@"HardwareModel"] = p.HardwareMachine;
@@ -98,6 +119,13 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             if (p.Model.length) {
                 map[@"DeviceName"] = p.Model;
                 map[@"UserAssignedDeviceName"] = p.Model;
+                map[@"MarketingProductName"] = p.Model;
+            }
+            BOOL isPad = [p.ProductType hasPrefix:@"iPad"];
+            map[@"DeviceClass"] = isPad ? @"iPad" : @"iPhone";
+            if (p.DeviceColor.length) {
+                map[@"DeviceColor"] = p.DeviceColor;
+                map[@"DeviceEnclosureColor"] = p.DeviceColor;
             }
         }
         if (st.config.fakeSystemVer) {

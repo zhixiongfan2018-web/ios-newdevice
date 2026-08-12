@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <dlfcn.h>
+#import <objc/runtime.h>
 #import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
@@ -11,7 +12,6 @@ static CFDictionaryRef (*orig_CNCopyCurrentNetworkInfo)(CFStringRef);
 static CFArrayRef hooked_CNCopySupportedInterfaces(void) {
     NDTweakState *st = [NDTweakState shared];
     if ([st shouldSpoof] && st.profile.SSID.length) {
-        // Present a single en0-style interface name
         NSArray *arr = @[@"en0"];
         return CFBridgingRetain(arr);
     }
@@ -32,6 +32,19 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
     }
     return orig_CNCopyCurrentNetworkInfo ? orig_CNCopyCurrentNetworkInfo(interfaceName) : NULL;
 }
+
+%hook NEHotspotNetwork
+- (NSString *)SSID {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.SSID.length) return st.profile.SSID;
+    return %orig;
+}
+- (NSString *)BSSID {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.BSSID.length) return st.profile.BSSID;
+    return %orig;
+}
+%end
 
 %ctor {
     if (!NDShouldLoadTweak()) return;

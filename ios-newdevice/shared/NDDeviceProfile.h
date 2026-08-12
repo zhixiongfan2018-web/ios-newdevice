@@ -23,6 +23,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *OpenUDID;
 @property (nonatomic, copy) NSString *TimeZone; // e.g. America/New_York
 @property (nonatomic, assign) NSTimeInterval BootTime; // unix seconds
+@property (nonatomic, copy) NSString *DeviceColor; // e.g. Black / White / Blue
+@property (nonatomic, assign) uint64_t DiskCapacity; // bytes
+@property (nonatomic, assign) BOOL AdvertisingTrackingEnabled;
 
 @property (nonatomic, copy) NSString *Model;
 @property (nonatomic, copy) NSString *ProductType;

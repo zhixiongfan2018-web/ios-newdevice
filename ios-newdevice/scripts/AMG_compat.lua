@@ -69,11 +69,17 @@ local AMG = {
     Original = (function() return ack("originRecord") end),
     New = (function() return ack("newRecord") end),
     Next = (function() return ack("nextRecord") end),
+    Prev = (function() return ack("prevRecord") end),
     First = (function() return ack("firstRecord") end),
     Delete_All = (function() return ack("deleteAllRecords") end),
     Disable_All = (function() return ack("disableAllRecord") end),
     Enable_All = (function() return ack("enableAllRecord") end),
     Clean = (function() return ack("clearAppData") end),
+    Count = (function()
+        Check_NewDevice()
+        local res, code = http.request("http://127.0.0.1:8080/cmd?fun=getRecordCount")
+        if code == 200 and Check_NewDevice_Result() then return tonumber(res) end
+    end),
 
     Get_Name = (function()
         Check_NewDevice()
