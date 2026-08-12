@@ -92,7 +92,7 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     NDConfig *c = [NDConfig shared];
     NSArray *titles = @[
         @"伪装设备机型", @"伪装系统版本", @"伪装运营商", @"伪装定位", @"随机位置",
-        @"智能偏移位置", @"智能飞行模式", @"允许伪装 iPad", @"切换时清空剪贴板",
+        @"智能偏移位置", @"智能飞行模式", @"允许伪装 iPad", @"剪贴板全息（切换备份/还原）",
         @"基础防越狱检测", @"深度防越狱检测", @"全息备份"
     ];
     NSArray *subs = @[

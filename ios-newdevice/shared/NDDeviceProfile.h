@@ -30,6 +30,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL AdvertisingTrackingEnabled;
 
 @property (nonatomic, copy) NSString *Model;
+@property (nonatomic, copy) NSString *DeviceName; // UIDevice.name / UserAssignedDeviceName (AMG Name)
 @property (nonatomic, copy) NSString *ProductType;
 @property (nonatomic, copy) NSString *HardwareMachine;
 @property (nonatomic, copy) NSString *SystemVer;

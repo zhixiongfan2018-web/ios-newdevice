@@ -1,5 +1,6 @@
 #import "NDRuntimeState.h"
 #import "NDPaths.h"
+#import "NDIfaddrsFingerprint.h"
 
 @implementation NDRuntimeState
 
@@ -28,6 +29,31 @@
     if (profile) {
         dict[@"profile"] = [profile toDictionary];
     }
+
+    // Publish AMG-style ifaddrs fingerprint (import or synthesize) for sandboxed tweaks
+    if (currentName.length && ![currentName isEqualToString:@"原始机器"]) {
+        NSDictionary *ifa = [NDIfaddrsFingerprint loadForRecord:currentName];
+        if (!ifa.count && profile) {
+            ifa = [NDIfaddrsFingerprint synthesizeFromProfileWiFiMAC:profile.WiFiMAC];
+        }
+        if (ifa.count && profile.WiFiMAC.length) {
+            NSMutableDictionary *mutableIfa = [ifa mutableCopy];
+            NSMutableDictionary *en0 = [mutableIfa[@"en0"] isKindOfClass:[NSDictionary class]]
+                ? [mutableIfa[@"en0"] mutableCopy]
+                : [NSMutableDictionary dictionary];
+            en0[@"mac"] = profile.WiFiMAC;
+            mutableIfa[@"en0"] = en0;
+            ifa = mutableIfa;
+        }
+        if (ifa.count) {
+            NSString *ifaPath = [NDPaths ifaddrsPathForRecord:currentName];
+            [[NSFileManager defaultManager] createDirectoryAtPath:[NDPaths recordDir:currentName]
+                                     withIntermediateDirectories:YES attributes:nil error:nil];
+            [ifa writeToFile:ifaPath atomically:YES];
+            dict[@"ifaddrs"] = ifa;
+        }
+    }
+
     NSString *path = [NDPaths runtimeStatePath];
     NSString *dir = [NDPaths runtimeStateDir];
     NSError *writeErr = nil;
@@ -45,6 +71,7 @@
     if (currentName.length) {
         [NDPaths makePathWorldReadable:[NDPaths profilePathForRecord:currentName]];
         [NDPaths makePathWorldReadable:[NDPaths recordDir:currentName]];
+        [NDPaths makePathWorldReadable:[NDPaths ifaddrsPathForRecord:currentName]];
     }
 }
 

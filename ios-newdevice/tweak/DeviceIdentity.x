@@ -56,8 +56,9 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 
 - (NSString *)name {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.Model.length) {
-        return st.profile.Model;
+    if ([st shouldSpoof] && st.config.fakeDeviceModel) {
+        if (st.profile.DeviceName.length) return st.profile.DeviceName;
+        if (st.profile.Model.length) return st.profile.Model;
     }
     return %orig;
 }
@@ -117,9 +118,12 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
                 map[@"HWModelStr"] = p.HardwareMachine;
             }
             if (p.Model.length) {
-                map[@"DeviceName"] = p.Model;
-                map[@"UserAssignedDeviceName"] = p.Model;
                 map[@"MarketingProductName"] = p.Model;
+            }
+            NSString *deviceName = p.DeviceName.length ? p.DeviceName : p.Model;
+            if (deviceName.length) {
+                map[@"DeviceName"] = deviceName;
+                map[@"UserAssignedDeviceName"] = deviceName;
             }
             BOOL isPad = [p.ProductType hasPrefix:@"iPad"];
             map[@"DeviceClass"] = isPad ? @"iPad" : @"iPhone";

@@ -151,7 +151,9 @@ static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
             return 0;
         }
         if (st.config.fakeDeviceModel && (strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0)) {
-            uint64_t mem = [NDDeviceCatalog memoryBytesForProductType:st.profile.ProductType];
+            uint64_t mem = st.profile.PhysicalMemory > 0
+                ? st.profile.PhysicalMemory
+                : [NDDeviceCatalog memoryBytesForProductType:st.profile.ProductType];
             if (mem > 0) {
                 if (*oldlenp < sizeof(mem)) {
                     *oldlenp = sizeof(mem);

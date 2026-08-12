@@ -221,6 +221,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.Brightness = -1;
     p.AdvertisingTrackingEnabled = YES;
     p.Model = @"";
+    p.DeviceName = @"";
     p.ProductType = @"";
     p.HardwareMachine = @"";
     p.SystemVer = @"";
@@ -325,6 +326,15 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.AdvertisingTrackingEnabled = YES;
 
     p.Model = dev[@"Model"];
+    // AMG-style user device name, e.g. "John's iPhone"
+    static NSArray<NSString *> *namePrefixes;
+    static dispatch_once_t nameOnce;
+    dispatch_once(&nameOnce, ^{
+        namePrefixes = @[@"Alex", @"Jordan", @"Sam", @"Taylor", @"Chris", @"Jamie", @"Casey", @"Morgan", @"Riley", @"Avery"];
+    });
+    NSString *who = namePrefixes[arc4random_uniform((uint32_t)namePrefixes.count)];
+    BOOL isPad = [((NSString *)dev[@"ProductType"] ?: @"") hasPrefix:@"iPad"];
+    p.DeviceName = [NSString stringWithFormat:@"%@'s %@", who, isPad ? @"iPad" : @"iPhone"];
     p.ProductType = dev[@"ProductType"];
     p.HardwareMachine = dev[@"HardwareMachine"];
     p.SystemVer = sys;
@@ -438,13 +448,16 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (![dict isKindOfClass:[NSDictionary class]]) return @{};
     NSMutableDictionary *d = [dict mutableCopy];
 
-    // Record name — only accept plaintext names (folder/description usually better)
-    if (!d[@"name"] && d[@"Name"] && [self NDStringLooksPlaintextIdentity:d[@"Name"] forKey:@"Name"]) {
-        d[@"name"] = d[@"Name"];
-    }
+    // Record name — prefer explicit record title fields, NOT AMG device Name
     if (!d[@"name"] && d[@"RecordName"]) d[@"name"] = d[@"RecordName"];
     if (!d[@"name"] && d[@"RecordID"]) d[@"name"] = d[@"RecordID"];
     if (!d[@"name"] && d[@"title"]) d[@"name"] = d[@"title"];
+
+    // AMG faker "Name" is the user-assigned device name (UIDevice.name), not record title
+    if (!d[@"DeviceName"] && d[@"Name"] && [self NDStringLooksPlaintextIdentity:d[@"Name"] forKey:@"Name"]) {
+        d[@"DeviceName"] = d[@"Name"];
+    }
+    if (!d[@"DeviceName"] && d[@"UserAssignedDeviceName"]) d[@"DeviceName"] = d[@"UserAssignedDeviceName"];
 
     // Identity aliases used by AMG / AWZ / CTW exports (faker.plist keys)
     if (!d[@"Serial"] && d[@"SerialNum"]) d[@"Serial"] = d[@"SerialNum"];
@@ -458,8 +471,9 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"SystemVer"] && d[@"SystemVersion"]) d[@"SystemVer"] = d[@"SystemVersion"];
     if (!d[@"SystemVer"] && d[@"ProductVersion"]) d[@"SystemVer"] = d[@"ProductVersion"];
     if (!d[@"Build"] && d[@"BuildVersion"]) d[@"Build"] = d[@"BuildVersion"];
-    if (!d[@"Model"] && d[@"DeviceName"]) d[@"Model"] = d[@"DeviceName"];
+    // Marketing model — do NOT map DeviceName (user phone name) onto Model
     if (!d[@"Model"] && d[@"DeviceModel"]) d[@"Model"] = d[@"DeviceModel"];
+    if (!d[@"Model"] && d[@"MarketingProductName"]) d[@"Model"] = d[@"MarketingProductName"];
     if (!d[@"ProductType"] && d[@"HardwareMachine"]) d[@"ProductType"] = d[@"HardwareMachine"];
     if (!d[@"HardwareMachine"] && d[@"ProductType"]) d[@"HardwareMachine"] = d[@"ProductType"];
     if (!d[@"IMEI"] && d[@"InternationalMobileEquipmentIdentity"]) d[@"IMEI"] = d[@"InternationalMobileEquipmentIdentity"];
@@ -471,6 +485,11 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"PhysicalMemory"] && d[@"Memory"]) d[@"PhysicalMemory"] = d[@"Memory"];
     if (!d[@"PhysicalMemory"] && d[@"PhysicalMemorySize"]) d[@"PhysicalMemory"] = d[@"PhysicalMemorySize"];
     if (!d[@"Brightness"] && d[@"ScreenBrightness"]) d[@"Brightness"] = d[@"ScreenBrightness"];
+    // AMG may store brightness as 0..100 percent
+    if (d[@"Brightness"] != nil) {
+        double b = [d[@"Brightness"] doubleValue];
+        if (b > 1.0 && b <= 100.0) d[@"Brightness"] = @(b / 100.0);
+    }
 
     // SystemUptime: either unix boot time or uptime seconds
     if (!d[@"BootTime"] && d[@"SystemUptime"]) {
@@ -543,6 +562,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.AdvertisingTrackingEnabled = dict[@"AdvertisingTrackingEnabled"] ? [dict[@"AdvertisingTrackingEnabled"] boolValue] : YES;
 
     p.Model = dict[@"Model"] ?: @"";
+    p.DeviceName = dict[@"DeviceName"] ?: @"";
     p.ProductType = dict[@"ProductType"] ?: @"";
     p.HardwareMachine = dict[@"HardwareMachine"] ?: @"";
     p.SystemVer = dict[@"SystemVer"] ?: @"";
@@ -570,6 +590,12 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!p.HardwareMachine.length && p.ProductType.length) {
         p.HardwareMachine = p.ProductType;
     }
+    if (!p.DeviceName.length && p.Model.length) {
+        p.DeviceName = p.Model;
+    }
+    // Brightness already normalized in import dict; clamp
+    if (p.Brightness > 1.0f) p.Brightness = p.Brightness / 100.0f;
+    if (p.Brightness > 1.0f) p.Brightness = 1.0f;
     return p;
 }
 
@@ -607,6 +633,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"Brightness": @(self.Brightness),
         @"AdvertisingTrackingEnabled": @(self.AdvertisingTrackingEnabled),
         @"Model": self.Model ?: @"",
+        @"DeviceName": self.DeviceName ?: @"",
         @"ProductType": self.ProductType ?: @"",
         @"HardwareMachine": self.HardwareMachine ?: @"",
         @"SystemVer": self.SystemVer ?: @"",

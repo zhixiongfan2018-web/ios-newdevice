@@ -24,6 +24,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Restore App Group containers previously imported/backed up under Records/<name>/AppGroup.
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName;
 
+/// Pasteboard holographic: backup current general pasteboard into record, restore from record.
+- (void)backupPasteboardToRecord:(NSString *)recordName;
+- (void)restorePasteboardFromRecord:(NSString *)recordName;
+- (void)clearGeneralPasteboard;
+
 /// Best-effort Keychain export/import for given access groups (plist under backup).
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;

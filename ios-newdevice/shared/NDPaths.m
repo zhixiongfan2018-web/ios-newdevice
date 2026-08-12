@@ -44,6 +44,14 @@ NSInteger const NDHTTPPort = 8080;
     return [[[self recordDir:name] stringByAppendingPathComponent:@"apps"] stringByAppendingPathComponent:bundleId];
 }
 
++ (NSString *)ifaddrsPathForRecord:(NSString *)name {
+    return [[self recordDir:name] stringByAppendingPathComponent:@"ifaddrs.plist"];
+}
+
++ (NSString *)pasteboardDirForRecord:(NSString *)name {
+    return [[self recordDir:name] stringByAppendingPathComponent:@"Pasteboard"];
+}
+
 + (NSString *)resultFilePath {
     return [[self jbPrefix] stringByAppendingPathComponent:@"/var/mobile/newdeviceResult.txt"];
 }

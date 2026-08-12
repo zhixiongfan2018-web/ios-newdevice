@@ -5,10 +5,13 @@
 #import <substrate.h>
 #import <ifaddrs.h>
 #import <net/if_dl.h>
+#import <arpa/inet.h>
 #import <string.h>
 #import <stdlib.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
+#import "NDIfaddrsFingerprint.h"
+#import "NDRuntimeState.h"
 
 static CFArrayRef (*orig_CNCopySupportedInterfaces)(void);
 static CFDictionaryRef (*orig_CNCopyCurrentNetworkInfo)(CFStringRef);
@@ -29,6 +32,35 @@ static void NDPatchLinkMAC(struct ifaddrs *ifa, NSString *mac) {
     uint8_t bytes[6];
     if (!NDParseMAC(mac, bytes)) return;
     memcpy(LLADDR(sdl), bytes, 6);
+}
+
+static NSDictionary *NDCurrentIfaddrsMap(void) {
+    NSDictionary *runtime = [NDRuntimeState dictionary];
+    id map = runtime[@"ifaddrs"];
+    if ([map isKindOfClass:[NSDictionary class]] && [(NSDictionary *)map count]) return map;
+    NDTweakState *st = [NDTweakState shared];
+    NSString *name = st.profile.name;
+    NSDictionary *fromDisk = [NDIfaddrsFingerprint loadForRecord:name];
+    if (fromDisk.count) return fromDisk;
+    return nil;
+}
+
+static void NDApplyIfaceFingerprint(struct ifaddrs *ifa, NSDictionary *iface) {
+    if (!ifa || ![iface isKindOfClass:[NSDictionary class]]) return;
+    NSString *mac = iface[@"mac"];
+    if ([mac isKindOfClass:[NSString class]] && mac.length) {
+        NDPatchLinkMAC(ifa, mac);
+    }
+    NSString *ipv4 = iface[@"ipv4"];
+    NSString *mask = iface[@"submask"] ?: @"255.255.255.0";
+    NSString *ipv6 = iface[@"ipv6"];
+    if (ifa->ifa_addr) {
+        if (ifa->ifa_addr->sa_family == AF_INET && [ipv4 isKindOfClass:[NSString class]]) {
+            [NDIfaddrsFingerprint applyIPv4:ipv4 mask:mask toSockaddr:ifa->ifa_addr netmask:ifa->ifa_netmask];
+        } else if (ifa->ifa_addr->sa_family == AF_INET6 && [ipv6 isKindOfClass:[NSString class]]) {
+            [NDIfaddrsFingerprint applyIPv6:ipv6 toSockaddr:ifa->ifa_addr];
+        }
+    }
 }
 
 static CFArrayRef hooked_CNCopySupportedInterfaces(void) {
@@ -60,14 +92,23 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     if (rc != 0 || !ifap || !*ifap) return rc;
     NDTweakState *st = [NDTweakState shared];
     if (![st shouldSpoof]) return rc;
+
+    NSDictionary *map = NDCurrentIfaddrsMap();
     NSString *wifi = st.profile.WiFiMAC;
     NSString *bt = st.profile.BTMAC;
-    if (!wifi.length && !bt.length) return rc;
+
     for (struct ifaddrs *ifa = *ifap; ifa; ifa = ifa->ifa_next) {
         if (!ifa->ifa_name) continue;
-        if (wifi.length && (strcmp(ifa->ifa_name, "en0") == 0 || strcmp(ifa->ifa_name, "en1") == 0)) {
+        NSString *iname = @(ifa->ifa_name);
+        NSDictionary *iface = map[iname];
+        if ([iface isKindOfClass:[NSDictionary class]]) {
+            NDApplyIfaceFingerprint(ifa, iface);
+            continue;
+        }
+        // Fallback: MAC-only when no ifaddrs.plist entry
+        if (wifi.length && ([iname isEqualToString:@"en0"] || [iname isEqualToString:@"en1"])) {
             NDPatchLinkMAC(ifa, wifi);
-        } else if (bt.length && strncmp(ifa->ifa_name, "anpi", 4) == 0) {
+        } else if (bt.length && [iname hasPrefix:@"anpi"]) {
             NDPatchLinkMAC(ifa, bt);
         }
     }

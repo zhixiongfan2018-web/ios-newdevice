@@ -28,7 +28,7 @@
 
 - (void)rebuild {
     NSDictionary *d = [self.profile toDictionary];
-    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"AdvertisingTrackingEnabled",@"Model",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
+    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"AdvertisingTrackingEnabled",@"Model",@"DeviceName",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
     NSMutableArray *rows = [NSMutableArray array];
     for (NSString *k in keys) {
         [rows addObject:@[k, [NSString stringWithFormat:@"%@", d[k] ?: @""]]];

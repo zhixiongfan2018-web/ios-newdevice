@@ -423,4 +423,119 @@ extern char **environ;
     return YES;
 }
 
+- (id)generalPasteboard {
+    Class PB = NSClassFromString(@"UIPasteboard");
+    if (!PB || ![PB respondsToSelector:NSSelectorFromString(@"generalPasteboard")]) return nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    return [PB performSelector:NSSelectorFromString(@"generalPasteboard")];
+#pragma clang diagnostic pop
+}
+
+- (void)clearGeneralPasteboard {
+    id board = [self generalPasteboard];
+    if (board && [board respondsToSelector:NSSelectorFromString(@"setItems:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [board performSelector:NSSelectorFromString(@"setItems:") withObject:@[]];
+#pragma clang diagnostic pop
+    }
+}
+
+- (void)backupPasteboardToRecord:(NSString *)recordName {
+    if (!recordName.length || [recordName isEqualToString:@"原始机器"]) return;
+    id board = [self generalPasteboard];
+    if (!board) return;
+    NSMutableDictionary *snap = [NSMutableDictionary dictionary];
+    if ([board respondsToSelector:NSSelectorFromString(@"string")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        NSString *s = [board performSelector:NSSelectorFromString(@"string")];
+#pragma clang diagnostic pop
+        if ([s isKindOfClass:[NSString class]] && s.length) snap[@"string"] = s;
+    }
+    if ([board respondsToSelector:NSSelectorFromString(@"items")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id items = [board performSelector:NSSelectorFromString(@"items")];
+#pragma clang diagnostic pop
+        // Only persist simple string-typed items to avoid huge binary blobs
+        if ([items isKindOfClass:[NSArray class]]) {
+            NSMutableArray *simple = [NSMutableArray array];
+            for (id entry in (NSArray *)items) {
+                if (![entry isKindOfClass:[NSDictionary class]]) continue;
+                NSMutableDictionary *one = [NSMutableDictionary dictionary];
+                [(NSDictionary *)entry enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                    if ([obj isKindOfClass:[NSString class]]) one[key] = obj;
+                    else if ([obj isKindOfClass:[NSData class]] && [(NSData *)obj length] < 64 * 1024) {
+                        one[key] = [(NSData *)obj base64EncodedStringWithOptions:0];
+                        one[[NSString stringWithFormat:@"%@_b64", key]] = @YES;
+                    }
+                }];
+                if (one.count) [simple addObject:one];
+            }
+            if (simple.count) snap[@"items"] = simple;
+        }
+    }
+    if (!snap.count) {
+        // Still write empty marker so restore clears
+        snap[@"empty"] = @YES;
+    }
+    NSString *dir = [NDPaths pasteboardDirForRecord:recordName];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    [snap writeToFile:[dir stringByAppendingPathComponent:@"general.plist"] atomically:YES];
+}
+
+- (void)restorePasteboardFromRecord:(NSString *)recordName {
+    if (!recordName.length || [recordName isEqualToString:@"原始机器"]) {
+        [self clearGeneralPasteboard];
+        return;
+    }
+    NSString *path = [[NDPaths pasteboardDirForRecord:recordName] stringByAppendingPathComponent:@"general.plist"];
+    NSDictionary *snap = [NSDictionary dictionaryWithContentsOfFile:path];
+    id board = [self generalPasteboard];
+    if (![snap isKindOfClass:[NSDictionary class]] || !board) {
+        [self clearGeneralPasteboard];
+        return;
+    }
+    if ([snap[@"empty"] boolValue]) {
+        [self clearGeneralPasteboard];
+        return;
+    }
+    NSString *s = snap[@"string"];
+    if ([s isKindOfClass:[NSString class]] && s.length && [board respondsToSelector:NSSelectorFromString(@"setString:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [board performSelector:NSSelectorFromString(@"setString:") withObject:s];
+#pragma clang diagnostic pop
+        return;
+    }
+    NSArray *items = snap[@"items"];
+    if ([items isKindOfClass:[NSArray class]] && items.count && [board respondsToSelector:NSSelectorFromString(@"setItems:")]) {
+        NSMutableArray *restored = [NSMutableArray array];
+        for (NSDictionary *entry in items) {
+            if (![entry isKindOfClass:[NSDictionary class]]) continue;
+            NSMutableDictionary *one = [NSMutableDictionary dictionary];
+            [entry enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                if (![key isKindOfClass:[NSString class]]) return;
+                if ([key hasSuffix:@"_b64"]) return;
+                NSString *flag = [NSString stringWithFormat:@"%@_b64", key];
+                if ([entry[flag] boolValue] && [obj isKindOfClass:[NSString class]]) {
+                    NSData *data = [[NSData alloc] initWithBase64EncodedString:obj options:0];
+                    if (data) one[key] = data;
+                } else {
+                    one[key] = obj;
+                }
+            }];
+            if (one.count) [restored addObject:one];
+        }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [board performSelector:NSSelectorFromString(@"setItems:") withObject:restored];
+#pragma clang diagnostic pop
+        return;
+    }
+    [self clearGeneralPasteboard];
+}
+
 @end

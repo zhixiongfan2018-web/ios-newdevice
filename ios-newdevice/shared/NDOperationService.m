@@ -54,19 +54,17 @@
     } else if (apps.count) {
         [[NDAppDataManager shared] clearDataForApps:apps error:nil];
     }
+
+    // AMG-style pasteboard holographic: always snapshot outgoing record when enabled
     if (cfg.clearPasteboardOnSwitch) {
-        Class PB = NSClassFromString(@"UIPasteboard");
-        if (PB && [PB respondsToSelector:NSSelectorFromString(@"generalPasteboard")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            id board = [PB performSelector:NSSelectorFromString(@"generalPasteboard")];
-#pragma clang diagnostic pop
-            if (board && [board respondsToSelector:NSSelectorFromString(@"setItems:")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                [board performSelector:NSSelectorFromString(@"setItems:") withObject:@[]];
-#pragma clang diagnostic pop
-            }
+        NDAppDataManager *adm = [NDAppDataManager shared];
+        if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+            [adm backupPasteboardToRecord:previous];
+        }
+        if ([current isEqualToString:@"原始机器"]) {
+            [adm clearGeneralPasteboard];
+        } else {
+            [adm restorePasteboardFromRecord:current];
         }
     }
     if (cfg.smartAirplane) {

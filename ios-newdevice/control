@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-51
+Version: 1.0.0-52
 Architecture: iphoneos-arm64
-Description: AMG folder import: faker/selectApp/holographic/AppGroup + ifaddrs MAC spoof.
+Description: AMG parity: DeviceName, ifaddrs IP, pasteboard holo, disk/mem hooks.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

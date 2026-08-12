@@ -15,6 +15,8 @@ FOUNDATION_EXPORT NSInteger const NDHTTPPort;
 + (NSString *)recordDir:(NSString *)name;
 + (NSString *)profilePathForRecord:(NSString *)name;
 + (NSString *)appsBackupDirForRecord:(NSString *)name bundleId:(NSString *)bundleId;
++ (NSString *)ifaddrsPathForRecord:(NSString *)name;
++ (NSString *)pasteboardDirForRecord:(NSString *)name;
 + (NSString *)resultFilePath;
 + (NSString *)currentRecordPointerPath;
 /// World-readable snapshot for sandboxed target apps (tweak injection).
