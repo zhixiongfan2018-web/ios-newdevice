@@ -2,13 +2,13 @@
 
 本项目是 **越狱 iPhone 上的 deb**，不能在 Windows 上直接运行，也不需要你买一台 Mac。
 
-## Sileo 固定源（唯一推荐，无 @）
+## Sileo 固定源（唯一，无 @）
 
 ```
-https://zhixiongfan2018-web.github.io/ios-newdevice/
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
 ```
 
-只用这一条。添加后刷新 → 安装/升级 NewDevice → Respring。
+只用这一条，禁止改成 GitHub Pages 或其它地址。添加后刷新 → 安装/升级 NewDevice → Respring。
 
 ## AMG 数据格式
 
@@ -19,4 +19,4 @@ https://zhixiongfan2018-web.github.io/ios-newdevice/
 
 ## 云端打包
 
-仓库工作流会生成 `.deb` 并更新 GitHub Pages 源（上面的链接）。
+仓库工作流会生成 `.deb`、更新 `stable/`，并打 GitHub Release（jsDelivr 无 `@` 跟最新 Release）。

@@ -3,5 +3,7 @@
 只用这一条：
 
 ```
-https://zhixiongfan2018-web.github.io/ios-newdevice/
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
 ```
+
+禁止改成 GitHub Pages 或其它地址。
