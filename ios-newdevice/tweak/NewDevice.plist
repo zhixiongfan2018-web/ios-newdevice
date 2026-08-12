@@ -3,5 +3,13 @@
 		Bundles = (
 			"com.apple.UIKit"
 		);
+		RejectList = (
+			"xyz.willy.Sileo",
+			"org.coolstar.SileoStore",
+			"com.saurik.Cydia",
+			"xyz.willy.Zebra",
+			"com.opa334.Dopamine",
+			"com.opa334.TrollStore"
+		);
 	};
 }

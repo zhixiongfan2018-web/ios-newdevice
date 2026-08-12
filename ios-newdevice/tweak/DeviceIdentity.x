@@ -4,6 +4,7 @@
 #import <dlfcn.h>
 #import <substrate.h>
 #import "NDTweakState.h"
+#import "NDSafeLoad.h"
 
 static NSUUID *NDUUIDFromString(NSString *s) {
     if (!s.length) return nil;
@@ -69,6 +70,7 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
 }
 
 %ctor {
+    if (!NDShouldLoadTweak()) return;
     void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
     if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
     if (gestalt) {

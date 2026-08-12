@@ -7,6 +7,7 @@
 #import <string.h>
 #import <substrate.h>
 #import "NDTweakState.h"
+#import "NDSafeLoad.h"
 
 %hook UIDevice
 - (NSString *)model {
@@ -100,6 +101,7 @@ static int hooked_uname(struct utsname *buf) {
 }
 
 %ctor {
+    if (!NDShouldLoadTweak()) return;
     MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
     MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);
 }

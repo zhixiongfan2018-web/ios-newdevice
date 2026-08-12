@@ -6,6 +6,7 @@
 #import <mach-o/dyld.h>
 #import <substrate.h>
 #import "NDTweakState.h"
+#import "NDSafeLoad.h"
 
 static NSArray<NSString *> *NDJBPaths(void) {
     return @[
@@ -106,9 +107,12 @@ static pid_t hooked_fork(void) {
 }
 
 %ctor {
+    if (!NDShouldLoadTweak()) return;
     MSHookFunction((void *)stat, (void *)hooked_stat, (void **)&orig_stat);
     MSHookFunction((void *)access, (void *)hooked_access, (void **)&orig_access);
     MSHookFunction((void *)fopen, (void *)hooked_fopen, (void **)&orig_fopen);
     MSHookFunction((void *)_dyld_get_image_name, (void *)hooked_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
+    // Never hook fork by default — can break package managers / jailbreak tools
+    // Deep hide (fork) remains opt-in and still gated by shouldSpoof + jailbreakHideDeep
     MSHookFunction((void *)fork, (void *)hooked_fork, (void **)&orig_fork);
 }

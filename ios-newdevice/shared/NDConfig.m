@@ -21,7 +21,8 @@
     self.randomLocation = YES;
     self.smartLocationOffset = YES;
     self.smartAirplane = YES;
-    self.jailbreakHideBasic = YES;
+    // Default OFF so install/respring never hides JB paths from tooling
+    self.jailbreakHideBasic = NO;
     self.jailbreakHideDeep = NO;
     self.holographicBackup = YES;
     self.targetApps = @[];
@@ -44,8 +45,8 @@
     self.randomLocation = dict[@"randomLocation"] ? [dict[@"randomLocation"] boolValue] : YES;
     self.smartLocationOffset = [dict[@"smartLocationOffset"] boolValue];
     self.smartAirplane = dict[@"smartAirplane"] ? [dict[@"smartAirplane"] boolValue] : YES;
-    self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : YES;
-    self.jailbreakHideDeep = [dict[@"jailbreakHideDeep"] boolValue];
+    self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : NO;
+    self.jailbreakHideDeep = dict[@"jailbreakHideDeep"] ? [dict[@"jailbreakHideDeep"] boolValue] : NO;
     self.holographicBackup = dict[@"holographicBackup"] ? [dict[@"holographicBackup"] boolValue] : YES;
     self.targetApps = dict[@"targetApps"] ?: @[];
     self.preferredModels = dict[@"preferredModels"] ?: @[];

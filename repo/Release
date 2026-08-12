@@ -1,4 +1,4 @@
-Date: Wed, 12 Aug 2026 09:43:50 +0000
+Date: Wed, 12 Aug 2026 14:49:08 +0000
 Origin: NewDevice
 Label: NewDevice
 Suite: stable
@@ -7,16 +7,16 @@ Codename: stable
 Architectures: iphoneos-arm64
 Components: main
 Description: NewDevice Sileo source
-Comment: remove-fake-ellekit-1786527830
+Comment: safe-1.0.0-22-1786546148
 MD5Sum:
- 6aee3733e0ac8175da539bba828f87d3 621 Packages
- f1ed4cc4b01a79fb8b01a3e6832e5c7d 444 Packages.gz
- 982ab92e332e4d91076cbe69ed1723d8 483 Packages.bz2
+ 41b43f5017b13ac6dbe8200146d4947c 601 Packages
+ b1b9f31113b5cb173067819e9d7da789 426 Packages.gz
+ 79d82b3d1c5491020c27551101e9b801 475 Packages.bz2
 SHA1:
- 4b527d2a15f137f30e1f0dacad1f1ee6b5ab958b 621 Packages
- 201a2dcb801f094e4985d0475ecb64a4f1695ac2 444 Packages.gz
- 4e3fde54a0a5cf757e577cd01eed47b3a6353c8b 483 Packages.bz2
+ c2de2a5077a4b5b889b874480ee37530f2c148dc 601 Packages
+ 92db49c80ed167c7b495746378d782b5ee413b96 426 Packages.gz
+ 27f559ccbe1e204d5fabe856e2338491952a2de8 475 Packages.bz2
 SHA256:
- aafe521aa8d4778c56a3a2a04c34db4eeaab892dbddbaf14c309dcad6f96f476 621 Packages
- 4b1cc34a260332d5f0082bdd3e3b5e5b08db388b0f876736ad67ab9d3a5636f9 444 Packages.gz
- 5eb96db6d53f9aa8860c3c3fe848fe298f60cf1a1bda9c10dbfb488a56cfd8b1 483 Packages.bz2
+ 99134c97de9bcb1fbfc0ce6e0c60496d3b9e0efe209fea860f95f8abc2a14aa7 601 Packages
+ f4a9b758c671395c5f0bb08fa0919ccc23118e6cd75e9931061435827b20001a 426 Packages.gz
+ 0b9bd960cae39ed5d18d9ab32aafd1049682374d238d6924051aba74a2e8d145 475 Packages.bz2
