@@ -3,5 +3,5 @@
 只用这一条：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@master/stable
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
 ```
