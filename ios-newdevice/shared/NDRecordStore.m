@@ -61,10 +61,12 @@
 }
 
 - (NSArray<NSString *> *)allRecordNames {
+    [self purgeAccidentalImportExportRecords];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *contents = [fm contentsOfDirectoryAtPath:[NDPaths recordsRoot] error:nil] ?: @[];
     NSMutableArray *names = [NSMutableArray array];
     for (NSString *name in contents) {
+        if ([[self class] isReservedRecordFolderName:name]) continue;
         NSString *profile = [NDPaths profilePathForRecord:name];
         if ([fm fileExistsAtPath:profile]) {
             [names addObject:name];
