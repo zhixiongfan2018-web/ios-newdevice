@@ -1,0 +1,16 @@
+Date: Wed, 12 Aug 2026 14:55:42 +0000
+Origin: NewDevice
+Label: NewDevice
+Suite: stable
+Version: 1.0
+Codename: stable
+Architectures: iphoneos-arm64
+Components: main
+Description: NewDevice Sileo source
+Comment: plain-only-1786546542
+MD5Sum:
+ f77688de5ae2b537bdf415af6e4f4845 609 main/binary-iphoneos-arm64/Packages
+SHA1:
+ 9ca31da39e407ced7c70166cdd90db652dcfecc0 609 main/binary-iphoneos-arm64/Packages
+SHA256:
+ d2b125caea7b48fabda09771025fb249ae9498934e7fcd1f2717d8a9b7d794e6 609 main/binary-iphoneos-arm64/Packages
