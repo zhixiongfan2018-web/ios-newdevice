@@ -8,10 +8,10 @@ Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@v1.0.24/
 Architecture: iphoneos-arm64
 Version: 1.0.0-23
 Installed-Size: 496
-Filename: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@v1.0.24/repo/debs/com.local.newdevice_1.0.0-23_iphoneos-arm64.deb
+Filename: debs/com.local.newdevice_1.0.0-23_iphoneos-arm64.deb
 Size: 140936
 MD5sum: 1671373c21f2e7a044544f67d3835e23
 SHA1: 0eb4c21859eb4db66e45e115147ff5f0493ba7e2
 SHA256: cf2421ca0cc638cee12b41090b35fe45a6249cdb7ff4a8f794243f086173255b
-X-Rev: 1786546994
+X-Rev: 1786547050
 
