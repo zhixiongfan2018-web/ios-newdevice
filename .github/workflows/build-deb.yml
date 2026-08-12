@@ -103,7 +103,7 @@ jobs:
         if: github.ref == 'refs/heads/master'
         run: |
           set -euo pipefail
-          FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt'
+          FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable'
           DEB="$(ls dist/*.deb | head -n1)"
           DEB_NAME="$(basename "$DEB")"
           mkdir -p downloads apt/debs
@@ -179,8 +179,8 @@ jobs:
           git commit -m "Update apt fixed source ${FIXED_SRC} [skip ci]"
           git push origin "HEAD:master"
           # best-effort CDN purge
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt/Packages" || true
-          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt/Release" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
 
       - name: Build Sileo apt repo artifact
         run: |
@@ -234,7 +234,7 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt</code></p>
+            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>

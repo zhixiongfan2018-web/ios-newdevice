@@ -5,7 +5,7 @@
 ## Sileo 固定源（推荐）
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
 ```
 
 只用这一条。添加后刷新 → 安装 NewDevice → Respring。

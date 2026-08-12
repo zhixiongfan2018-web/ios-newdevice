@@ -1,11 +1,9 @@
-# Sileo 固定源
+# 请改用新固定源
 
-只用这一条（以后都用它，不要换）：
+本目录 `/apt` 在 jsDelivr 上出现 Release/Packages 缓存错位，Sileo 刷新会报哈希错误。
+
+请改用（无 `@`）：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/apt
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
 ```
-
-可带末尾 `/`。不要用 `@latest` / `@master` / `raw.githubusercontent.com` / 旧 `/repo`。
-
-添加后刷新 → 安装 NewDevice → Respring。
