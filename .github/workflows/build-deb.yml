@@ -322,14 +322,12 @@ jobs:
           retention-days: 14
 
   # GITHUB_TOKEN pushes to master do NOT trigger deploy-apt-pages.yml.
-  # Deploy Pages from this workflow so Sileo URL always gets the new deb.
+  # Deploy Pages here. No environment: filter — feature-branch builds must be allowed
+  # (github-pages env often allows only master and then this job fails with 0 steps).
   deploy-pages:
     needs: build
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.pages.outputs.page_url }}
     steps:
       - name: Checkout master (published stable/)
         uses: actions/checkout@v4
