@@ -105,7 +105,7 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
-          FIXED_SRC='https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable'
+          FIXED_SRC='https://zhixiongfan2018-web.github.io/ios-newdevice'
           DEB="$(ls dist/*.deb | head -n1)"
           DEB_NAME="$(basename "$DEB")"
           mkdir -p downloads stable/debs apt/debs
@@ -206,7 +206,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "stable/apt/downloads already up to date"
           else
-            git commit -m "Update stable Sileo source ${FIXED_SRC} [skip ci]"
+            git commit -m "Update Pages/Sileo source ${FIXED_SRC}"
             git push origin HEAD:master
           fi
           # Restore feature branch pointer for subsequent steps
@@ -221,7 +221,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG exists"
           else
-            gh release create "$TAG" --target master --title "NewDevice stable ${TAG}" --notes "Sileo: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable" || true
+            gh release create "$TAG" --target master --title "NewDevice stable ${TAG}" --notes "Sileo: https://zhixiongfan2018-web.github.io/ios-newdevice/" || true
           fi
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
