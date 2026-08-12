@@ -219,65 +219,180 @@ extern char **environ;
 }
 
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName {
-    // Best-effort: dump queryable generic passwords filtered by service containing bundle id.
+    // Fuller dump: generic + internet passwords (+ optional cert/key metadata) across access groups.
     for (NSString *bid in bundleIds) {
-        NSMutableDictionary *query = [@{
-            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
-            (__bridge id)kSecReturnAttributes: @YES,
-            (__bridge id)kSecReturnData: @YES,
-        } mutableCopy];
-        CFTypeRef result = NULL;
-        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
         NSMutableArray *items = [NSMutableArray array];
-        if (status == errSecSuccess && result) {
+        NSArray *classes = @[
+            (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecClassInternetPassword,
+        ];
+        for (id secClass in classes) {
+            NSMutableDictionary *query = [@{
+                (__bridge id)kSecClass: secClass,
+                (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+                (__bridge id)kSecReturnAttributes: @YES,
+                (__bridge id)kSecReturnData: @YES,
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            } mutableCopy];
+            CFTypeRef result = NULL;
+            OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+            if (status != errSecSuccess || !result) {
+                if (result) CFRelease(result);
+                continue;
+            }
             NSArray *arr = (__bridge_transfer NSArray *)result;
             for (NSDictionary *item in arr) {
                 NSString *service = item[(__bridge id)kSecAttrService] ?: @"";
                 NSString *account = item[(__bridge id)kSecAttrAccount] ?: @"";
-                if ([service containsString:bid] || [account containsString:bid]) {
+                NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup] ?: @"";
+                NSString *server = item[(__bridge id)kSecAttrServer] ?: @"";
+                NSString *label = item[(__bridge id)kSecAttrLabel] ?: @"";
+                BOOL related = [service containsString:bid]
+                    || [account containsString:bid]
+                    || [accessGroup containsString:bid]
+                    || [server containsString:bid]
+                    || [label containsString:bid];
+                if (!related && [accessGroup hasPrefix:@"group."]) {
+                    NSString *tail = bid.lastPathComponent ?: bid;
+                    related = [accessGroup.lowercaseString containsString:tail.lowercaseString];
+                }
+                // Also keep items whose access group matches app's known groups via heuristic last path
+                if (!related && bid.pathExtension.length) {
+                    NSString *tail = bid.pathExtension;
+                    related = [accessGroup containsString:tail] || [service containsString:tail];
+                }
+                if (!related) continue;
+
+                NSMutableDictionary *copy = [NSMutableDictionary dictionary];
+                copy[@"class"] = [secClass isEqual:(__bridge id)kSecClassInternetPassword] ? @"internet" : @"generic";
+                copy[@"service"] = service;
+                copy[@"account"] = account;
+                if (accessGroup.length) copy[@"accessGroup"] = accessGroup;
+                if (server.length) copy[@"server"] = server;
+                if (label.length) copy[@"label"] = label;
+                id protocol = item[(__bridge id)kSecAttrProtocol];
+                if (protocol) copy[@"protocol"] = [protocol description];
+                id port = item[(__bridge id)kSecAttrPort];
+                if (port) copy[@"port"] = port;
+                id path = item[(__bridge id)kSecAttrPath];
+                if ([path isKindOfClass:[NSString class]]) copy[@"path"] = path;
+                id sync = item[(__bridge id)kSecAttrSynchronizable];
+                if (sync) copy[@"synchronizable"] = @([sync boolValue]);
+                id accessible = item[(__bridge id)kSecAttrAccessible];
+                if (accessible) copy[@"accessible"] = [accessible description];
+                NSData *data = item[(__bridge id)kSecValueData];
+                if (data) copy[@"data"] = [data base64EncodedStringWithOptions:0];
+                [items addObject:copy];
+            }
+        }
+
+        // Also try certificates tied to the bundle (attributes only; private keys may refuse export)
+        {
+            NSDictionary *query = @{
+                (__bridge id)kSecClass: (__bridge id)kSecClassCertificate,
+                (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+                (__bridge id)kSecReturnAttributes: @YES,
+                (__bridge id)kSecReturnRef: @NO,
+            };
+            CFTypeRef result = NULL;
+            if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) == errSecSuccess && result) {
+                NSArray *arr = (__bridge_transfer NSArray *)result;
+                for (NSDictionary *item in arr) {
+                    NSString *label = item[(__bridge id)kSecAttrLabel] ?: @"";
+                    NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup] ?: @"";
+                    if (![label containsString:bid] && ![accessGroup containsString:bid]) continue;
                     NSMutableDictionary *copy = [NSMutableDictionary dictionary];
-                    copy[@"service"] = service;
-                    copy[@"account"] = account;
-                    NSData *data = item[(__bridge id)kSecValueData];
-                    if (data) copy[@"data"] = [data base64EncodedStringWithOptions:0];
+                    copy[@"class"] = @"certificate";
+                    copy[@"label"] = label;
+                    if (accessGroup.length) copy[@"accessGroup"] = accessGroup;
                     [items addObject:copy];
                 }
+            } else if (result) {
+                CFRelease(result);
             }
-        } else if (result) {
-            CFRelease(result);
         }
-        NSString *path = [[NDPaths appsBackupDirForRecord:recordName bundleId:bid] stringByAppendingPathComponent:@"keychain-hints.plist"];
-        NSString *dir = [path stringByDeletingLastPathComponent];
+
+        NSString *dir = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
         [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-        [items writeToFile:path atomically:YES];
+        // Keep legacy filename for older records + richer dump
+        [items writeToFile:[dir stringByAppendingPathComponent:@"keychain-hints.plist"] atomically:YES];
+        [items writeToFile:[dir stringByAppendingPathComponent:@"keychain-full.plist"] atomically:YES];
     }
     return YES;
 }
 
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName {
     for (NSString *bid in bundleIds) {
-        NSString *path = [[NDPaths appsBackupDirForRecord:recordName bundleId:bid] stringByAppendingPathComponent:@"keychain-hints.plist"];
-        NSArray *items = [NSArray arrayWithContentsOfFile:path];
+        NSString *dir = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
+        NSString *fullPath = [dir stringByAppendingPathComponent:@"keychain-full.plist"];
+        NSString *hintPath = [dir stringByAppendingPathComponent:@"keychain-hints.plist"];
+        NSArray *items = [NSArray arrayWithContentsOfFile:fullPath];
+        if (![items isKindOfClass:[NSArray class]]) items = [NSArray arrayWithContentsOfFile:hintPath];
         if (![items isKindOfClass:[NSArray class]]) continue;
+
+        // Clear existing items that look related before restore (avoid duplicates)
+        for (id secClass in @[ (__bridge id)kSecClassGenericPassword, (__bridge id)kSecClassInternetPassword ]) {
+            NSDictionary *query = @{
+                (__bridge id)kSecClass: secClass,
+                (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+                (__bridge id)kSecReturnAttributes: @YES,
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            };
+            CFTypeRef result = NULL;
+            if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) {
+                if (result) CFRelease(result);
+                continue;
+            }
+            NSArray *arr = (__bridge_transfer NSArray *)result;
+            for (NSDictionary *item in arr) {
+                NSString *service = item[(__bridge id)kSecAttrService] ?: @"";
+                NSString *account = item[(__bridge id)kSecAttrAccount] ?: @"";
+                NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup] ?: @"";
+                if (![service containsString:bid] && ![account containsString:bid] && ![accessGroup containsString:bid]) continue;
+                NSMutableDictionary *del = [@{
+                    (__bridge id)kSecClass: secClass,
+                } mutableCopy];
+                if (service.length) del[(__bridge id)kSecAttrService] = service;
+                if (account.length) del[(__bridge id)kSecAttrAccount] = account;
+                if (accessGroup.length) del[(__bridge id)kSecAttrAccessGroup] = accessGroup;
+                SecItemDelete((__bridge CFDictionaryRef)del);
+            }
+        }
+
         for (NSDictionary *item in items) {
+            NSString *cls = item[@"class"] ?: @"generic";
+            if ([cls isEqualToString:@"certificate"]) continue; // attributes-only; skip reimport
+            NSData *data = [[NSData alloc] initWithBase64EncodedString:item[@"data"] ?: @"" options:0];
+            if (!data.length) continue;
+            CFStringRef secClass = [cls isEqualToString:@"internet"] ? kSecClassInternetPassword : kSecClassGenericPassword;
+            NSMutableDictionary *del = [@{
+                (__bridge id)kSecClass: (__bridge id)secClass,
+            } mutableCopy];
             NSString *service = item[@"service"] ?: @"";
             NSString *account = item[@"account"] ?: @"";
-            NSData *data = [[NSData alloc] initWithBase64EncodedString:item[@"data"] ?: @"" options:0];
-            if (!service.length || !data) continue;
-            NSDictionary *del = @{
-                (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                (__bridge id)kSecAttrService: service,
-                (__bridge id)kSecAttrAccount: account,
-            };
+            NSString *accessGroup = item[@"accessGroup"] ?: @"";
+            NSString *server = item[@"server"] ?: @"";
+            if (!service.length && !server.length && !account.length) continue;
+            if (service.length) del[(__bridge id)kSecAttrService] = service;
+            if (account.length) del[(__bridge id)kSecAttrAccount] = account;
+            if (server.length) del[(__bridge id)kSecAttrServer] = server;
+            if (accessGroup.length) del[(__bridge id)kSecAttrAccessGroup] = accessGroup;
             SecItemDelete((__bridge CFDictionaryRef)del);
-            NSDictionary *add = @{
-                (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                (__bridge id)kSecAttrService: service,
-                (__bridge id)kSecAttrAccount: account,
-                (__bridge id)kSecValueData: data,
-            };
-            SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+
+            NSMutableDictionary *add = [del mutableCopy];
+            add[(__bridge id)kSecValueData] = data;
+            if (item[@"label"]) add[(__bridge id)kSecAttrLabel] = item[@"label"];
+            if (item[@"path"]) add[(__bridge id)kSecAttrPath] = item[@"path"];
+            if (item[@"port"]) add[(__bridge id)kSecAttrPort] = item[@"port"];
+            if (item[@"synchronizable"]) add[(__bridge id)kSecAttrSynchronizable] = item[@"synchronizable"];
+            // Prefer AfterFirstUnlock so background restore works
+            add[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlock;
+            OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+            if (st == errSecMissingEntitlement && accessGroup.length) {
+                // Retry without access group when entitlement mismatch
+                [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
+                SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+            }
         }
     }
     return YES;

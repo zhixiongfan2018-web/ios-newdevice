@@ -3,6 +3,10 @@
 		Bundles = (
 			"com.apple.UIKit"
 		);
+		Executables = (
+			"CommCenter",
+			"CommCenterRootHelper"
+		);
 		RejectList = (
 			"xyz.willy.Sileo",
 			"org.coolstar.SileoStore",

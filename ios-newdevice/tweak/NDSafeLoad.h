@@ -6,7 +6,8 @@
 /// Return YES if NewDevice tweak must NOT load in this process.
 /// Keeps Sileo / Dopamine / package managers stable so jailbreak tooling is not disrupted.
 static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
-    if (!bundleId.length) return YES;
+    // Empty bundle id is common for daemons (e.g. CommCenter) — not a jailbreak tool by itself.
+    if (!bundleId.length) return NO;
     static NSSet<NSString *> *deny;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -36,6 +37,11 @@ static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
 static inline BOOL NDShouldLoadTweak(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if (NDBundleIsJailbreakTool(bid)) return NO;
+    // Allow UIKit apps + telephony daemons listed in NewDevice.plist Executables
+    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+    if (!bid.length) {
+        return [proc isEqualToString:@"CommCenter"] || [proc isEqualToString:@"CommCenterRootHelper"];
+    }
     return YES;
 }
 

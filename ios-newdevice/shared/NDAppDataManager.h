@@ -29,7 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)restorePasteboardFromRecord:(NSString *)recordName;
 - (void)clearGeneralPasteboard;
 
-/// Best-effort Keychain export/import for given access groups (plist under backup).
+/// Best-effort Keychain export/import (generic + internet passwords, access groups).
+/// Writes `keychain-full.plist` (+ legacy `keychain-hints.plist`).
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
 

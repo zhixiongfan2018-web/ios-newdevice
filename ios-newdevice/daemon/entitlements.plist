@@ -18,5 +18,9 @@
 	<array>
 		<string>*</string>
 	</array>
+	<key>application-identifier</key>
+	<string>*</string>
+	<key>com.apple.token</key>
+	<true/>
 </dict>
 </plist>

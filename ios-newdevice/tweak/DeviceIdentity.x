@@ -69,7 +69,7 @@ typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef);
 static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && key) {
+    if ([st shouldSpoofIdentity] && key) {
         NSString *k = (__bridge NSString *)key;
         NDDeviceProfile *p = st.profile;
 
@@ -79,7 +79,9 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             return CFBridgingRetain([p.UDID dataUsingEncoding:NSUTF8StringEncoding]);
         }
 
-        if (st.config.fakeDeviceModel) {
+        // In CommCenter (identity host), still apply equipment / model gestalt
+        BOOL modelGate = st.config.fakeDeviceModel || st.identityHost;
+        if (modelGate) {
             if ([k isEqualToString:@"PhysicalMemory"]) {
                 uint64_t mem = p.PhysicalMemory > 0 ? p.PhysicalMemory : [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
                 if (mem > 0) return CFBridgingRetain(@(mem));
@@ -100,14 +102,20 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if (p.BTMAC.length) map[@"BluetoothAddress"] = p.BTMAC;
         if (p.IMEI.length) {
             map[@"InternationalMobileEquipmentIdentity"] = p.IMEI;
+            map[@"InternationalMobileEquipmentIdentity1"] = p.IMEI;
             map[@"InverseDeviceID"] = p.IMEI;
+            map[@"DeviceId"] = p.IMEI;
+            // MEID-ish hex form some baseband stacks expose (14 hex from first 14 decimal digits)
+            if (p.IMEI.length >= 14) {
+                map[@"MobileEquipmentIdentifier"] = p.IMEI;
+            }
         }
         if (p.IMEI2.length) {
             map[@"InternationalMobileEquipmentIdentity2"] = p.IMEI2;
         }
         if (p.OpenUDID.length) map[@"OpenUDID"] = p.OpenUDID;
 
-        if (st.config.fakeDeviceModel) {
+        if (modelGate) {
             if (p.ProductType.length) {
                 map[@"ProductType"] = p.ProductType;
                 map[@"HardwarePlatform"] = p.ProductType;
@@ -132,12 +140,12 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
                 map[@"DeviceEnclosureColor"] = p.DeviceColor;
             }
         }
-        if (st.config.fakeSystemVer) {
+        if (st.config.fakeSystemVer || st.identityHost) {
             if (p.SystemVer.length) map[@"ProductVersion"] = p.SystemVer;
             if (p.Build.length) map[@"BuildVersion"] = p.Build;
         }
         // US locale identity hints (when spoofing carrier / device)
-        if (st.config.fakeCarrier) {
+        if (st.config.fakeCarrier || st.identityHost) {
             map[@"RegionInfo"] = @"US";
             map[@"RegionCode"] = @"US";
         }

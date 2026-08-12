@@ -31,6 +31,7 @@
 - (void)reload {
     if (NDBundleIsJailbreakTool(self.bundleId)) {
         self.active = NO;
+        self.identityHost = NO;
         return;
     }
     [[NDConfig shared] reload];
@@ -40,11 +41,22 @@
     // as original (legacy/corrupt profiles would silently disable spoof).
     BOOL isOriginal = [self.profile.name isEqualToString:@"原始机器"];
     BOOL targeted = [self.config isTargetApp:self.bundleId];
-    self.active = targeted && !isOriginal && self.profile.enabled && self.profile != nil;
+    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+    BOOL isCommCenter = [proc isEqualToString:@"CommCenter"]
+        || [proc isEqualToString:@"CommCenterRootHelper"]
+        || [self.bundleId isEqualToString:@"com.apple.CommCenter"];
+    self.identityHost = isCommCenter;
+    BOOL profileOK = !isOriginal && self.profile.enabled && self.profile != nil;
+    self.active = targeted && profileOK;
 }
 
 - (BOOL)shouldSpoof {
     return self.active && self.profile != nil;
+}
+
+- (BOOL)shouldSpoofIdentity {
+    // Target apps + telephony daemons (baseband-adjacent IMEI / equipment info)
+    return self.profile != nil && (self.active || self.identityHost);
 }
 
 @end

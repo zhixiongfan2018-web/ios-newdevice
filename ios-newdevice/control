@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-52
+Version: 1.0.0-53
 Architecture: iphoneos-arm64
-Description: AMG parity: DeviceName, ifaddrs IP, pasteboard holo, disk/mem hooks.
+Description: DNS deep spoof, CommCenter IMEI surfaces, fuller Keychain holo.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

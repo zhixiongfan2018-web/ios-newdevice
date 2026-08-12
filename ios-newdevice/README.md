@@ -100,21 +100,22 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | 智能飞行 + 公网 IP | ✅ |
 | 脚本 API `8080/cmd` | ✅（含完整 `AMG.*` 兼容表） |
 | Serial / UDID / MAC / IDFA | ✅ |
-| **IMEI / SSID / BSSID** | ✅ 用户态（非基带） |
+| **IMEI / SSID / BSSID** | ✅ 用户态 + CommCenter/IOKit/CT 邻近面（非 modem NVRAM） |
 | iPad 机型池 | ✅（设置里「允许伪装 iPad」） |
 | 分辨率 / 内存 / 磁盘 | ✅ UIScreen + Gestalt / sysctl / `statfs` / `NSFileSystemSize` |
 | DeviceColor / DeviceClass | ✅ |
 | DeviceName（用户设备名） | ✅ 与 Model 分离 |
-| ifaddrs IP / MAC | ✅ `getifaddrs` 读记录内 `ifaddrs.plist` |
+| ifaddrs IP / MAC / DNS | ✅ `getifaddrs` + `SCDynamicStore` + `res_*_getservers` |
 | canOpenURL 隐藏 | ✅ cydia/sileo/… |
 | dyld 计数 / getenv | ✅ 深度防越狱 |
 | 剪贴板全息 | ✅ 切换时备份/还原（可关） |
+| Keychain 全息 | ✅ generic/internet + accessGroup（`keychain-full.plist`） |
 | 记录导入导出 | ✅ 记录页（含 AMG 全息目录） |
 | 美国运营商 / GPS / 时区 | ✅ |
 | 结果文件 `amgResult.txt` | ✅ 同步写入 |
 | `prevRecord` / `getRecordCount` | ✅ |
 
-**边界**：基带级 IMEI、部分系统进程内标识、完整 Keychain 跨组迁移、DNS resolver API、密文 `faker.plist` 解密无法保证。全息 Keychain 仅为可枚举 generic password 的尽力备份。
+**边界**：真正改写基带/modem NVRAM 的 IMEI、跨完全无关 access group 的 Keychain、密文 `faker.plist` 解密仍无法保证。证书私钥导出受系统限制。
 
 额外 API：`clearAppData` / `cleanApps`（只清目标 App，不换身份）；`importAMGRecords`（从 `/var/mobile/AMG` 导入身份）。
 
@@ -142,7 +143,7 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 
 脚本：`http://127.0.0.1:8080/cmd?fun=importAMGRecords`（可选 `&dir=/path`）。
 
-**仍弱于 AMG / 待优化**：DNS resolver 深层伪造、基带 IMEI、完整 Keychain 跨组、密文 faker 解密（需 AMG 运行时密钥）。
+**仍弱于 AMG / 待优化**：modem NVRAM 级 IMEI、Keychain 私钥/证书实体重放、密文 faker 解密。
 
 ## 自测清单
 
