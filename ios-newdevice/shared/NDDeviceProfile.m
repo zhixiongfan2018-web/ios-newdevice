@@ -2,7 +2,7 @@
 #import "NDDeviceCatalog.h"
 
 static NSString *NDRandomHex(NSUInteger length) {
-    static const char *hex = "0123456789ABCDEF";
+    static const char *hex = "0123456789abcdef";
     NSMutableString *s = [NSMutableString stringWithCapacity:length];
     for (NSUInteger i = 0; i < length; i++) {
         [s appendFormat:@"%c", hex[arc4random_uniform(16)]];
@@ -14,43 +14,125 @@ static NSString *NDRandomUUID(void) {
     return [[NSUUID UUID] UUIDString];
 }
 
-static NSString *NDRandomMAC(void) {
-    // Locally administered, unicast
-    uint8_t bytes[6];
-    for (int i = 0; i < 6; i++) bytes[i] = (uint8_t)arc4random_uniform(256);
-    bytes[0] = (bytes[0] & 0xFE) | 0x02;
-    return [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]];
+/// Apple-assigned OUI prefixes commonly seen on iPhone Wi‑Fi / BT interfaces.
+static NSArray<NSString *> *NDAppleOUIs(void) {
+    static NSArray<NSString *> *ouis;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        ouis = @[
+            @"00:1E:C2", @"00:25:00", @"04:0C:CE", @"04:15:52", @"04:26:65",
+            @"04:48:9A", @"04:54:53", @"04:DB:56", @"04:E5:36", @"08:66:98",
+            @"08:70:45", @"0C:74:C2", @"0C:BC:9F", @"10:1C:0C", @"10:94:BB",
+            @"14:10:9F", @"14:20:5E", @"14:7D:DA", @"18:65:90", @"1C:1A:C0",
+            @"1C:36:BB", @"20:78:F0", @"24:A0:74", @"24:F0:94", @"28:37:37",
+            @"28:6A:BA", @"28:CF:E9", @"2C:1F:23", @"30:90:AB", @"34:15:9E",
+            @"34:A3:95", @"38:89:2C", @"3C:07:54", @"40:30:04", @"40:33:1A",
+            @"40:A6:D9", @"44:2A:60", @"48:43:7C", @"4C:74:BF", @"50:32:37",
+            @"54:26:96", @"54:72:4F", @"58:55:CA", @"5C:8D:4E", @"5C:95:AE",
+            @"60:33:4B", @"60:92:17", @"64:A3:CB", @"64:B0:A6", @"68:09:27",
+            @"68:96:7B", @"68:D9:3C", @"6C:40:08", @"6C:70:9F", @"6C:72:E7",
+            @"70:3E:AC", @"70:48:0F", @"70:DE:E2", @"74:1B:B2", @"78:4F:43",
+            @"78:7E:61", @"7C:01:91", @"7C:04:D0", @"7C:11:BE", @"7C:50:49",
+            @"80:BE:05", @"80:E6:50", @"84:38:35", @"84:89:AD", @"84:A1:34",
+            @"88:63:DF", @"88:66:A5", @"8C:29:37", @"8C:85:90", @"90:27:E4",
+            @"90:B0:ED", @"94:BF:2D", @"98:01:A7", @"98:10:E8", @"9C:04:EB",
+            @"9C:84:BF", @"9C:F3:87", @"A4:83:E7", @"A4:B1:97", @"A8:60:B6",
+            @"A8:BB:CF", @"AC:1F:74", @"AC:87:A3", @"AC:BC:32", @"B0:65:BD",
+            @"B4:F0:AB", @"B8:17:C2", @"B8:53:AC", @"B8:63:4D", @"B8:C1:11",
+            @"BC:52:B7", @"BC:67:78", @"BC:92:6B", @"C0:A5:3E", @"C8:69:CD",
+            @"C8:B5:B7", @"CC:08:E0", @"CC:25:EF", @"D0:03:4B", @"D0:23:DB",
+            @"D0:4F:7E", @"D4:61:9D", @"D8:1C:79", @"D8:A2:5E", @"DC:2B:2A",
+            @"DC:37:14", @"DC:56:E7", @"E0:33:8E", @"E0:B9:BA", @"E4:CE:8F",
+            @"E8:04:0B", @"E8:80:2E", @"EC:35:86", @"F0:18:98", @"F0:99:BF",
+            @"F0:DB:E2", @"F4:0F:24", @"F4:F1:5A", @"F8:1E:DF", @"F8:4D:89",
+            @"FC:25:3F", @"FC:E9:98",
+        ];
+    });
+    return ouis;
 }
 
+static NSString *NDRandomMAC(void) {
+    NSString *oui = NDAppleOUIs()[arc4random_uniform((uint32_t)NDAppleOUIs().count)];
+    // Globally administered (clear multicast + local bits) — matches real Apple NICs
+    uint8_t b3 = (uint8_t)arc4random_uniform(256);
+    uint8_t b4 = (uint8_t)arc4random_uniform(256);
+    uint8_t b5 = (uint8_t)arc4random_uniform(256);
+    return [NSString stringWithFormat:@"%@:%02X:%02X:%02X", oui, b3, b4, b5];
+}
+
+/// Modern iPhone serials are typically 10 chars (newer) or 12 chars (legacy).
 static NSString *NDRandomSerial(void) {
-    static NSString *alphabet = @"CDEFGHJKLMNPQRSTUVWXYZ0123456789";
-    NSMutableString *s = [NSMutableString stringWithCapacity:12];
-    for (int i = 0; i < 12; i++) {
-        NSUInteger idx = arc4random_uniform((uint32_t)alphabet.length);
-        [s appendFormat:@"%C", [alphabet characterAtIndex:idx]];
+    static NSString *alpha = @"CDEFGHJKLMNPQRSTUVWXYZ";
+    static NSString *alnum = @"CDEFGHJKLMNPQRSTUVWXYZ0123456789";
+    NSUInteger len = (arc4random_uniform(100) < 65) ? 10 : 12;
+    NSMutableString *s = [NSMutableString stringWithCapacity:len];
+    // First char often a letter plant/code hint
+    [s appendFormat:@"%C", [alpha characterAtIndex:arc4random_uniform((uint32_t)alpha.length)]];
+    for (NSUInteger i = 1; i < len; i++) {
+        [s appendFormat:@"%C", [alnum characterAtIndex:arc4random_uniform((uint32_t)alnum.length)]];
     }
     return s;
 }
 
 static NSString *NDRandomBuild(NSString *systemVer) {
-    // Prefer known public builds for modern iOS (esp. 18.x)
     static NSDictionary<NSString *, NSString *> *known;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         known = @{
+            // iOS 16
+            @"16.0": @"20A362",
+            @"16.0.2": @"20A380",
+            @"16.1": @"20B82",
+            @"16.1.1": @"20B101",
+            @"16.1.2": @"20B110",
+            @"16.2": @"20C65",
+            @"16.3": @"20D47",
+            @"16.3.1": @"20D67",
+            @"16.4": @"20E247",
+            @"16.4.1": @"20E252",
+            @"16.5": @"20F66",
+            @"16.5.1": @"20F75",
+            @"16.6": @"20G75",
             @"16.6.1": @"20G81",
+            @"16.7": @"20H19",
+            @"16.7.1": @"20H30",
             @"16.7.2": @"20H115",
+            @"16.7.5": @"20H307",
+            @"16.7.8": @"20H343",
+            @"16.7.10": @"20H350",
+            // iOS 17
             @"17.0": @"21A329",
+            @"17.0.1": @"21A340",
+            @"17.0.2": @"21A351",
+            @"17.0.3": @"21A360",
+            @"17.1": @"21B74",
             @"17.1.1": @"21B91",
+            @"17.1.2": @"21B101",
+            @"17.2": @"21C62",
+            @"17.2.1": @"21C66",
+            @"17.3": @"21D50",
+            @"17.3.1": @"21D61",
+            @"17.4": @"21E219",
             @"17.4.1": @"21E236",
+            @"17.5": @"21F79",
             @"17.5.1": @"21F90",
+            @"17.6": @"21G80",
             @"17.6.1": @"21G93",
+            @"17.7": @"21H16",
+            @"17.7.1": @"21H216",
+            @"17.7.2": @"21H221",
+            // iOS 18
             @"18.0": @"22A3354",
+            @"18.0.1": @"22A3370",
             @"18.1": @"22B83",
+            @"18.1.1": @"22B91",
+            @"18.2": @"22C152",
             @"18.2.1": @"22C161",
+            @"18.3": @"22D63",
             @"18.3.1": @"22D72",
+            @"18.3.2": @"22D82",
             @"18.4": @"22E240",
+            @"18.4.1": @"22E252",
             @"18.5": @"22F76",
         };
     });
@@ -114,10 +196,38 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         }
     }
     if (!dev) {
-        dev = models[arc4random_uniform((uint32_t)models.count)];
+        // Bias toward recent devices (14+) without excluding older ones
+        NSUInteger biasStart = 0;
+        for (NSUInteger i = 0; i < models.count; i++) {
+            NSString *pt = models[i][@"ProductType"];
+            if ([pt hasPrefix:@"iPhone14,"] || [pt hasPrefix:@"iPhone15,"] ||
+                [pt hasPrefix:@"iPhone16,"] || [pt hasPrefix:@"iPhone17,"]) {
+                biasStart = i;
+                break;
+            }
+        }
+        if (biasStart > 0 && arc4random_uniform(100) < 70) {
+            NSUInteger span = models.count - biasStart;
+            dev = models[biasStart + arc4random_uniform((uint32_t)span)];
+        } else {
+            dev = models[arc4random_uniform((uint32_t)models.count)];
+        }
     }
 
-    NSString *sys = systemVer.length ? systemVer : [NDDeviceCatalog systemVersions][arc4random_uniform((uint32_t)[NDDeviceCatalog systemVersions].count)];
+    NSArray *systems = [NDDeviceCatalog systemVersions];
+    NSString *sys = systemVer;
+    if (!sys.length) {
+        // Bias toward iOS 17/18 for modern app compatibility
+        NSMutableArray *modern = [NSMutableArray array];
+        for (NSString *v in systems) {
+            if ([v hasPrefix:@"17."] || [v hasPrefix:@"18."]) [modern addObject:v];
+        }
+        if (modern.count && arc4random_uniform(100) < 75) {
+            sys = modern[arc4random_uniform((uint32_t)modern.count)];
+        } else {
+            sys = systems[arc4random_uniform((uint32_t)systems.count)];
+        }
+    }
     NSDictionary *carrier = [NDDeviceCatalog carriers][arc4random_uniform((uint32_t)[NDDeviceCatalog carriers].count)];
     NSDictionary *coord = [NDDeviceCatalog randomChinaCoordinate];
 
@@ -125,7 +235,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.IDFV = NDRandomUUID();
     p.UUID = NDRandomUUID();
     p.Serial = NDRandomSerial();
-    p.UDID = [NDRandomHex(40) lowercaseString];
+    p.UDID = NDRandomHex(40); // lowercase 40-hex, matches Apple UDID style
     p.WiFiMAC = NDRandomMAC();
     p.BTMAC = NDRandomMAC();
     p.DeviceToken = NDRandomHex(64);
@@ -143,7 +253,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
 
     p.Latitude = [coord[@"lat"] doubleValue];
     p.Longitude = [coord[@"lon"] doubleValue];
-    p.Altitude = 5.0 + arc4random_uniform(80);
+    // Urban altitude: mostly low buildings / street level
+    p.Altitude = 8.0 + (double)arc4random_uniform(120) + ((double)arc4random_uniform(100) / 100.0);
     return p;
 }
 

@@ -27,12 +27,16 @@
         dict[@"profile"] = [profile toDictionary];
     }
     NSString *path = [NDPaths runtimeStatePath];
-    NSString *dir = [path stringByDeletingLastPathComponent];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
-    [dict writeToFile:path atomically:YES];
+    NSString *dir = [NDPaths runtimeStateDir];
+    NSError *writeErr = nil;
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:&writeErr];
+    BOOL wrote = [dict writeToFile:path atomically:YES];
+    if (!wrote) {
+        NSLog(@"[NewDevice] runtime.plist publish failed at %@", path);
+    }
     [NDPaths makePathWorldReadable:dir];
     [NDPaths makePathWorldReadable:path];
-    // Also relax preferences copies used as fallback
+    // Also relax preferences copies used as fallback (may still be unreadable in sandbox)
     [NDPaths makePathWorldReadable:[NDPaths preferencesDir]];
     [NDPaths makePathWorldReadable:[NDPaths configPlistPath]];
     [NDPaths makePathWorldReadable:[NDPaths currentRecordPointerPath]];

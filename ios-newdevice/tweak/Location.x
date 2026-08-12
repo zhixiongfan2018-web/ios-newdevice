@@ -16,6 +16,17 @@ static CLLocation *NDFakeLocation(void) {
                                         timestamp:[NSDate date]];
 }
 
+static void NDDeliverFake(CLLocationManager *manager) {
+    CLLocation *fake = NDFakeLocation();
+    id<CLLocationManagerDelegate> delegate = manager.delegate;
+    if (!fake || !delegate) return;
+    if ([delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [delegate locationManager:manager didUpdateLocations:@[fake]];
+        });
+    }
+}
+
 %hook CLLocationManager
 - (CLLocation *)location {
     CLLocation *fake = NDFakeLocation();
@@ -24,25 +35,40 @@ static CLLocation *NDFakeLocation(void) {
 }
 
 - (void)startUpdatingLocation {
-    %orig;
-    CLLocation *fake = NDFakeLocation();
-    id<CLLocationManagerDelegate> delegate = self.delegate;
-    if (fake && delegate && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [delegate locationManager:self didUpdateLocations:@[fake]];
-        });
-    }
-}
-
-- (void)requestLocation {
-    CLLocation *fake = NDFakeLocation();
-    id<CLLocationManagerDelegate> delegate = self.delegate;
-    if (fake && delegate && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [delegate locationManager:self didUpdateLocations:@[fake]];
-        });
+    if (NDFakeLocation()) {
+        // Avoid racing real GPS callbacks against the spoofed fix
+        NDDeliverFake(self);
         return;
     }
     %orig;
+}
+
+- (void)startUpdatingHeading {
+    if (NDFakeLocation()) {
+        return;
+    }
+    %orig;
+}
+
+- (void)requestLocation {
+    if (NDFakeLocation()) {
+        NDDeliverFake(self);
+        return;
+    }
+    %orig;
+}
+
+- (void)requestWhenInUseAuthorization {
+    %orig;
+    if (NDFakeLocation()) {
+        NDDeliverFake(self);
+    }
+}
+
+- (void)requestAlwaysAuthorization {
+    %orig;
+    if (NDFakeLocation()) {
+        NDDeliverFake(self);
+    }
 }
 %end

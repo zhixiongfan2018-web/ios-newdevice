@@ -19,6 +19,7 @@ FOUNDATION_EXPORT NSInteger const NDHTTPPort;
 + (NSString *)currentRecordPointerPath;
 /// World-readable snapshot for sandboxed target apps (tweak injection).
 + (NSString *)runtimeStatePath;
++ (NSString *)runtimeStateDir;
 + (void)ensureDirectories;
 + (void)makePathWorldReadable:(NSString *)path;
 @end

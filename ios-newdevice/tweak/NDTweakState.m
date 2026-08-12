@@ -36,9 +36,11 @@
     [[NDConfig shared] reload];
     self.config = [NDConfig shared];
     self.profile = [[NDRecordStore shared] currentProfile];
-    BOOL isOriginal = [self.profile.name isEqualToString:@"原始机器"] || self.profile.IDFA.length == 0;
+    // Only the explicit "原始机器" record means passthrough — do NOT treat empty IDFA alone
+    // as original (legacy/corrupt profiles would silently disable spoof).
+    BOOL isOriginal = [self.profile.name isEqualToString:@"原始机器"];
     BOOL targeted = [self.config isTargetApp:self.bundleId];
-    self.active = targeted && !isOriginal && self.profile.enabled;
+    self.active = targeted && !isOriginal && self.profile.enabled && self.profile != nil;
 }
 
 - (BOOL)shouldSpoof {

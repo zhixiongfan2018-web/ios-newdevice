@@ -52,9 +52,20 @@ NSInteger const NDHTTPPort = 8080;
     return [[self preferencesDir] stringByAppendingPathComponent:@"currentRecord.txt"];
 }
 
++ (NSString *)runtimeStateDir {
+    return [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice"];
+}
+
 + (NSString *)runtimeStatePath {
-    // /var/jb/Library/NewDevice is outside app containers and typically readable by injected tweaks
-    return [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice/runtime.plist"];
+    // Outside app containers; world-readable snapshot for injected tweaks
+    return [[self runtimeStateDir] stringByAppendingPathComponent:@"runtime.plist"];
+}
+
++ (void)chmodPath:(NSString *)path mode:(NSUInteger)mode {
+    if (!path.length) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) return;
+    [fm setAttributes:@{NSFilePosixPermissions: @(mode)} ofItemAtPath:path error:nil];
 }
 
 + (void)makePathWorldReadable:(NSString *)path {
@@ -62,10 +73,15 @@ NSInteger const NDHTTPPort = 8080;
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:path isDirectory:&isDir]) return;
-    NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
-    attrs[NSFilePosixPermissions] = isDir ? @0755 : @0644;
-    [fm setAttributes:attrs ofItemAtPath:path error:nil];
-    // Also chmod parents we own under jb Library/NewDevice and preferences
+    [self chmodPath:path mode:(isDir ? 0755 : 0644)];
+
+    // Always ensure the runtime snapshot directory chain is traversable by sandboxed apps.
+    NSString *runtimeDir = [self runtimeStateDir];
+    [self chmodPath:runtimeDir mode:0755];
+    NSString *library = [runtimeDir stringByDeletingLastPathComponent]; // .../Library
+    if ([library hasSuffix:@"/Library"]) {
+        [self chmodPath:library mode:0755];
+    }
 }
 
 + (void)ensureDirectories {
@@ -73,14 +89,13 @@ NSInteger const NDHTTPPort = 8080;
     NSArray<NSString *> *dirs = @[
         [self preferencesDir],
         [self recordsRoot],
-        [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice"],
+        [self runtimeStateDir],
     ];
     for (NSString *dir in dirs) {
         if (![fm fileExistsAtPath:dir]) {
             [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
-        } else {
-            [self makePathWorldReadable:dir];
         }
+        [self makePathWorldReadable:dir];
     }
 }
 

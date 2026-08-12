@@ -7,7 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSArray<NSString *> *)systemVersions;
 + (NSArray<NSDictionary *> *)carriers; // Carrier, MCC, MNC
 + (NSArray<NSString *> *)radioAccessTypes;
-+ (NSDictionary *)randomChinaCoordinate; // lat, lon
++ (NSArray<NSDictionary *> *)chinaCityCoordinates; // city, lat, lon
++ (NSDictionary *)randomChinaCoordinate; // lat, lon, city
 @end
 
 NS_ASSUME_NONNULL_END
