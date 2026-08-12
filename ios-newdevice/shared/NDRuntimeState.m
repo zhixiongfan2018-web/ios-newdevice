@@ -23,6 +23,8 @@
         @"holographicBackup": @(config.holographicBackup),
         @"allowIPadSpoof": @(config.allowIPadSpoof),
         @"clearPasteboardOnSwitch": @(config.clearPasteboardOnSwitch),
+        @"importKeychainWithData": @(config.importKeychainWithData),
+        @"slimExportStripMedia": @(config.slimExportStripMedia),
         @"targetApps": config.targetApps ?: @[],
         @"currentRecord": currentName ?: @"",
     } mutableCopy];

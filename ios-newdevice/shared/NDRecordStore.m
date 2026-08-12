@@ -333,7 +333,7 @@
 }
 
 - (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError **)error {
-    if (!dir.length) dir = @"/var/mobile/AMG";
+    if (!dir.length) dir = @"/var/mobile/AMG_tar";
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
@@ -420,14 +420,33 @@
             NSDictionary *selectDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"selectApp.plist"]];
             if ([selectDict[@"apps"] isKindOfClass:[NSArray class]]) selectApps = selectDict[@"apps"];
         }
-        if ([selectApps isKindOfClass:[NSArray class]]) [self mergeTargetApps:selectApps];
+        // description.appName may hold bundle ids or display names; merge string-looking bids
+        NSDictionary *descDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
+        NSMutableArray *toMerge = [NSMutableArray array];
+        if ([selectApps isKindOfClass:[NSArray class]]) [toMerge addObjectsFromArray:selectApps];
+        if ([descDict[@"appName"] isKindOfClass:[NSArray class]]) {
+            for (id item in descDict[@"appName"]) {
+                if ([item isKindOfClass:[NSString class]] && [item containsString:@"."]) [toMerge addObject:item];
+            }
+        }
+        if (toMerge.count) [self mergeTargetApps:toMerge];
 
-        for (NSString *side in @[@"ifaddrs.plist", @"faker.plist", @"description.plist", @"selectApp.plist"]) {
+        // Side-copy metadata; skip ciphertext faker (identity already saved as profile.plist)
+        for (NSString *side in @[@"ifaddrs.plist", @"description.plist", @"selectApp.plist"]) {
             NSString *src = [full stringByAppendingPathComponent:side];
             if (![fm fileExistsAtPath:src]) continue;
             NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:side];
             [fm removeItemAtPath:dst error:nil];
             [fm copyItemAtPath:src toPath:dst error:nil];
+        }
+        NSString *fakerSrc = [full stringByAppendingPathComponent:@"faker.plist"];
+        if ([fm fileExistsAtPath:fakerSrc]) {
+            NSDictionary *fakerRaw = [NSDictionary dictionaryWithContentsOfFile:fakerSrc];
+            if (![NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:fakerRaw]) {
+                NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"faker.plist"];
+                [fm removeItemAtPath:dst error:nil];
+                [fm copyItemAtPath:fakerSrc toPath:dst error:nil];
+            }
         }
         NSString *pbSrc = [full stringByAppendingPathComponent:@"Pasteboard"];
         if ([fm fileExistsAtPath:pbSrc]) {
@@ -437,13 +456,13 @@
         }
 
         [[NDAppDataManager shared] importAMGHolographicFromDirectory:full intoRecord:saved.name];
-        if ([NDConfig shared].importKeychainWithData) {
-            NSArray *apps = [NDConfig shared].targetApps ?: @[];
-            if (!apps.count && [selectApps isKindOfClass:[NSArray class]]) apps = selectApps;
-            if (apps.count) {
-                [[NDAppDataManager shared] restoreKeychainHintsForApps:apps fromRecord:saved.name];
-            }
-        }
+        // Merge apps discovered from holographic folders under Records/<name>/apps/
+        NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
+        NSArray *holoBids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        if (holoBids.count) [self mergeTargetApps:holoBids];
+
+        // Keychain: stage only during holographic import. Live restore happens on record switch
+        // via restoreApps → restoreKeychainHints (avoids multi-record import clobbering Keychain).
     }
     if (imported) [self notifyReload];
     return imported;

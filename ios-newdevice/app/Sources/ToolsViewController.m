@@ -52,7 +52,7 @@ extern char **environ;
         cell.textLabel.text = @"同时导入 Keychain";
         cell.detailTextLabel.font = [NDTheme captionFont];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        cell.detailTextLabel.text = @"导入记录时还原 keychain-full.plist";
+        cell.detailTextLabel.text = @"导入时暂存钥匙串；切换记录时再写入系统 Keychain";
         UISwitch *sw = [UISwitch new];
         sw.onTintColor = [NDTheme accent];
         sw.on = c.importKeychainWithData;

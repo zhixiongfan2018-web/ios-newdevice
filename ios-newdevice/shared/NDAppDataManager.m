@@ -1,5 +1,6 @@
 #import "NDAppDataManager.h"
 #import "NDPaths.h"
+#import "NDConfig.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <spawn.h>
@@ -481,8 +482,10 @@ extern char **environ;
     static NSSet *skip;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        skip = [NSSet setWithArray:@[@"AppGroup", @"Pasteboard", @"Documents", @"Library", @"tmp"]];
+        skip = [NSSet setWithArray:@[@"AppGroup", @"Pasteboard", @"Documents", @"Library", @"tmp", @"SystemData"]];
     });
+
+    BOOL importKC = [NDConfig shared].importKeychainWithData;
 
     for (NSString *entry in entries) {
         if ([entry hasPrefix:@"."]) continue;
@@ -499,6 +502,17 @@ extern char **environ;
             NSString *src = [srcRoot stringByAppendingPathComponent:sub];
             if (![fm fileExistsAtPath:src]) continue;
             [self copyItem:src to:[dstRoot stringByAppendingPathComponent:sub] error:nil];
+        }
+        // AMG/NewDevice may keep keychain dumps at <bid>/keychain-*.plist (not under Library/)
+        if (importKC) {
+            for (NSString *kcName in @[@"keychain-full.plist", @"keychain-hints.plist"]) {
+                NSString *kcSrc = [srcRoot stringByAppendingPathComponent:kcName];
+                if (![fm fileExistsAtPath:kcSrc]) continue;
+                [fm createDirectoryAtPath:dstRoot withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *kcDst = [dstRoot stringByAppendingPathComponent:kcName];
+                [fm removeItemAtPath:kcDst error:nil];
+                [fm copyItemAtPath:kcSrc toPath:kcDst error:nil];
+            }
         }
     }
 

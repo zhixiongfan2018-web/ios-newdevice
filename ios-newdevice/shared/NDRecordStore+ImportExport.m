@@ -17,19 +17,46 @@ extern char **environ;
 + (NSString *)iGrimaceImportPath { return @"/var/mobile/iGrimace"; }
 + (NSString *)awzImportPath { return @"/var/mobile/importdata"; }
 
-+ (NSString *)resolvedAMGImportPath {
++ (BOOL)NDDirectoryLooksImportable:(NSString *)dir {
     NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return NO;
+    NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *entry in entries) {
+        if ([entry hasPrefix:@"."]) continue;
+        NSString *lower = entry.lowercaseString;
+        if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".tar"] || [lower hasSuffix:@".zip"]) return YES;
+        if ([lower hasSuffix:@".plist"]) return YES;
+        NSString *full = [dir stringByAppendingPathComponent:entry];
+        BOOL entryDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&entryDir] || !entryDir) continue;
+        // Record folder: faker/profile/description or app bundles
+        for (NSString *marker in @[@"faker.plist", @"profile.plist", @"description.plist", @"selectApp.plist"]) {
+            if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:marker]]) return YES;
+        }
+    }
+    return NO;
+}
+
++ (NSString *)resolvedAMGImportPath {
+    // Prefer directories that actually contain importable content.
+    // Empty AMG_tar (created by a prior export) must not shadow Media/AMG/import.
     NSArray *candidates = @[
         [self amgTarPath],
         [self amgMediaImportPath],
         @"/var/mobile/Media/AMG",
+        // Runtime tree last — faker often at-rest ciphertext; only use if nothing else
         @"/var/mobile/AMG",
     ];
+    NSString *emptyPreferred = nil;
     for (NSString *p in candidates) {
+        if ([self NDDirectoryLooksImportable:p]) return p;
         BOOL isDir = NO;
-        if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) return p;
+        if (!emptyPreferred && [[NSFileManager defaultManager] fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+            emptyPreferred = p;
+        }
     }
-    return [self amgTarPath];
+    return emptyPreferred ?: [self amgTarPath];
 }
 
 - (BOOL)NDSpawn:(const char *)path args:(char *const[])argv {
@@ -60,7 +87,6 @@ extern char **environ;
         return NO;
     }
 
-    // .tar / .tar.gz / .tgz (AMG packs into AMG_tar)
     for (const char **b = tarBins; *b; b++) {
         NSString *bin = [NSString stringWithUTF8String:*b];
         if (![fm fileExistsAtPath:bin]) continue;
@@ -97,33 +123,52 @@ extern char **environ;
     }
 
     NSUInteger total = 0;
-    // 1) Folder trees (and nested record dirs)
-    total += [self NDImportUnpackedTree:dir importKeychain:importKeychain error:error];
 
-    // 2) Archives that official AMG dumps into AMG_tar (no manual decrypt)
+    // 1) Folder trees
+    {
+        NSError *err = nil;
+        NSUInteger n = [self NDImportUnpackedTree:dir importKeychain:importKeychain error:&err];
+        total += n;
+        if (error && err) *error = err;
+    }
+
+    // 2) Archives in AMG_tar (skip if same basename already present as folder)
     NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
     NSString *scratchRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-amg-import"];
     [fm createDirectoryAtPath:scratchRoot withIntermediateDirectories:YES attributes:nil error:nil];
 
     for (NSString *entry in entries) {
         NSString *lower = entry.lowercaseString;
-        BOOL isArchive = [lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".tar"] || [lower hasSuffix:@".zip"] || [lower hasSuffix:@".gz"];
+        BOOL isArchive = [lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".tar"] || [lower hasSuffix:@".zip"];
         if (!isArchive) continue;
-        NSString *archive = [dir stringByAppendingPathComponent:entry];
-        NSString *dest = [scratchRoot stringByAppendingPathComponent:[[entry stringByDeletingPathExtension] stringByDeletingPathExtension]];
-        [fm removeItemAtPath:dest error:nil];
-        if (![self NDExtractArchive:archive toDirectory:dest]) continue;
 
-        // Archives often wrap var/mobile/AMG/<record>/ — walk a few levels for faker.plist / record folders
+        // Skip archive if an unpacked sibling folder with same logical name exists
+        NSString *base = entry;
+        if ([lower hasSuffix:@".tar.gz"]) base = [entry substringToIndex:entry.length - 7];
+        else base = [entry stringByDeletingPathExtension];
+        NSString *sibling = [dir stringByAppendingPathComponent:base];
+        BOOL siblingDir = NO;
+        if ([fm fileExistsAtPath:sibling isDirectory:&siblingDir] && siblingDir) continue;
+
+        NSString *archive = [dir stringByAppendingPathComponent:entry];
+        NSString *dest = [scratchRoot stringByAppendingPathComponent:base];
+        [fm removeItemAtPath:dest error:nil];
+        if (![self NDExtractArchive:archive toDirectory:dest]) {
+            if (error && !*error) {
+                *error = [NSError errorWithDomain:@"NDRecordStore" code:32 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"无法解压: %@", entry]}];
+            }
+            continue;
+        }
+
         NSString *importRoot = dest;
-        NSString *nestedAMG = [dest stringByAppendingPathComponent:@"var/mobile/AMG"];
-        if ([fm fileExistsAtPath:nestedAMG]) importRoot = nestedAMG;
-        else {
-            NSString *nestedTar = [dest stringByAppendingPathComponent:@"var/mobile/AMG_tar"];
-            if ([fm fileExistsAtPath:nestedTar]) importRoot = nestedTar;
+        for (NSString *nested in @[@"var/mobile/AMG", @"var/mobile/AMG_tar", @"private/var/mobile/AMG", @"AMG"]) {
+            NSString *p = [dest stringByAppendingPathComponent:nested];
+            if ([fm fileExistsAtPath:p]) { importRoot = p; break; }
         }
         total += [self NDImportUnpackedTree:importRoot importKeychain:importKeychain error:nil];
     }
+
+    [fm removeItemAtPath:scratchRoot error:nil];
 
     if (total == 0 && error && !*error) {
         *error = [NSError errorWithDomain:@"NDRecordStore" code:31 userInfo:@{NSLocalizedDescriptionKey: @"未找到可导入的 AMG 记录。请使用 AMG「导出 AMG 数据」得到的包放到 /var/mobile/AMG_tar，不要只拷运行时目录 /var/mobile/AMG（其中 faker.plist 为落盘密文）。"}];
@@ -177,7 +222,6 @@ extern char **environ;
         if (!p) continue;
         NSString *out = [dir stringByAppendingPathComponent:name];
         [fm removeItemAtPath:out error:nil];
-        // Plaintext faker — re-import does NOT need decryption
         if (![p writeAMGFakerToDirectory:out error:nil]) continue;
 
         NSDictionary *desc = @{

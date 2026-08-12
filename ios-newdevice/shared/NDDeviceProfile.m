@@ -464,7 +464,10 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     }
     if (!d[@"DeviceName"] && d[@"UserAssignedDeviceName"]) d[@"DeviceName"] = d[@"UserAssignedDeviceName"];
 
-    // Identity aliases used by AMG / AWZ / CTW exports (faker.plist keys)
+    // Identity aliases used by AMG / AWZ / CTW / Gestalt-style exports
+    if (!d[@"UDID"] && d[@"UniqueDeviceID"]) d[@"UDID"] = d[@"UniqueDeviceID"];
+    if (!d[@"IDFA"] && d[@"AdvertisingIdentifier"]) d[@"IDFA"] = d[@"AdvertisingIdentifier"];
+    if (!d[@"IDFV"] && d[@"IdentifierForVendor"]) d[@"IDFV"] = d[@"IdentifierForVendor"];
     if (!d[@"Serial"] && d[@"SerialNum"]) d[@"Serial"] = d[@"SerialNum"];
     if (!d[@"Serial"] && d[@"SerialNumber"]) d[@"Serial"] = d[@"SerialNumber"];
     if (!d[@"WiFiMAC"] && d[@"MAC"]) d[@"WiFiMAC"] = d[@"MAC"];
@@ -483,6 +486,11 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"HardwareMachine"] && d[@"ProductType"]) d[@"HardwareMachine"] = d[@"ProductType"];
     if (!d[@"IMEI"] && d[@"InternationalMobileEquipmentIdentity"]) d[@"IMEI"] = d[@"InternationalMobileEquipmentIdentity"];
     if (!d[@"IMEI2"] && d[@"InternationalMobileEquipmentIdentity2"]) d[@"IMEI2"] = d[@"InternationalMobileEquipmentIdentity2"];
+    if (!d[@"Carrier"] && d[@"CarrierName"]) d[@"Carrier"] = d[@"CarrierName"];
+    if (!d[@"MCC"] && d[@"MobileCountryCode"]) d[@"MCC"] = d[@"MobileCountryCode"];
+    if (!d[@"MNC"] && d[@"MobileNetworkCode"]) d[@"MNC"] = d[@"MobileNetworkCode"];
+    if (!d[@"RadioAccess"] && d[@"CurrentRadioAccessTechnology"]) d[@"RadioAccess"] = d[@"CurrentRadioAccessTechnology"];
+    if (!d[@"DeviceClass"] && d[@"DeviceClassNumber"]) d[@"DeviceClass"] = d[@"DeviceClassNumber"];
 
     // Disk / RAM / brightness / uptime (AMG faker.plist)
     if (!d[@"DiskCapacity"] && d[@"DiskSpace"]) d[@"DiskCapacity"] = d[@"DiskSpace"];

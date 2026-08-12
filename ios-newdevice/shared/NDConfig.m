@@ -64,11 +64,17 @@
     NSDictionary *runtime = [NDRuntimeState dictionary];
     if (runtime) {
         [self applyDictionary:runtime];
-        // preferred* may only live in full config plist
+        // preferred* + Tools toggles may only live in full config plist on older runtime.plist
         NSDictionary *full = [NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]];
         if ([full isKindOfClass:[NSDictionary class]]) {
             self.preferredModels = full[@"preferredModels"] ?: self.preferredModels;
             self.preferredSystems = full[@"preferredSystems"] ?: self.preferredSystems;
+            if (!runtime[@"importKeychainWithData"] && full[@"importKeychainWithData"]) {
+                self.importKeychainWithData = [full[@"importKeychainWithData"] boolValue];
+            }
+            if (!runtime[@"slimExportStripMedia"] && full[@"slimExportStripMedia"]) {
+                self.slimExportStripMedia = [full[@"slimExportStripMedia"] boolValue];
+            }
         }
         return;
     }
