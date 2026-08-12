@@ -3,6 +3,7 @@
 #import "NDRecordStore+ImportExport.h"
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
+#import "NDOperationService.h"
 #import "NDTheme.h"
 #import "NDPaths.h"
 #import "NDConfig.h"
@@ -173,10 +174,16 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSString *name = self.names[indexPath.row];
+    // Prefer in-process switch first (avoids query '+' / space mangling for imported names)
+    NSError *localErr = nil;
+    if ([[NDRecordStore shared] switchToRecord:name error:&localErr]) {
+        [[NDRecordStore shared] notifyReload];
+        [self reload];
+    }
     [[NDAPIClient shared] call:@"setRecord" query:@{@"recordName": name} completion:^(BOOL ok, NSString *body, NSError *error) {
         [self reload];
-        if (!ok) {
-            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        if (!ok && localErr) {
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败" message:error.localizedDescription ?: localErr.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
         }

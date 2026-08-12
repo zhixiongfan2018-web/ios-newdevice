@@ -35,16 +35,37 @@
     return fun.length && [set containsObject:fun];
 }
 
-- (void)prepareTargets:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
+- (NSArray<NSString *> *)appsForSwitchTo:(NSString *)current previous:(NSString *)previous {
     [[NDConfig shared] reload];
-    NSArray *apps = [NDConfig shared].targetApps ?: @[];
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[NDConfig shared].targetApps ?: @[]];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [set addObject:b];
+    // Keep global targetApps in sync so「目标应用」页能看到导入的 App 环境
+    if (set.count && set.count != ([NDConfig shared].targetApps.count ?: 0)) {
+        [NDConfig shared].targetApps = set.array;
+        [[NDConfig shared] save];
+    }
+    return set.array;
+}
+
+- (void)prepareTargets:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
     NSString *prev = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
+    NSArray *apps = [self appsForSwitchTo:prev previous:prev];
     [[NDAppDataManager shared] terminateApps:apps];
     block(apps, prev);
 }
 
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
     NDConfig *cfg = [NDConfig shared];
+    // Prefer apps belonging to the destination record (imported selectApp / apps/)
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:apps ?: @[]];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [set addObject:b];
+    apps = set.array;
+    if (apps.count) {
+        cfg.targetApps = apps;
+        [cfg save];
+    }
     if (cfg.holographicBackup && apps.count) {
         if (previous.length && ![previous isEqualToString:@"原始机器"]) {
             [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
@@ -53,6 +74,7 @@
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
         } else {
             [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
+            [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
         }
     } else if (apps.count) {
         [[NDAppDataManager shared] clearDataForApps:apps error:nil];

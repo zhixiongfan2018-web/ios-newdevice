@@ -329,14 +329,8 @@
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:22 userInfo:@{NSLocalizedDescriptionKey: @"Skipped reserved name"}];
         return nil;
     }
-    if ([self profileNamed:p.name]) {
-        NSString *base = p.name;
-        NSInteger suffix = 2;
-        while ([self profileNamed:[NSString stringWithFormat:@"%@-%ld", base, (long)suffix]]) {
-            suffix++;
-        }
-        p.name = [NSString stringWithFormat:@"%@-%ld", base, (long)suffix];
-    }
+    p.name = [self sanitizeRecordName:p.name];
+    p.enabled = YES;
     if (![self saveProfile:p error:error]) return nil;
     return p;
 }
@@ -354,15 +348,149 @@
     return [NSString stringWithFormat:@"%@-%ld", base, (long)suffix];
 }
 
++ (BOOL)NDLooksLikeBundleId:(NSString *)s {
+    if (s.length < 3) return NO;
+    if ([s hasPrefix:@"."]) return NO;
+    if ([s containsString:@"/"]) return NO;
+    // com.foo / net.x / xyz.willy.Sileo
+    NSArray *parts = [s componentsSeparatedByString:@"."];
+    if (parts.count < 2) return NO;
+    for (NSString *p in parts) {
+        if (!p.length) return NO;
+    }
+    return YES;
+}
+
++ (NSArray<NSString *> *)parseAppBundleIdsFromValue:(id)raw {
+    NSMutableOrderedSet *out = [NSMutableOrderedSet orderedSet];
+    void (^add)(NSString *) = ^(NSString *s) {
+        s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([[self class] NDLooksLikeBundleId:s]) [out addObject:s];
+    };
+    if ([raw isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)raw) {
+            if ([item isKindOfClass:[NSString class]]) {
+                add(item);
+            } else if ([item isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *d = item;
+                for (NSString *k in @[@"bundleId", @"bundleID", @"bid", @"id", @"appId", @"identifier", @"bundle"]) {
+                    if ([d[k] isKindOfClass:[NSString class]]) add(d[k]);
+                }
+            }
+        }
+    } else if ([raw isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *d = raw;
+        if ([d[@"apps"] isKindOfClass:[NSArray class]] || [d[@"appName"] isKindOfClass:[NSArray class]] || [d[@"bundleIds"] isKindOfClass:[NSArray class]]) {
+            for (NSString *k in @[@"apps", @"appName", @"bundleIds", @"SelectApp", @"selectApp"]) {
+                NSArray *part = [[self class] parseAppBundleIdsFromValue:d[k]];
+                for (NSString *b in part) [out addObject:b];
+            }
+        }
+        // { "com.foo.app": true/1/"1", ... }
+        [d enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            if (![key isKindOfClass:[NSString class]]) return;
+            if (![[self class] NDLooksLikeBundleId:key]) return;
+            if ([obj isKindOfClass:[NSNumber class]] && ![obj boolValue]) return;
+            if ([obj isKindOfClass:[NSString class]] && ([obj isEqualToString:@"0"] || [obj.lowercaseString isEqualToString:@"false"])) return;
+            add(key);
+        }];
+    }
+    return out.array;
+}
+
++ (NSArray<NSString *> *)discoverAppBundleIdsInDirectory:(NSString *)dir {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableOrderedSet *out = [NSMutableOrderedSet orderedSet];
+    NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    static NSSet *skip;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        skip = [NSSet setWithArray:@[
+            @"AppGroup", @"Pasteboard", @"Documents", @"Library", @"tmp", @"SystemData",
+            @"apps", @"debs", @"import", @"export"
+        ]];
+    });
+    for (NSString *entry in entries) {
+        if ([entry hasPrefix:@"."]) continue;
+        if ([skip containsObject:entry]) continue;
+        if ([[entry pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
+        if (![[self class] NDLooksLikeBundleId:entry]) continue;
+        BOOL isDir = NO;
+        NSString *full = [dir stringByAppendingPathComponent:entry];
+        if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) [out addObject:entry];
+    }
+    // Nested apps/ from NewDevice exports
+    NSString *appsNested = [dir stringByAppendingPathComponent:@"apps"];
+    BOOL appsDir = NO;
+    if ([fm fileExistsAtPath:appsNested isDirectory:&appsDir] && appsDir) {
+        for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:appsNested]) [out addObject:b];
+    }
+    return out.array;
+}
+
+- (NSArray<NSString *> *)appBundleIdsForRecord:(NSString *)name {
+    if (!name.length || [name isEqualToString:@"原始机器"]) return @[];
+    NSMutableOrderedSet *out = [NSMutableOrderedSet orderedSet];
+    NSString *root = [NDPaths recordDir:name];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    for (NSString *side in @[@"selectApp.plist", @"selectapp.plist"]) {
+        NSString *p = [root stringByAppendingPathComponent:side];
+        if (![fm fileExistsAtPath:p]) continue;
+        id raw = [NSArray arrayWithContentsOfFile:p];
+        if (!raw) raw = [NSDictionary dictionaryWithContentsOfFile:p];
+        for (NSString *b in [[self class] parseAppBundleIdsFromValue:raw]) [out addObject:b];
+    }
+    NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[root stringByAppendingPathComponent:@"description.plist"]];
+    for (NSString *b in [[self class] parseAppBundleIdsFromValue:desc[@"appName"]]) [out addObject:b];
+    for (NSString *b in [[self class] parseAppBundleIdsFromValue:desc[@"apps"]]) [out addObject:b];
+    for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:[root stringByAppendingPathComponent:@"apps"]]) [out addObject:b];
+    return out.array;
+}
+
 - (void)mergeTargetApps:(NSArray *)apps {
     if (![apps isKindOfClass:[NSArray class]] || !apps.count) return;
+    // Reload from disk config (not stale runtime) before merge
+    NSDictionary *full = [NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]];
     NDConfig *cfg = [NDConfig shared];
+    if ([full isKindOfClass:[NSDictionary class]] && [full[@"targetApps"] isKindOfClass:[NSArray class]]) {
+        NSMutableOrderedSet *disk = [NSMutableOrderedSet orderedSetWithArray:full[@"targetApps"]];
+        [disk addObjectsFromArray:cfg.targetApps ?: @[]];
+        cfg.targetApps = disk.array;
+    }
     NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
     for (id item in apps) {
-        if ([item isKindOfClass:[NSString class]] && [item length]) [set addObject:item];
+        if ([item isKindOfClass:[NSString class]] && [[self class] NDLooksLikeBundleId:item]) [set addObject:item];
     }
     cfg.targetApps = set.array;
     [cfg save];
+}
+
+- (NSString *)sanitizeRecordName:(NSString *)preferred {
+    NSString *base = preferred.length ? preferred : [self makeRecordName];
+    // Avoid URL query '+' / spaces breaking setRecord; keep readable
+    base = [base stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([base hasPrefix:@"+"]) base = [base substringFromIndex:1];
+    NSMutableString *out = [NSMutableString string];
+    for (NSUInteger i = 0; i < base.length; i++) {
+        unichar c = [base characterAtIndex:i];
+        if (c < 32) continue;
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+            [out appendString:@"_"];
+            continue;
+        }
+        if (c == ' ' || c == '+') {
+            [out appendString:@"-"];
+            continue;
+        }
+        [out appendFormat:@"%C", c];
+    }
+    while ([out containsString:@"--"]) [out replaceOccurrencesOfString:@"--" withString:@"-" options:0 range:NSMakeRange(0, out.length)];
+    if (!out.length) out = [[self makeRecordName] mutableCopy];
+    if ([out isEqualToString:@"原始机器"] || [[self class] isReservedRecordFolderName:out]) {
+        [out appendString:@"-record"];
+    }
+    return [self uniqueRecordName:out];
 }
 
 - (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError **)error {
@@ -408,10 +536,10 @@
             recordName = desc[@"title"];
         }
         if ([[self class] isReservedRecordFolderName:recordName]) {
-            // Keep folder-name fallback only when title is a reserved container label
             recordName = entry;
             if ([[self class] isReservedRecordFolderName:recordName]) continue;
         }
+        recordName = [self sanitizeRecordName:recordName];
 
         NSMutableArray<NSString *> *candidates = [NSMutableArray array];
         NSString *faker = [full stringByAppendingPathComponent:@"faker.plist"];
@@ -427,24 +555,13 @@
             if (![candidates containsObject:p]) [candidates addObject:p];
         }
 
-        // Detect holographic / side-car payload (apps, AppGroup, Pasteboard)
-        BOOL hasHolo = NO;
-        if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:@"AppGroup"]] ||
-            [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"Pasteboard"]] ||
-            [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"apps"]]) {
-            hasHolo = YES;
-        }
-        if (!hasHolo) {
-            for (NSString *f in inner) {
-                if ([f hasPrefix:@"."] || [[f pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
-                BOOL nestedDir = NO;
-                NSString *nested = [full stringByAppendingPathComponent:f];
-                if ([fm fileExistsAtPath:nested isDirectory:&nestedDir] && nestedDir) {
-                    // bundle-id style folder
-                    if ([f containsString:@"."]) { hasHolo = YES; break; }
-                }
-            }
-        }
+        // App env markers: selectApp / AppGroup / bundle-id folders
+        NSArray *discoveredApps = [[self class] discoverAppBundleIdsInDirectory:full];
+        BOOL hasHolo = discoveredApps.count > 0
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"AppGroup"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"Pasteboard"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"apps"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectApp.plist"]];
 
         NDDeviceProfile *saved = nil;
         BOOL fakerEncrypted = NO;
@@ -461,43 +578,46 @@
         // Do NOT invent a record for empty container folders (this created bogus "import"/"export").
         if (!saved) {
             if (!hasHolo && !fakerEncrypted) continue;
-            if (!hasHolo) continue; // ciphertext-only with no app data: skip
-            NSString *unique = [self uniqueRecordName:recordName];
-            NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:unique preferredModel:nil preferredSystem:nil];
+            if (!hasHolo) continue;
+            NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
+            fresh.enabled = YES;
             if ([self saveProfile:fresh error:nil]) {
                 saved = fresh;
                 NSString *note = fakerEncrypted
-                    ? @"faker.plist here is AMG at-rest ciphertext (typical under /var/mobile/AMG). Do not decrypt — use AMG「导出」into /var/mobile/AMG_tar, or AMG.Get_Param() / NewDevice plaintext export. Holographic app data was still imported; identity was randomized."
+                    ? @"faker.plist here is AMG at-rest ciphertext. Holographic app data was still imported; identity was randomized."
                     : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
                 [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                       atomically:YES encoding:NSUTF8StringEncoding error:nil];
             }
         }
         if (!saved) continue;
+        // Always enable imported records so they can be selected
+        if (!saved.enabled) {
+            saved.enabled = YES;
+            [self saveProfile:saved error:nil];
+        }
 
         imported++;
 
-        id selectApps = [NSArray arrayWithContentsOfFile:[full stringByAppendingPathComponent:@"selectApp.plist"]];
-        if (![selectApps isKindOfClass:[NSArray class]]) {
-            NSDictionary *selectDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"selectApp.plist"]];
-            if ([selectDict[@"apps"] isKindOfClass:[NSArray class]]) selectApps = selectDict[@"apps"];
+        // Collect App environment (selectApp + description + folder names)
+        NSMutableOrderedSet *toMerge = [NSMutableOrderedSet orderedSet];
+        for (NSString *side in @[@"selectApp.plist", @"selectapp.plist"]) {
+            NSString *p = [full stringByAppendingPathComponent:side];
+            id raw = [NSArray arrayWithContentsOfFile:p];
+            if (!raw) raw = [NSDictionary dictionaryWithContentsOfFile:p];
+            for (NSString *b in [[self class] parseAppBundleIdsFromValue:raw]) [toMerge addObject:b];
         }
-        // description.appName may hold bundle ids or display names; merge string-looking bids
         NSDictionary *descDict = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
-        NSMutableArray *toMerge = [NSMutableArray array];
-        if ([selectApps isKindOfClass:[NSArray class]]) [toMerge addObjectsFromArray:selectApps];
-        if ([descDict[@"appName"] isKindOfClass:[NSArray class]]) {
-            for (id item in descDict[@"appName"]) {
-                if ([item isKindOfClass:[NSString class]] && [item containsString:@"."]) [toMerge addObject:item];
-            }
-        }
-        if (toMerge.count) [self mergeTargetApps:toMerge];
+        for (NSString *b in [[self class] parseAppBundleIdsFromValue:descDict[@"appName"]]) [toMerge addObject:b];
+        for (NSString *b in [[self class] parseAppBundleIdsFromValue:descDict[@"apps"]]) [toMerge addObject:b];
+        for (NSString *b in discoveredApps) [toMerge addObject:b];
 
         // Side-copy metadata; skip ciphertext faker (identity already saved as profile.plist)
-        for (NSString *side in @[@"ifaddrs.plist", @"description.plist", @"selectApp.plist"]) {
+        for (NSString *side in @[@"ifaddrs.plist", @"description.plist", @"selectApp.plist", @"selectapp.plist"]) {
             NSString *src = [full stringByAppendingPathComponent:side];
             if (![fm fileExistsAtPath:src]) continue;
-            NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:side];
+            NSString *dstName = [side.lowercaseString isEqualToString:@"selectapp.plist"] ? @"selectApp.plist" : side;
+            NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:dstName];
             [fm removeItemAtPath:dst error:nil];
             [fm copyItemAtPath:src toPath:dst error:nil];
         }
@@ -518,13 +638,22 @@
         }
 
         [[NDAppDataManager shared] importAMGHolographicFromDirectory:full intoRecord:saved.name];
-        // Merge apps discovered from holographic folders under Records/<name>/apps/
+        // Also pull apps nested under apps/
+        NSString *nestedApps = [full stringByAppendingPathComponent:@"apps"];
+        BOOL nestedDir = NO;
+        if ([fm fileExistsAtPath:nestedApps isDirectory:&nestedDir] && nestedDir) {
+            [[NDAppDataManager shared] importAMGHolographicFromDirectory:nestedApps intoRecord:saved.name];
+        }
         NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
-        NSArray *holoBids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
-        if (holoBids.count) [self mergeTargetApps:holoBids];
+        for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:appsRoot]) [toMerge addObject:b];
 
-        // Keychain: stage only during holographic import. Live restore happens on record switch
-        // via restoreApps → restoreKeychainHints (avoids multi-record import clobbering Keychain).
+        if (toMerge.count) {
+            // Persist per-record selectApp so switch restores this env
+            [toMerge.array writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+            [self mergeTargetApps:toMerge.array];
+        }
+
+        // Keychain: stage only during holographic import. Live restore happens on record switch.
     }
     if (imported) [self notifyReload];
     return imported;
@@ -552,9 +681,22 @@
 }
 
 - (void)notifyReload {
-    // Publish world-readable snapshot BEFORE notify so target apps reload fresh state
+    // Publish world-readable snapshot BEFORE notify so target apps reload fresh state.
+    // Prefer full config.plist for targetApps — runtime.plist alone can be stale/empty
+    // and would wipe App environment after AMG import.
     NDConfig *cfg = [NDConfig shared];
+    NSDictionary *full = [NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]];
     [cfg reload];
+    if ([full isKindOfClass:[NSDictionary class]] && [full[@"targetApps"] isKindOfClass:[NSArray class]]) {
+        NSArray *diskApps = full[@"targetApps"];
+        if (diskApps.count >= (cfg.targetApps.count ?: 0)) {
+            cfg.targetApps = diskApps;
+        } else {
+            NSMutableOrderedSet *merged = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+            [merged addObjectsFromArray:diskApps];
+            cfg.targetApps = merged.array;
+        }
+    }
     NSString *name = nil;
     NSString *diskName = [NSString stringWithContentsOfFile:[NDPaths currentRecordPointerPath] encoding:NSUTF8StringEncoding error:nil];
     diskName = [diskName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];

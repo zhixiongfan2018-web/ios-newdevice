@@ -31,6 +31,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
 - (nullable NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(nullable NSString *)name error:(NSError * _Nullable * _Nullable)error;
 
+/// Bundle IDs for a record's App environment (selectApp.plist + apps/ folders).
+- (NSArray<NSString *> *)appBundleIdsForRecord:(NSString *)name;
+
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;
 

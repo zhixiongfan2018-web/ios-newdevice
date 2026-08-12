@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-104
+Version: 1.0.0-106
 Architecture: iphoneos-arm64
-Description: Robust built-in .tar.gz extract for AMG imports (abs paths/pax).
+Description: Restore App environment (selectApp/targetApps) on AMG import.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -165,8 +165,9 @@ extern char **environ;
     NSError *err = nil;
     BOOL kc = [NDConfig shared].importKeychainWithData;
     NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:path kind:kind importKeychain:kc error:&err];
+    NSUInteger appCount = [NDConfig shared].targetApps.count;
     NSString *msg = n
-        ? [NSString stringWithFormat:@"已导入 %lu 条（Keychain：%@）\n%@", (unsigned long)n, kc ? @"开" : @"关", path]
+        ? [NSString stringWithFormat:@"已导入 %lu 条记录（Keychain：%@）\nApp 环境：%lu 个目标应用\n%@\n\n请到「记录」点选导入的环境，再到「应用」确认勾选。", (unsigned long)n, kc ? @"开" : @"关", (unsigned long)appCount, path]
         : (err.localizedDescription ?: @"未找到可导入数据");
     [self alert:n ? @"导入完成" : @"导入结果" message:msg];
 }

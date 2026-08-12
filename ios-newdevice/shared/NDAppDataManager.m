@@ -498,10 +498,23 @@ extern char **environ;
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:srcRoot isDirectory:&isDir] || !isDir) continue;
         NSString *dstRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:entry];
+        BOOL copiedSub = NO;
         for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
             NSString *src = [srcRoot stringByAppendingPathComponent:sub];
             if (![fm fileExistsAtPath:src]) continue;
             [self copyItem:src to:[dstRoot stringByAppendingPathComponent:sub] error:nil];
+            copiedSub = YES;
+        }
+        // Some AMG dumps put container contents directly under the bid folder
+        if (!copiedSub) {
+            NSArray *kids = [fm contentsOfDirectoryAtPath:srcRoot error:nil] ?: @[];
+            for (NSString *kid in kids) {
+                if ([kid hasPrefix:@"."]) continue;
+                if ([kid.pathExtension.lowercaseString isEqualToString:@"plist"] && [kid.lowercaseString containsString:@"keychain"]) continue;
+                NSString *src = [srcRoot stringByAppendingPathComponent:kid];
+                [self copyItem:src to:[dstRoot stringByAppendingPathComponent:kid] error:nil];
+                copiedSub = YES;
+            }
         }
         // AMG/NewDevice may keep keychain dumps at <bid>/keychain-*.plist (not under Library/)
         if (importKC) {

@@ -43,8 +43,12 @@
     for (NSString *pair in [query componentsSeparatedByString:@"&"]) {
         NSArray *kv = [pair componentsSeparatedByString:@"="];
         if (kv.count >= 2) {
-            NSString *key = [kv[0] stringByRemovingPercentEncoding] ?: kv[0];
+            NSString *key = kv[0];
             NSString *val = [[kv subarrayWithRange:NSMakeRange(1, kv.count - 1)] componentsJoinedByString:@"="];
+            // application/x-www-form-urlencoded: '+' means space (before percent-decode)
+            key = [key stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+            val = [val stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+            key = [key stringByRemovingPercentEncoding] ?: key;
             val = [val stringByRemovingPercentEncoding] ?: val;
             dict[key] = val;
         }
