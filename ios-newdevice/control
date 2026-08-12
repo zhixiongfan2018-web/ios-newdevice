@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-95
+Version: 1.0.0-99
 Architecture: iphoneos-arm64
-Description: Stop mistaking Media import/export folders for records.
+Description: Fix jsDelivr publish/purge; skip Media import/export as records.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

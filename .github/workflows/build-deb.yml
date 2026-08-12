@@ -236,13 +236,17 @@ jobs:
           gh release create "$TAG" --target "$MASTER_SHA" --latest \
             --title "NewDevice ${DEB_NAME} (${TAG})" \
             --notes "Sileo 固定源：${FIXED_SRC}"
-          # Purge bare + versioned CDN paths
-          for p in Packages Release "debs/${DEB_NAME}" debs/NewDevice.deb index.html; do
-            curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/${p}" || true
-            curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@${TAG#v}/stable/${p}" || true
-          done
-          sleep 3
+          # jsDelivr: wait for version list (~10m), then ONE repo purge + Packages.
+          # Spamming path purges causes throttle and pins bare URL on old X-Rev.
+          echo "Waiting 11m for jsDelivr version list before purge..."
+          sleep 660
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice" || true
+          sleep 2
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
+          curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
+          sleep 5
           echo "CDN Packages (bare):"
+          curl -sSI "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" | tr -d '\r' | grep -iE 'x-jsd-version|HTTP/' || true
           curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" | head -n 20 || true
           echo "CDN Packages (@${TAG#v}):"
           curl -sS "https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@${TAG#v}/stable/Packages" | head -n 20 || true
