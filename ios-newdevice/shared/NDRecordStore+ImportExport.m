@@ -173,6 +173,11 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:error]) return 0;
 
+    // Stage folders under Media so packing works even if AMG_tar is awkward to browse in Aisi
+    NSString *stageRoot = @"/var/mobile/Media/AMG/.nd-export-stage";
+    [fm removeItemAtPath:stageRoot error:nil];
+    [fm createDirectoryAtPath:stageRoot withIntermediateDirectories:YES attributes:nil error:nil];
+
     NSUInteger exported = 0;
     NSArray *names = [self allRecordNames];
     NSArray *apps = [NDConfig shared].targetApps ?: @[];
@@ -180,7 +185,10 @@
         if ([name isEqualToString:@"原始机器"]) continue;
         NDDeviceProfile *p = [self profileNamed:name];
         if (!p) continue;
-        NSString *out = [dir stringByAppendingPathComponent:name];
+        // Sanitize filename for tar
+        NSString *safe = [[name componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:"]] componentsJoinedByString:@"_"];
+        if (!safe.length) safe = @"record";
+        NSString *out = [stageRoot stringByAppendingPathComponent:safe];
         [fm removeItemAtPath:out error:nil];
         if (![p writeAMGFakerToDirectory:out error:nil]) continue;
 
@@ -214,8 +222,30 @@
         if (slim || [NDConfig shared].slimExportStripMedia) {
             [[NDAppDataManager shared] slimMediaInDirectory:out];
         }
+
+        // Pack as uncompressed .tar (easy for Aisi / no gzip dependency)
+        NSString *tarName = [safe stringByAppendingPathExtension:@"tar"];
+        NSString *tarPath = [dir stringByAppendingPathComponent:tarName];
+        [fm removeItemAtPath:tarPath error:nil];
+        // Also drop a copy under Media/AMG/export for Aisi file manager
+        NSString *mediaExport = [NDRecordStore amgMediaExportPath];
+        [fm createDirectoryAtPath:mediaExport withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *mediaTar = [mediaExport stringByAppendingPathComponent:tarName];
+
+        NSError *tarErr = nil;
+        if (!NDCreateTarFromDirectory(out, tarPath, &tarErr)) {
+            // keep folder as fallback
+            NSString *folderDst = [dir stringByAppendingPathComponent:safe];
+            [fm removeItemAtPath:folderDst error:nil];
+            [self NDCopyTree:out to:folderDst];
+            if (error && !*error) *error = tarErr;
+        } else {
+            [fm removeItemAtPath:mediaTar error:nil];
+            [fm copyItemAtPath:tarPath toPath:mediaTar error:nil];
+        }
         exported++;
     }
+    [fm removeItemAtPath:stageRoot error:nil];
     return exported;
 }
 

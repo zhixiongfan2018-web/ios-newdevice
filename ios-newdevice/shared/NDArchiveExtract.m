@@ -2,6 +2,9 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <zlib.h>
+#import <string.h>
+#import <stdio.h>
+#import <time.h>
 
 extern char **environ;
 
@@ -225,4 +228,110 @@ BOOL NDExtractArchiveToDirectory(NSString *archivePath, NSString *destDir, NSErr
         *error = [NSError errorWithDomain:@"NDArchive" code:30 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@\n也可在电脑解压后，把记录文件夹直接放进 /var/mobile/Media/AMG/import/", msg]}];
     }
     return NO;
+}
+
+static void NDTarWriteOctal(char *dst, size_t n, unsigned long long v) {
+    // classic tar: zero-filled octal, NUL-terminated within field
+    if (n == 0) return;
+    memset(dst, 0, n);
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%llo", v);
+    size_t len = strlen(tmp);
+    size_t width = n - 1; // leave room for NUL
+    if (len >= width) {
+        memcpy(dst, tmp + (len - width), width);
+    } else {
+        memset(dst, '0', width - len);
+        memcpy(dst + (width - len), tmp, len);
+    }
+}
+
+static void NDTarWriteHeader(NSMutableData *out, NSString *relPath, unsigned long long size, char typeflag) {
+    NDTarHeader h;
+    memset(&h, 0, sizeof(h));
+    NSString *path = relPath ?: @"";
+    // split prefix/name if needed (ustar)
+    NSString *name = path;
+    NSString *prefix = @"";
+    if (path.length > 100) {
+        NSRange slash = [path rangeOfString:@"/" options:NSBackwardsSearch range:NSMakeRange(0, path.length - 1)];
+        if (slash.location != NSNotFound && slash.location <= 155 && (path.length - slash.location - 1) <= 100) {
+            prefix = [path substringToIndex:slash.location];
+            name = [path substringFromIndex:slash.location + 1];
+        } else {
+            name = [path substringToIndex:MIN(100, path.length)];
+        }
+    }
+    strncpy(h.name, name.fileSystemRepresentation, sizeof(h.name));
+    strncpy(h.prefix, prefix.fileSystemRepresentation, sizeof(h.prefix));
+    NDTarWriteOctal(h.mode, sizeof(h.mode), typeflag == '5' ? 0755ULL : 0644ULL);
+    NDTarWriteOctal(h.uid, sizeof(h.uid), 501);
+    NDTarWriteOctal(h.gid, sizeof(h.gid), 501);
+    NDTarWriteOctal(h.size, sizeof(h.size), typeflag == '5' ? 0 : size);
+    NDTarWriteOctal(h.mtime, sizeof(h.mtime), (unsigned long long)time(NULL));
+    memset(h.chksum, ' ', sizeof(h.chksum));
+    h.typeflag = typeflag;
+    memcpy(h.magic, "ustar", 5);
+    h.magic[5] = '\0';
+    memcpy(h.version, "00", 2);
+
+    unsigned int sum = 0;
+    const unsigned char *raw = (const unsigned char *)&h;
+    for (size_t i = 0; i < sizeof(h); i++) sum += raw[i];
+    snprintf(h.chksum, sizeof(h.chksum), "%06o", sum);
+    h.chksum[6] = '\0';
+    h.chksum[7] = ' ';
+
+    [out appendBytes:&h length:sizeof(h)];
+}
+
+BOOL NDCreateTarFromDirectory(NSString *sourceDir, NSString *tarPath, NSError **error) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:sourceDir isDirectory:&isDir] || !isDir) {
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:40 userInfo:@{NSLocalizedDescriptionKey: @"源目录不存在"}];
+        return NO;
+    }
+    // Try system tar first
+    NSString *parent = [tarPath stringByDeletingLastPathComponent];
+    [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:tarPath error:nil];
+    NSString *base = [sourceDir lastPathComponent];
+    NSString *cwd = [sourceDir stringByDeletingLastPathComponent];
+    NSString *qTar = [tarPath stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    NSString *qCwd = [cwd stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    NSString *qBase = [base stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    NSString *cmd = [NSString stringWithFormat:@"tar -cf '%@' -C '%@' '%@'", qTar, qCwd, qBase];
+    if (NDSpawnShell(cmd) && [fm fileExistsAtPath:tarPath]) return YES;
+
+    // Built-in ustar writer
+    NSMutableData *out = [NSMutableData data];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:sourceDir];
+    // root directory entry
+    NDTarWriteHeader(out, base, 0, '5');
+
+    for (NSString *rel in en) {
+        NSString *full = [sourceDir stringByAppendingPathComponent:rel];
+        NSString *tarRel = [base stringByAppendingPathComponent:rel];
+        BOOL entryDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&entryDir];
+        if (entryDir) {
+            NDTarWriteHeader(out, [tarRel hasSuffix:@"/"] ? tarRel : [tarRel stringByAppendingString:@"/"], 0, '5');
+            continue;
+        }
+        NSData *file = [NSData dataWithContentsOfFile:full options:0 error:nil];
+        if (!file) file = [NSData data];
+        NDTarWriteHeader(out, tarRel, file.length, '0');
+        [out appendData:file];
+        NSUInteger pad = (512 - (file.length % 512)) % 512;
+        if (pad) {
+            static char zeros[512];
+            [out appendBytes:zeros length:pad];
+        }
+    }
+    // two zero blocks
+    static char zend[1024];
+    [out appendBytes:zend length:1024];
+    if (![out writeToFile:tarPath options:NSDataWritingAtomic error:error]) return NO;
+    return YES;
 }
