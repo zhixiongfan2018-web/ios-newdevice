@@ -30,6 +30,23 @@ static BOOL NDSpawnShell(NSString *command) {
     return NO;
 }
 
+static BOOL NDDestHasContent(NSString *destDir) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:destDir];
+    for (NSString *rel in en) {
+        if ([rel hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        NSString *full = [destDir stringByAppendingPathComponent:rel];
+        if ([fm fileExistsAtPath:full isDirectory:&isDir] && !isDir) return YES;
+        // directory with known markers counts
+        for (NSString *m in @[@"faker.plist", @"profile.plist", @"description.plist"]) {
+            if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:m]]) return YES;
+        }
+    }
+    NSArray *kids = [fm contentsOfDirectoryAtPath:destDir error:nil] ?: @[];
+    return kids.count > 0;
+}
+
 static NSData *NDGunzipData(NSData *gz, NSError **error) {
     if (gz.length < 10) {
         if (error) *error = [NSError errorWithDomain:@"NDArchive" code:1 userInfo:@{NSLocalizedDescriptionKey: @"gzip 数据太短"}];
@@ -42,18 +59,17 @@ static NSData *NDGunzipData(NSData *gz, NSError **error) {
     }
     z_stream strm;
     memset(&strm, 0, sizeof(strm));
-    // windowBits 15+16 = gzip
     if (inflateInit2(&strm, 15 + 16) != Z_OK) {
         if (error) *error = [NSError errorWithDomain:@"NDArchive" code:3 userInfo:@{NSLocalizedDescriptionKey: @"inflateInit 失败"}];
         return nil;
     }
     strm.next_in = (Bytef *)src;
     strm.avail_in = (uInt)gz.length;
-    NSMutableData *out = [NSMutableData dataWithLength:gz.length * 4 + 64 * 1024];
+    NSMutableData *out = [NSMutableData dataWithLength:MAX((NSUInteger)gz.length * 4, (NSUInteger)256 * 1024)];
     int ret = Z_OK;
     while (ret == Z_OK) {
         if (strm.total_out >= out.length) {
-            [out increaseLengthBy:out.length]; // grow
+            [out increaseLengthBy:MAX(out.length, (NSUInteger)1024 * 1024)];
         }
         strm.next_out = (Bytef *)out.mutableBytes + strm.total_out;
         strm.avail_out = (uInt)(out.length - strm.total_out);
@@ -92,7 +108,16 @@ typedef struct {
 } NDTarHeader;
 #pragma pack(pop)
 
-static unsigned long long NDTarOctal(const char *s, size_t n) {
+static unsigned long long NDTarParseSize(const char *s, size_t n) {
+    if (n == 0) return 0;
+    // GNU base-256 (high bit set)
+    if ((unsigned char)s[0] == 0x80 || (unsigned char)s[0] == 0xff) {
+        unsigned long long v = 0;
+        for (size_t i = 1; i < n; i++) {
+            v = (v << 8) | (unsigned char)s[i];
+        }
+        return v;
+    }
     unsigned long long v = 0;
     for (size_t i = 0; i < n && s[i]; i++) {
         char c = s[i];
@@ -103,6 +128,58 @@ static unsigned long long NDTarOctal(const char *s, size_t n) {
     return v;
 }
 
+static NSString *NDTarDecodeName(const char *bytes, size_t maxLen) {
+    size_t n = strnlen(bytes, maxLen);
+    if (n == 0) return @"";
+    NSString *s = [[NSString alloc] initWithBytes:bytes length:n encoding:NSUTF8StringEncoding];
+    if (s) return s;
+    s = [[NSString alloc] initWithBytes:bytes length:n encoding:NSISOLatin1StringEncoding];
+    return s ?: @"";
+}
+
+static NSString *NDTarSanitizePath(NSString *name) {
+    if (!name.length) return @"";
+    NSString *n = name;
+    // Normalize separators
+    n = [n stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+    while ([n hasPrefix:@"./"]) n = [n substringFromIndex:2];
+    // AMG / macOS tars often store absolute paths — strip leading slashes instead of skipping
+    while ([n hasPrefix:@"/"]) n = [n substringFromIndex:1];
+    // Drop private/var → var (common Apple layout)
+    if ([n hasPrefix:@"private/var/"]) n = [n substringFromIndex:@"private/".length];
+    // Reject parent escapes after sanitize
+    for (NSString *part in [n componentsSeparatedByString:@"/"]) {
+        if ([part isEqualToString:@".."]) return @"";
+    }
+    return n;
+}
+
+static NSString *NDTarPaxPath(NSData *payload) {
+    // pax records: "LEN key=value\n"
+    NSString *text = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding]
+        ?: [[NSString alloc] initWithData:payload encoding:NSISOLatin1StringEncoding];
+    if (!text.length) return nil;
+    NSString *found = nil;
+    NSUInteger i = 0;
+    while (i < text.length) {
+        NSRange sp = [text rangeOfString:@" " options:0 range:NSMakeRange(i, text.length - i)];
+        if (sp.location == NSNotFound) break;
+        NSInteger len = [[text substringWithRange:NSMakeRange(i, sp.location - i)] integerValue];
+        if (len <= 0) break;
+        if (i + (NSUInteger)len > text.length) break;
+        NSString *rec = [text substringWithRange:NSMakeRange(i, (NSUInteger)len)];
+        NSRange eq = [rec rangeOfString:@"="];
+        if (eq.location != NSNotFound) {
+            NSString *key = [rec substringWithRange:NSMakeRange(sp.location - i + 1, eq.location - (sp.location - i + 1))];
+            NSString *val = [rec substringFromIndex:eq.location + 1];
+            if ([val hasSuffix:@"\n"]) val = [val substringToIndex:val.length - 1];
+            if ([key isEqualToString:@"path"] || [key isEqualToString:@"linkpath"]) found = val;
+        }
+        i += (NSUInteger)len;
+    }
+    return found;
+}
+
 static BOOL NDExtractTarBytes(NSData *tar, NSString *destDir, NSError **error) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -110,60 +187,90 @@ static BOOL NDExtractTarBytes(NSData *tar, NSString *destDir, NSError **error) {
     NSUInteger len = tar.length;
     NSUInteger off = 0;
     NSUInteger written = 0;
+    NSString *pendingLongName = nil;
+    NSString *pendingPaxPath = nil;
+
     while (off + 512 <= len) {
         const NDTarHeader *h = (const NDTarHeader *)(bytes + off);
         off += 512;
-        // two zero blocks = EOF
         BOOL allZero = YES;
         for (int i = 0; i < 512; i++) {
             if (((const uint8_t *)h)[i] != 0) { allZero = NO; break; }
         }
         if (allZero) break;
 
-        NSString *name = [[NSString alloc] initWithBytes:h->name length:strnlen(h->name, 100) encoding:NSUTF8StringEncoding] ?: @"";
-        NSString *prefix = [[NSString alloc] initWithBytes:h->prefix length:strnlen(h->prefix, 155) encoding:NSUTF8StringEncoding] ?: @"";
-        if (prefix.length) name = [prefix stringByAppendingPathComponent:name];
-        unsigned long long size = NDTarOctal(h->size, sizeof(h->size));
+        unsigned long long size = NDTarParseSize(h->size, sizeof(h->size));
         NSUInteger padded = (NSUInteger)((size + 511ULL) / 512ULL * 512ULL);
+        NSUInteger payloadLen = (NSUInteger)MIN(size, (unsigned long long)(len > off ? len - off : 0));
+        NSData *payload = (payloadLen > 0) ? [NSData dataWithBytes:bytes + off length:payloadLen] : [NSData data];
         char type = h->typeflag ? h->typeflag : '0';
+
+        // GNU long name / long link
+        if (type == 'L' || type == 'K') {
+            NSString *longName = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding]
+                ?: [[NSString alloc] initWithData:payload encoding:NSISOLatin1StringEncoding];
+            if ([longName hasSuffix:@"\0"]) longName = [longName stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0"]];
+            if (type == 'L') pendingLongName = longName;
+            off += padded;
+            continue;
+        }
+        // pax extended header
+        if (type == 'x' || type == 'g') {
+            if (type == 'x') {
+                NSString *p = NDTarPaxPath(payload);
+                if (p.length) pendingPaxPath = p;
+            }
+            off += padded;
+            continue;
+        }
+
+        NSString *name = pendingPaxPath.length ? pendingPaxPath : (pendingLongName.length ? pendingLongName : nil);
+        pendingPaxPath = nil;
+        pendingLongName = nil;
+        if (!name.length) {
+            NSString *base = NDTarDecodeName(h->name, sizeof(h->name));
+            NSString *prefix = NDTarDecodeName(h->prefix, sizeof(h->prefix));
+            name = prefix.length ? [prefix stringByAppendingPathComponent:base] : base;
+        }
+        name = NDTarSanitizePath(name);
 
         if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."]) {
             off += padded;
             continue;
         }
-        // refuse path escape
-        if ([name hasPrefix:@"/"] || [name containsString:@".."]) {
-            off += padded;
-            continue;
-        }
+
         NSString *full = [destDir stringByAppendingPathComponent:name];
 
         if (type == '5' || [name hasSuffix:@"/"]) {
             [fm createDirectoryAtPath:full withIntermediateDirectories:YES attributes:nil error:nil];
-        } else if (type == '0' || type == '\0') {
+        } else if (type == '0' || type == '\0' || type == '7') { // 7 = contiguous file
             NSString *parent = [full stringByDeletingLastPathComponent];
             [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
-            NSUInteger payload = (NSUInteger)MIN(size, (unsigned long long)(len > off ? len - off : 0));
-            NSData *fileData = [NSData dataWithBytes:bytes + off length:payload];
-            [fileData writeToFile:full atomically:YES];
+            [payload writeToFile:full atomically:YES];
             written++;
+        } else if (type == '1' || type == '2') {
+            // hard/symlink — ignore content, keep layout via parent dirs
+            NSString *parent = [full stringByDeletingLastPathComponent];
+            [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
         }
+        // other types: skip payload
         off += padded;
     }
-    if (written == 0) {
-        // directory-only archives still OK if dest has anything
-        NSArray *kids = [fm contentsOfDirectoryAtPath:destDir error:nil];
-        if (!kids.count) {
-            if (error) *error = [NSError errorWithDomain:@"NDArchive" code:5 userInfo:@{NSLocalizedDescriptionKey: @"tar 内没有可提取的文件"}];
-            return NO;
-        }
+
+    if (written == 0 && !NDDestHasContent(destDir)) {
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:5 userInfo:@{NSLocalizedDescriptionKey: @"tar 内没有可提取的文件（可能是损坏包或空包）"}];
+        return NO;
     }
     return YES;
 }
 
 static BOOL NDExtractBuiltin(NSString *archivePath, NSString *destDir, NSError **error) {
-    NSData *raw = [NSData dataWithContentsOfFile:archivePath options:0 error:error];
-    if (!raw.length) return NO;
+    NSError *readErr = nil;
+    NSData *raw = [NSData dataWithContentsOfFile:archivePath options:NSDataReadingMappedIfSafe error:&readErr];
+    if (!raw.length) {
+        if (error) *error = readErr ?: [NSError errorWithDomain:@"NDArchive" code:12 userInfo:@{NSLocalizedDescriptionKey: @"无法读取压缩包"}];
+        return NO;
+    }
     const uint8_t *b = raw.bytes;
     NSData *tar = raw;
     NSString *lower = archivePath.lowercaseString;
@@ -178,7 +285,8 @@ static BOOL NDExtractBuiltin(NSString *archivePath, NSString *destDir, NSError *
             return NO;
         }
     }
-    // ustar / bare tar
+    // Some "tar.gz" are actually plain ustar already gunzipped by sender wrongly named — handled above.
+    // If still looks like gzip magic after "gunzip" failure path skipped — already handled.
     return NDExtractTarBytes(tar, destDir, error);
 }
 
@@ -192,52 +300,76 @@ BOOL NDExtractArchiveToDirectory(NSString *archivePath, NSString *destDir, NSErr
         if (error) *error = [NSError errorWithDomain:@"NDArchive" code:11 userInfo:@{NSLocalizedDescriptionKey: @"压缩包不存在"}];
         return NO;
     }
+    [fm removeItemAtPath:destDir error:nil];
     [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
 
     NSString *lower = archivePath.lowercaseString;
     NSString *qArch = [archivePath stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
     NSString *qDest = [destDir stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
 
-    // 1) Prefer system tools via sh (handles spaces in paths)
-    if ([lower hasSuffix:@".zip"]) {
-        NSString *cmd = [NSString stringWithFormat:@"unzip -o '%@' -d '%@'", qArch, qDest];
-        if (NDSpawnShell(cmd)) return YES;
-        // bsdtar can often read zip
-        cmd = [NSString stringWithFormat:@"tar -xf '%@' -C '%@'", qArch, qDest];
-        if (NDSpawnShell(cmd)) return YES;
-        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:20 userInfo:@{NSLocalizedDescriptionKey: @"无法解压 zip（设备无 unzip）。请在电脑解压后把文件夹拷进 import。"}];
+    // Prefer built-in first for .tar/.tar.gz — system tar on Dopamine is often missing,
+    // and when present may mishandle absolute paths. Builtin strips leading '/'.
+    if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".tar"] || [lower hasSuffix:@".gz"]) {
+        NSError *builtinErr = nil;
+        if (NDExtractBuiltin(archivePath, destDir, &builtinErr) && NDDestHasContent(destDir)) return YES;
+        // Fall back to system tools
+        NSArray *cmds = nil;
+        if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"]) {
+            cmds = @[
+                [NSString stringWithFormat:@"tar -xzf '%@' -C '%@'", qArch, qDest],
+                [NSString stringWithFormat:@"/var/jb/usr/bin/tar -xzf '%@' -C '%@'", qArch, qDest],
+                [NSString stringWithFormat:@"gzip -dc '%@' | tar -xf - -C '%@'", qArch, qDest],
+                [NSString stringWithFormat:@"gzip -dc '%@' | /var/jb/usr/bin/tar -xf - -C '%@'", qArch, qDest],
+            ];
+        } else {
+            cmds = @[
+                [NSString stringWithFormat:@"tar -xf '%@' -C '%@'", qArch, qDest],
+                [NSString stringWithFormat:@"/var/jb/usr/bin/tar -xf '%@' -C '%@'", qArch, qDest],
+            ];
+        }
+        for (NSString *cmd in cmds) {
+            [fm removeItemAtPath:destDir error:nil];
+            [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+            if (NDSpawnShell(cmd) && NDDestHasContent(destDir)) return YES;
+        }
+        if (error) {
+            NSString *msg = builtinErr.localizedDescription ?: @"解压失败";
+            *error = [NSError errorWithDomain:@"NDArchive" code:30 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@\n也可在电脑解压后，把记录文件夹直接放进 /var/mobile/Media/AMG/import/ 或 Media/NewDevice/import/", msg]}];
+        }
         return NO;
     }
 
-    if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"]) {
-        NSString *cmd = [NSString stringWithFormat:@"tar -xzf '%@' -C '%@'", qArch, qDest];
-        if (NDSpawnShell(cmd)) return YES;
-        cmd = [NSString stringWithFormat:@"gzip -dc '%@' | tar -xf - -C '%@'", qArch, qDest];
-        if (NDSpawnShell(cmd)) return YES;
-    } else if ([lower hasSuffix:@".tar"]) {
-        NSString *cmd = [NSString stringWithFormat:@"tar -xf '%@' -C '%@'", qArch, qDest];
-        if (NDSpawnShell(cmd)) return YES;
+    if ([lower hasSuffix:@".zip"]) {
+        NSArray *cmds = @[
+            [NSString stringWithFormat:@"unzip -o '%@' -d '%@'", qArch, qDest],
+            [NSString stringWithFormat:@"/var/jb/usr/bin/unzip -o '%@' -d '%@'", qArch, qDest],
+            [NSString stringWithFormat:@"tar -xf '%@' -C '%@'", qArch, qDest],
+        ];
+        for (NSString *cmd in cmds) {
+            [fm removeItemAtPath:destDir error:nil];
+            [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+            if (NDSpawnShell(cmd) && NDDestHasContent(destDir)) return YES;
+        }
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:20 userInfo:@{NSLocalizedDescriptionKey: @"无法解压 zip。请在电脑解压后把文件夹拷进 import。"}];
+        return NO;
     }
 
-    // 2) Built-in gzip + ustar (no external tar required)
+    // Unknown extension: try builtin as tar/gzip anyway
     NSError *builtinErr = nil;
-    if (NDExtractBuiltin(archivePath, destDir, &builtinErr)) return YES;
-
+    if (NDExtractBuiltin(archivePath, destDir, &builtinErr) && NDDestHasContent(destDir)) return YES;
     if (error) {
-        NSString *msg = builtinErr.localizedDescription ?: @"解压失败";
-        *error = [NSError errorWithDomain:@"NDArchive" code:30 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@\n也可在电脑解压后，把记录文件夹直接放进 /var/mobile/Media/AMG/import/", msg]}];
+        *error = [NSError errorWithDomain:@"NDArchive" code:30 userInfo:@{NSLocalizedDescriptionKey: builtinErr.localizedDescription ?: @"解压失败"}];
     }
     return NO;
 }
 
 static void NDTarWriteOctal(char *dst, size_t n, unsigned long long v) {
-    // classic tar: zero-filled octal, NUL-terminated within field
     if (n == 0) return;
     memset(dst, 0, n);
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%llo", v);
     size_t len = strlen(tmp);
-    size_t width = n - 1; // leave room for NUL
+    size_t width = n - 1;
     if (len >= width) {
         memcpy(dst, tmp + (len - width), width);
     } else {
@@ -250,7 +382,6 @@ static void NDTarWriteHeader(NSMutableData *out, NSString *relPath, unsigned lon
     NDTarHeader h;
     memset(&h, 0, sizeof(h));
     NSString *path = relPath ?: @"";
-    // split prefix/name if needed (ustar)
     NSString *name = path;
     NSString *prefix = @"";
     if (path.length > 100) {
@@ -292,7 +423,6 @@ BOOL NDCreateTarFromDirectory(NSString *sourceDir, NSString *tarPath, NSError **
         if (error) *error = [NSError errorWithDomain:@"NDArchive" code:40 userInfo:@{NSLocalizedDescriptionKey: @"源目录不存在"}];
         return NO;
     }
-    // Try system tar first
     NSString *parent = [tarPath stringByDeletingLastPathComponent];
     [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
     [fm removeItemAtPath:tarPath error:nil];
@@ -304,10 +434,8 @@ BOOL NDCreateTarFromDirectory(NSString *sourceDir, NSString *tarPath, NSError **
     NSString *cmd = [NSString stringWithFormat:@"tar -cf '%@' -C '%@' '%@'", qTar, qCwd, qBase];
     if (NDSpawnShell(cmd) && [fm fileExistsAtPath:tarPath]) return YES;
 
-    // Built-in ustar writer
     NSMutableData *out = [NSMutableData data];
     NSDirectoryEnumerator *en = [fm enumeratorAtPath:sourceDir];
-    // root directory entry
     NDTarWriteHeader(out, base, 0, '5');
 
     for (NSString *rel in en) {
@@ -329,7 +457,6 @@ BOOL NDCreateTarFromDirectory(NSString *sourceDir, NSString *tarPath, NSError **
             [out appendBytes:zeros length:pad];
         }
     }
-    // two zero blocks
     static char zend[1024];
     [out appendBytes:zend length:1024];
     if (![out writeToFile:tarPath options:NSDataWritingAtomic error:error]) return NO;

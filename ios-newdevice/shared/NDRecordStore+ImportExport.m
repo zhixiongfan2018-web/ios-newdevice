@@ -130,9 +130,37 @@
         }
 
         NSString *importRoot = dest;
-        for (NSString *nested in @[@"var/mobile/AMG", @"var/mobile/AMG_tar", @"private/var/mobile/AMG", @"AMG"]) {
+        NSArray *nestedCandidates = @[
+            @"var/mobile/AMG", @"var/mobile/AMG_tar",
+            @"private/var/mobile/AMG", @"private/var/mobile/AMG_tar",
+            @"AMG", @"AMG_tar",
+        ];
+        for (NSString *nested in nestedCandidates) {
             NSString *p = [dest stringByAppendingPathComponent:nested];
             if ([fm fileExistsAtPath:p]) { importRoot = p; break; }
+        }
+        // Single top-level folder wrapping the tree
+        if ([importRoot isEqualToString:dest]) {
+            NSArray *top = [fm contentsOfDirectoryAtPath:dest error:nil] ?: @[];
+            if (top.count == 1) {
+                NSString *only = [dest stringByAppendingPathComponent:top.firstObject];
+                BOOL d = NO;
+                if ([fm fileExistsAtPath:only isDirectory:&d] && d) {
+                    for (NSString *nested in nestedCandidates) {
+                        NSString *p = [only stringByAppendingPathComponent:nested];
+                        if ([fm fileExistsAtPath:p]) { importRoot = p; break; }
+                    }
+                    if ([importRoot isEqualToString:dest]) {
+                        // record folder itself (has faker/profile)
+                        for (NSString *m in @[@"faker.plist", @"profile.plist", @"description.plist"]) {
+                            if ([fm fileExistsAtPath:[only stringByAppendingPathComponent:m]]) {
+                                importRoot = dest; // import children of dest (the one folder)
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
         total += [self NDImportUnpackedTree:importRoot importKeychain:importKeychain error:nil];
     }
