@@ -52,15 +52,34 @@ NSInteger const NDHTTPPort = 8080;
     return [[self preferencesDir] stringByAppendingPathComponent:@"currentRecord.txt"];
 }
 
++ (NSString *)runtimeStatePath {
+    // /var/jb/Library/NewDevice is outside app containers and typically readable by injected tweaks
+    return [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice/runtime.plist"];
+}
+
++ (void)makePathWorldReadable:(NSString *)path {
+    if (!path.length) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return;
+    NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
+    attrs[NSFilePosixPermissions] = isDir ? @0755 : @0644;
+    [fm setAttributes:attrs ofItemAtPath:path error:nil];
+    // Also chmod parents we own under jb Library/NewDevice and preferences
+}
+
 + (void)ensureDirectories {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray<NSString *> *dirs = @[
         [self preferencesDir],
         [self recordsRoot],
+        [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice"],
     ];
     for (NSString *dir in dirs) {
         if (![fm fileExistsAtPath:dir]) {
             [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
+        } else {
+            [self makePathWorldReadable:dir];
         }
     }
 }

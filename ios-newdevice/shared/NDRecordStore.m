@@ -1,6 +1,7 @@
 #import "NDRecordStore.h"
 #import "NDPaths.h"
 #import "NDConfig.h"
+#import "NDRuntimeState.h"
 #import <notify.h>
 
 @implementation NDRecordStore
@@ -48,13 +49,25 @@
 }
 
 - (NSString *)currentRecordName {
+    // Prefer on-disk pointer (authoritative when NewDevice App/daemon can write it)
     NSString *name = [NSString stringWithContentsOfFile:[NDPaths currentRecordPointerPath] encoding:NSUTF8StringEncoding error:nil];
-    return [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (name.length) return name;
+    // Sandboxed target apps may only see the world-readable runtime snapshot
+    NSDictionary *runtime = [NDRuntimeState dictionary];
+    NSString *fromRuntime = runtime[@"currentRecord"];
+    if ([fromRuntime isKindOfClass:[NSString class]] && fromRuntime.length) {
+        return [fromRuntime stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    return @"";
 }
 
 - (void)setCurrentRecordName:(NSString *)name {
     [NDPaths ensureDirectories];
-    [(name ?: @"原始机器") writeToFile:[NDPaths currentRecordPointerPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSString *value = name ?: @"原始机器";
+    [value writeToFile:[NDPaths currentRecordPointerPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [NDPaths makePathWorldReadable:[NDPaths preferencesDir]];
+    [NDPaths makePathWorldReadable:[NDPaths currentRecordPointerPath]];
 }
 
 - (NDDeviceProfile *)profileNamed:(NSString *)name {
@@ -63,8 +76,12 @@
 
 - (NDDeviceProfile *)currentProfile {
     NSString *name = [self currentRecordName];
-    if (!name.length) return nil;
-    return [self profileNamed:name];
+    if (name.length) {
+        NDDeviceProfile *disk = [self profileNamed:name];
+        if (disk) return disk;
+    }
+    // Sandboxed fallback
+    return [NDRuntimeState profileFromDictionary:[NDRuntimeState dictionary]];
 }
 
 - (BOOL)saveProfile:(NDDeviceProfile *)profile error:(NSError **)error {
@@ -241,6 +258,15 @@
 }
 
 - (void)notifyReload {
+    // Publish world-readable snapshot BEFORE notify so target apps reload fresh state
+    NDConfig *cfg = [NDConfig shared];
+    [cfg reload];
+    NSString *name = nil;
+    NSString *diskName = [NSString stringWithContentsOfFile:[NDPaths currentRecordPointerPath] encoding:NSUTF8StringEncoding error:nil];
+    diskName = [diskName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    name = diskName.length ? diskName : [self currentRecordName];
+    NDDeviceProfile *profile = name.length ? [self profileNamed:name] : nil;
+    [NDRuntimeState publishWithConfig:cfg profile:profile currentName:name];
     notify_post([NDNotifyReload UTF8String]);
 }
 

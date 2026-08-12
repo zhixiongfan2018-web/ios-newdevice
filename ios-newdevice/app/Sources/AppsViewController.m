@@ -1,5 +1,6 @@
 #import "AppsViewController.h"
 #import "NDConfig.h"
+#import "NDRecordStore.h"
 #import "NDTheme.h"
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -93,8 +94,12 @@
 - (void)save {
     [NDConfig shared].targetApps = self.selected.allObjects;
     [[NDConfig shared] save];
+    // Force publish + notify even if config unchanged on disk semantics
+    [[NDRecordStore shared] notifyReload];
     [self updateTitleBadge];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"已保存" message:[NSString stringWithFormat:@"已选择 %lu 个应用", (unsigned long)self.selected.count] preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"已保存"
+                                                               message:[NSString stringWithFormat:@"已选择 %lu 个应用\n请强杀并重开这些 App 后生效", (unsigned long)self.selected.count]
+                                                        preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
 }
@@ -104,7 +109,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"勾选后点右上角保存。NewDevice 自身始终参与伪装探测。";
+    return @"勾选后点右上角保存，再强杀并重开目标 App。仅勾选不重开不会生效。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

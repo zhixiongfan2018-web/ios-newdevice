@@ -63,6 +63,10 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         };
         NSString *val = map[k];
         if (val.length) {
+            if ([k isEqualToString:@"UniqueDeviceIDData"]) {
+                NSData *data = [val dataUsingEncoding:NSUTF8StringEncoding];
+                return CFBridgingRetain(data);
+            }
             return CFBridgingRetain(val);
         }
     }

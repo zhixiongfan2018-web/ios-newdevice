@@ -252,6 +252,8 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // Migrate/publish world-readable runtime.plist so sandboxed target apps can spoof
+    [[NDRecordStore shared] notifyReload];
     [self refresh];
     [self refreshAPIStatus];
     [self refreshIP:NO];

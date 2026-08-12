@@ -38,11 +38,44 @@ extern char **environ;
 
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds {
     for (NSString *bid in bundleIds) {
-        // killall by executable name is fragile; use launchctl / killall best-effort
-        [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", bid.lastPathComponent]];
-        [self runCommand:@"/usr/bin/killall" arguments:@[@"-9", bid.lastPathComponent]];
+        if (!bid.length) continue;
+        NSMutableSet<NSString *> *names = [NSMutableSet set];
+        // Prefer CFBundleExecutable from LSApplicationProxy
+        Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+        if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bid];
+#pragma clang diagnostic pop
+            if (proxy) {
+                if ([proxy respondsToSelector:NSSelectorFromString(@"bundleExecutable")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    NSString *exec = [proxy performSelector:NSSelectorFromString(@"bundleExecutable")];
+#pragma clang diagnostic pop
+                    if ([exec isKindOfClass:[NSString class]] && exec.length) [names addObject:exec];
+                }
+                if ([proxy respondsToSelector:NSSelectorFromString(@"localizedName")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    NSString *lname = [proxy performSelector:NSSelectorFromString(@"localizedName")];
+#pragma clang diagnostic pop
+                    if ([lname isKindOfClass:[NSString class]] && lname.length) [names addObject:lname];
+                }
+            }
+        }
+        // Fallbacks: last bundle component (often wrong) + full bid
+        if (bid.pathExtension.length) {
+            // ignore
+        }
+        NSString *last = bid.lastPathComponent;
+        if (last.length) [names addObject:last];
+        for (NSString *proc in names) {
+            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", proc]];
+            [self runCommand:@"/usr/bin/killall" arguments:@[@"-9", proc]];
+            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", [proc stringByReplacingOccurrencesOfString:@" " withString:@""]]];
+        }
     }
-    // Also try sbutils-style via bash kill by bundle through `killall` of common names
 }
 
 - (NSString *)containerPathForBundleId:(NSString *)bundleId {
