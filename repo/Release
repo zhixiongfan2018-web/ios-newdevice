@@ -1,4 +1,4 @@
-Date: Wed, 12 Aug 2026 06:40:58 GMT
+Date: Wed, 12 Aug 2026 07:14:52 +0000
 Origin: NewDevice
 Label: NewDevice
 Suite: stable
@@ -9,13 +9,13 @@ Components: main
 Description: NewDevice Sileo source
 MD5Sum:
  c937ce4b84e7482a8618a08fa86dcaff 1138 Packages
- 2951f8983ec15037b90f3f59034a959b 640 Packages.gz
+ 231dc5604cea7db9cf04e02936223584 655 Packages.gz
  4bef0b845375cf74495b6fc3933fc5a5 724 Packages.bz2
 SHA1:
  6df09249842f61afdcbbd00ec3863a39a72abdb7 1138 Packages
- 02f8cd91e0c28fe193eea4484c2bfa7bfee6b160 640 Packages.gz
+ e8ef45d3c17c896b4594e42fed5764ecd1c9da43 655 Packages.gz
  a9da358b9c16513b5df8f5b3978ffbaf3dbd9db3 724 Packages.bz2
 SHA256:
  e891348c1e2553636c78b0e8b9e43537e8df3245a0804e4dc4b797862532e6a9 1138 Packages
- 3b91e0ad10ee757083a6e1eb157bd8dadb5f7ceedcbeadc88b69a719ff301753 640 Packages.gz
+ 9f006a70d3c43c01334c2440fe1e636d345bcb04c3313a06a53b17e194b3cf0d 655 Packages.gz
  cb78b83b639fd12e2c2d8aa5cac4f7836e7a9cd9591e80cac03213e28f547bff 724 Packages.bz2
