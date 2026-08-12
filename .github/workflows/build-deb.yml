@@ -185,16 +185,33 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Snapshot published trees, then commit onto master (non-FF safe)
+          rm -rf /tmp/nd-pub-stable /tmp/nd-pub-apt /tmp/nd-pub-dl
+          cp -a stable /tmp/nd-pub-stable
+          cp -a apt /tmp/nd-pub-apt
+          cp -a downloads /tmp/nd-pub-dl
+          git fetch origin master
+          git stash push -u -m "pre-publish-stash" || true
+          git checkout -B _publish-stable origin/master
+          rm -rf stable apt downloads
+          cp -a /tmp/nd-pub-stable stable
+          cp -a /tmp/nd-pub-apt apt
+          cp -a /tmp/nd-pub-dl downloads
           git add downloads/*.deb \
             stable/Packages stable/Release stable/.jsdelivr_refresh stable/README.md stable/index.html stable/debs/*.deb \
             apt/Packages apt/Release apt/.jsdelivr_refresh apt/README.md apt/debs/*.deb
+          # Drop obsolete debs from index dirs
+          git add -u stable/debs apt/debs downloads || true
           if git diff --cached --quiet; then
             echo "stable/apt/downloads already up to date"
-            exit 0
+          else
+            git commit -m "Update stable Sileo source ${FIXED_SRC} [skip ci]"
+            git push origin HEAD:master
           fi
-          git commit -m "Update stable Sileo source ${FIXED_SRC} [skip ci]"
-          # Publish CDN files to master (jsDelivr serves default branch)
-          git push origin "HEAD:master"
+          # Restore feature branch pointer for subsequent steps
+          git checkout "${GITHUB_REF_NAME}" || git checkout -
+          git stash pop || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Packages" || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/Release" || true
           curl -sS "https://purge.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/debs/${DEB_NAME}" || true
