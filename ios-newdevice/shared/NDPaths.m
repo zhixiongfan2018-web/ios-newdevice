@@ -92,18 +92,52 @@ NSInteger const NDHTTPPort = 8080;
     }
 }
 
++ (NSString *)mediaHomeDir {
+    return @"/var/mobile/Media/NewDevice";
+}
+
++ (NSString *)mediaImportDir {
+    return [[self mediaHomeDir] stringByAppendingPathComponent:@"import"];
+}
+
++ (NSString *)mediaExportDir {
+    return [[self mediaHomeDir] stringByAppendingPathComponent:@"export"];
+}
+
 + (void)ensureDirectories {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray<NSString *> *dirs = @[
         [self preferencesDir],
         [self recordsRoot],
         [self runtimeStateDir],
+        // Visible in Aisi file manager (Media root)
+        [self mediaHomeDir],
+        [self mediaImportDir],
+        [self mediaExportDir],
+        @"/var/mobile/Media/AMG/import",
+        @"/var/mobile/Media/AMG/export",
+        @"/var/mobile/AMG_tar",
     ];
     for (NSString *dir in dirs) {
         if (![fm fileExistsAtPath:dir]) {
             [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
         }
         [self makePathWorldReadable:dir];
+    }
+
+    // Drop a short readme so the folder is obvious in Aisi
+    NSString *readme = [[self mediaHomeDir] stringByAppendingPathComponent:@"使用说明.txt"];
+    if (![fm fileExistsAtPath:readme]) {
+        NSString *text =
+            @"NewDevice 用户目录（爱思「文件管理」可见）\n"
+            @"\n"
+            @"import/  把要导入的 .tar 放这里，然后打开 App → 工具 → 导入\n"
+            @"export/  App「导出本机数据」生成的 .tar 在这里\n"
+            @"\n"
+            @"内部运行数据在越狱路径，不在此显示：\n"
+            @"/var/jb/var/mobile/NewDevice/Records\n";
+        [text writeToFile:readme atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [self makePathWorldReadable:readme];
     }
 }
 

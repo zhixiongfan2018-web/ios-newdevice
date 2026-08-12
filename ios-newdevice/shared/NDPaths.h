@@ -22,6 +22,11 @@ FOUNDATION_EXPORT NSInteger const NDHTTPPort;
 /// World-readable snapshot for sandboxed target apps (tweak injection).
 + (NSString *)runtimeStatePath;
 + (NSString *)runtimeStateDir;
+/// Aisi/爱思「文件管理」可见目录（= /var/mobile/Media/NewDevice）
++ (NSString *)mediaHomeDir;
++ (NSString *)mediaImportDir;
++ (NSString *)mediaExportDir;
+
 + (void)ensureDirectories;
 + (void)makePathWorldReadable:(NSString *)path;
 @end

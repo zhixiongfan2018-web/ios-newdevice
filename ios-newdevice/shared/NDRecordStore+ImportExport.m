@@ -37,10 +37,11 @@
 
 + (NSString *)resolvedAMGImportPath {
     // Prefer directories that actually contain importable content.
-    // Empty AMG_tar (created by a prior export) must not shadow Media/AMG/import.
+    // Media/NewDevice/import is the Aisi-visible user folder.
     NSArray *candidates = @[
-        [self amgTarPath],
+        [NDPaths mediaImportDir],
         [self amgMediaImportPath],
+        [self amgTarPath],
         @"/var/mobile/Media/AMG",
         // Runtime tree last — faker often at-rest ciphertext; only use if nothing else
         @"/var/mobile/AMG",
@@ -53,7 +54,7 @@
             emptyPreferred = p;
         }
     }
-    return emptyPreferred ?: [self amgTarPath];
+    return emptyPreferred ?: [NDPaths mediaImportDir];
 }
 
 - (NSUInteger)NDImportUnpackedTree:(NSString *)dir
@@ -169,18 +170,34 @@
 - (NSUInteger)exportAMGRecordsToDirectory:(NSString *)dir
                                      slim:(BOOL)slim
                                     error:(NSError **)error {
-    if (!dir.length) dir = [NDRecordStore amgTarPath];
+    // Default to Aisi-visible NewDevice export folder
+    if (!dir.length) dir = [NDPaths mediaExportDir];
     NSFileManager *fm = [NSFileManager defaultManager];
+    [NDPaths ensureDirectories];
     if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:error]) return 0;
 
     // Stage folders under Media so packing works even if AMG_tar is awkward to browse in Aisi
-    NSString *stageRoot = @"/var/mobile/Media/AMG/.nd-export-stage";
+    NSString *stageRoot = [[NDPaths mediaHomeDir] stringByAppendingPathComponent:@".nd-export-stage"];
     [fm removeItemAtPath:stageRoot error:nil];
     [fm createDirectoryAtPath:stageRoot withIntermediateDirectories:YES attributes:nil error:nil];
 
     NSUInteger exported = 0;
     NSArray *names = [self allRecordNames];
     NSArray *apps = [NDConfig shared].targetApps ?: @[];
+    // Mirror destinations (Aisi can see Media/*)
+    NSArray *mirrorDirs = @[
+        dir,
+        [NDPaths mediaExportDir],
+        [NDRecordStore amgMediaExportPath],
+        [NDRecordStore amgTarPath],
+    ];
+    NSMutableSet *uniqueMirrors = [NSMutableSet set];
+    for (NSString *d in mirrorDirs) {
+        if (!d.length) continue;
+        [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+        [uniqueMirrors addObject:d];
+    }
+
     for (NSString *name in names) {
         if ([name isEqualToString:@"原始机器"]) continue;
         NDDeviceProfile *p = [self profileNamed:name];
@@ -191,6 +208,12 @@
         NSString *out = [stageRoot stringByAppendingPathComponent:safe];
         [fm removeItemAtPath:out error:nil];
         if (![p writeAMGFakerToDirectory:out error:nil]) continue;
+
+        // Also copy NewDevice native profile.plist for round-trip
+        NSString *profileSrc = [NDPaths profilePathForRecord:name];
+        if ([fm fileExistsAtPath:profileSrc]) {
+            [fm copyItemAtPath:profileSrc toPath:[out stringByAppendingPathComponent:@"profile.plist"] error:nil];
+        }
 
         NSDictionary *desc = @{
             @"title": name,
@@ -223,25 +246,24 @@
             [[NDAppDataManager shared] slimMediaInDirectory:out];
         }
 
-        // Pack as uncompressed .tar (easy for Aisi / no gzip dependency)
+        // Pack as uncompressed .tar
         NSString *tarName = [safe stringByAppendingPathExtension:@"tar"];
-        NSString *tarPath = [dir stringByAppendingPathComponent:tarName];
-        [fm removeItemAtPath:tarPath error:nil];
-        // Also drop a copy under Media/AMG/export for Aisi file manager
-        NSString *mediaExport = [NDRecordStore amgMediaExportPath];
-        [fm createDirectoryAtPath:mediaExport withIntermediateDirectories:YES attributes:nil error:nil];
-        NSString *mediaTar = [mediaExport stringByAppendingPathComponent:tarName];
+        NSString *primaryTar = [dir stringByAppendingPathComponent:tarName];
+        [fm removeItemAtPath:primaryTar error:nil];
 
         NSError *tarErr = nil;
-        if (!NDCreateTarFromDirectory(out, tarPath, &tarErr)) {
-            // keep folder as fallback
+        if (!NDCreateTarFromDirectory(out, primaryTar, &tarErr)) {
             NSString *folderDst = [dir stringByAppendingPathComponent:safe];
             [fm removeItemAtPath:folderDst error:nil];
             [self NDCopyTree:out to:folderDst];
             if (error && !*error) *error = tarErr;
         } else {
-            [fm removeItemAtPath:mediaTar error:nil];
-            [fm copyItemAtPath:tarPath toPath:mediaTar error:nil];
+            for (NSString *mirror in uniqueMirrors) {
+                if ([mirror isEqualToString:dir]) continue;
+                NSString *copyTo = [mirror stringByAppendingPathComponent:tarName];
+                [fm removeItemAtPath:copyTo error:nil];
+                [fm copyItemAtPath:primaryTar toPath:copyTo error:nil];
+            }
         }
         exported++;
     }

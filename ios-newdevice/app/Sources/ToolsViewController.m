@@ -28,31 +28,41 @@ extern char **environ;
 
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.tableView addGestureRecognizer:lp];
+    [NDPaths ensureDirectories];
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == 0) return @"其他数据导入";
-    if (section == 1) return @"AMG 数据导入与导出";
+    if (section == 0) return @"本机数据（爱思可见）";
+    if (section == 1) return @"其他数据导入";
+    if (section == 2) return @"AMG 兼容";
     return @"实用工具";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) {
+        return [NSString stringWithFormat:@"爱思 → 文件管理 → NewDevice\n%@", [NDPaths mediaHomeDir]];
+    }
+    return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 3;
     if (section == 1) return 3;
+    if (section == 2) return 2;
     return 4;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     NDConfig *c = [NDConfig shared];
-    if (indexPath.section == 0 && indexPath.row == 2) {
+    if (indexPath.section == 1 && indexPath.row == 2) {
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
         cell.textLabel.font = [NDTheme headlineFont];
         cell.textLabel.text = @"同时导入 Keychain";
         cell.detailTextLabel.font = [NDTheme captionFont];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        cell.detailTextLabel.text = @"导入时暂存钥匙串；切换记录时再写入系统 Keychain";
+        cell.detailTextLabel.text = @"导入时暂存钥匙串；切换记录时再写入";
         UISwitch *sw = [UISwitch new];
         sw.onTintColor = [NDTheme accent];
         sw.on = c.importKeychainWithData;
@@ -72,6 +82,20 @@ extern char **environ;
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) {
+            cell.textLabel.text = @"导出本机数据";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@".tar → %@", [NDPaths mediaExportDir]];
+            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"导入本机数据";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"从 %@ 读 .tar", [NDPaths mediaImportDir]];
+            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
+        } else {
+            cell.textLabel.text = @"创建/打开用户文件夹";
+            cell.detailTextLabel.text = @"爱思文件管理里应看到 NewDevice";
+            cell.imageView.image = [UIImage systemImageNamed:@"folder.badge.plus"];
+        }
+    } else if (indexPath.section == 1) {
+        if (indexPath.row == 0) {
             cell.textLabel.text = @"导入其他数据";
             cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore iGrimaceImportPath]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down"];
@@ -80,15 +104,11 @@ extern char **environ;
             cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore awzImportPath]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
         }
-    } else if (indexPath.section == 1) {
+    } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"导入 AMG 数据";
-            cell.detailTextLabel.text = @"放 .tar 到 /var/mobile/Media/AMG/import（或 AMG_tar）";
+            cell.detailTextLabel.text = @"Media/AMG/import 或 AMG_tar 的 .tar";
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"导出 AMG 数据";
-            cell.detailTextLabel.text = @"导出为 .tar → Media/AMG/export 与 AMG_tar";
-            cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.up"];
         } else {
             cell.textLabel.text = @"瘦身（清除图片、视频）";
             cell.detailTextLabel.text = c.slimExportStripMedia
@@ -127,12 +147,12 @@ extern char **environ;
     if (gr.state != UIGestureRecognizerStateBegan) return;
     CGPoint p = [gr locationInView:self.tableView];
     NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:p];
-    if (!ip || ip.section != 1 || ip.row != 2) return;
+    if (!ip || ip.section != 2 || ip.row != 1) return;
     NDConfig *c = [NDConfig shared];
     c.slimExportStripMedia = !c.slimExportStripMedia;
     [c save];
     [self.tableView reloadData];
-    [self alert:@"导出自动瘦身" message:c.slimExportStripMedia ? @"已开启：导出 AMG 时清除图片/视频" : @"已关闭"];
+    [self alert:@"导出自动瘦身" message:c.slimExportStripMedia ? @"已开启：导出时清除图片/视频" : @"已关闭"];
 }
 
 - (void)alert:(NSString *)title message:(NSString *)msg {
@@ -149,6 +169,25 @@ extern char **environ;
         ? [NSString stringWithFormat:@"已导入 %lu 条（Keychain：%@）\n%@", (unsigned long)n, kc ? @"开" : @"关", path]
         : (err.localizedDescription ?: @"未找到可导入数据");
     [self alert:n ? @"导入完成" : @"导入结果" message:msg];
+}
+
+- (void)exportOwnData {
+    [NDPaths ensureDirectories];
+    NSError *err = nil;
+    BOOL slim = [NDConfig shared].slimExportStripMedia;
+    NSString *outDir = [NDPaths mediaExportDir];
+    NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:slim error:&err];
+    [self alert:n ? @"导出完成" : @"导出结果"
+        message:n ? [NSString stringWithFormat:@"已导出 %lu 条本机数据（.tar）\n\n爱思可见路径：\n%@\n\n另有副本：\n%@", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath]]
+                 : (err.localizedDescription ?: @"没有可导出的记录（请先一键新机生成记录）")];
+}
+
+- (void)ensureUserFolder {
+    [NDPaths ensureDirectories];
+    BOOL ok = [[NSFileManager defaultManager] fileExistsAtPath:[NDPaths mediaHomeDir]];
+    [self alert:ok ? @"已创建" : @"创建失败"
+        message:ok ? [NSString stringWithFormat:@"请用爱思打开：\n文件管理 → 刷新 → NewDevice\n\n%@", [NDPaths mediaHomeDir]]
+                  : @"无法在 /var/mobile/Media 下创建 NewDevice"];
 }
 
 - (void)respring {
@@ -183,9 +222,15 @@ extern char **environ;
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 0 && indexPath.row == 2) return;
+    if (indexPath.section == 1 && indexPath.row == 2) return;
 
     if (indexPath.section == 0) {
+        if (indexPath.row == 0) [self exportOwnData];
+        else if (indexPath.row == 1) [self runImportKind:@"AMG" path:[NDPaths mediaImportDir]];
+        else [self ensureUserFolder];
+        return;
+    }
+    if (indexPath.section == 1) {
         if (indexPath.row == 0) {
             [self runImportKind:@"iGrimace" path:[NDRecordStore iGrimaceImportPath]];
         } else {
@@ -193,17 +238,9 @@ extern char **environ;
         }
         return;
     }
-    if (indexPath.section == 1) {
+    if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             [self runImportKind:@"AMG" path:[NDRecordStore resolvedAMGImportPath]];
-        } else if (indexPath.row == 1) {
-            NSError *err = nil;
-            BOOL slim = [NDConfig shared].slimExportStripMedia;
-            NSString *outDir = [NDRecordStore amgTarPath];
-            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:slim error:&err];
-            [self alert:n ? @"导出完成" : @"导出结果"
-                message:n ? [NSString stringWithFormat:@"已导出 %lu 条 .tar\n%@\n兼复制到\n%@\n瘦身：%@", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath], slim ? @"开" : @"关"]
-                         : (err.localizedDescription ?: @"没有可导出的记录")];
         } else {
             NSString *name = [[NDRecordStore shared] currentRecordName];
             if (!name.length || [name isEqualToString:@"原始机器"]) {
