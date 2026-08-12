@@ -405,7 +405,7 @@
             if ([self saveProfile:fresh error:nil]) {
                 saved = fresh;
                 NSString *note = fakerEncrypted
-                    ? @"AMG faker.plist was encrypted; generated a new random identity. App holographic data was imported."
+                    ? @"faker.plist here is AMG at-rest ciphertext (typical under /var/mobile/AMG). Do not decrypt — use AMG「导出」into /var/mobile/AMG_tar, or AMG.Get_Param() / NewDevice plaintext export. Holographic app data was still imported; identity was randomized."
                     : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
                 [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                       atomically:YES encoding:NSUTF8StringEncoding error:nil];

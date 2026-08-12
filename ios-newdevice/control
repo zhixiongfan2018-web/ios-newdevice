@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-56
+Version: 1.0.0-57
 Architecture: iphoneos-arm64
-Description: AMG Tools tab: iGrimace/AWZ/AMG Media import-export, Keychain toggle, slim.
+Description: Fix AMG import path to official AMG_tar; unpack tar.gz; plaintext export.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

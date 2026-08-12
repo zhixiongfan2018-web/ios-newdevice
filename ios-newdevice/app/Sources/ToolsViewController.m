@@ -83,11 +83,11 @@ extern char **environ;
     } else if (indexPath.section == 1) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"导入 AMG 数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore amgMediaImportPath]];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@（官方 AMG_tar；也可放 Media/AMG/import）", [NDRecordStore amgTarPath]];
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];
         } else if (indexPath.row == 1) {
             cell.textLabel.text = @"导出 AMG 数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore amgMediaExportPath]];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@（明文 faker，无需解密）", [NDRecordStore amgTarPath]];
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.up"];
         } else {
             cell.textLabel.text = @"瘦身（清除图片、视频）";
@@ -195,18 +195,14 @@ extern char **environ;
     }
     if (indexPath.section == 1) {
         if (indexPath.row == 0) {
-            NSString *dir = [NDRecordStore amgMediaImportPath];
-            BOOL isDir = NO;
-            if (![[NSFileManager defaultManager] fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
-                dir = @"/var/mobile/AMG";
-            }
-            [self runImportKind:@"AMG" path:dir];
+            [self runImportKind:@"AMG" path:[NDRecordStore resolvedAMGImportPath]];
         } else if (indexPath.row == 1) {
             NSError *err = nil;
             BOOL slim = [NDConfig shared].slimExportStripMedia;
-            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:[NDRecordStore amgMediaExportPath] slim:slim error:&err];
+            NSString *outDir = [NDRecordStore amgTarPath];
+            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:slim error:&err];
             [self alert:n ? @"导出完成" : @"导出结果"
-                message:n ? [NSString stringWithFormat:@"已导出 %lu 条到\n%@\n瘦身：%@", (unsigned long)n, [NDRecordStore amgMediaExportPath], slim ? @"开" : @"关"]
+                message:n ? [NSString stringWithFormat:@"已导出 %lu 条到\n%@\n瘦身：%@\n（明文 faker，再导入无需解密）", (unsigned long)n, outDir, slim ? @"开" : @"关"]
                          : (err.localizedDescription ?: @"没有可导出的记录")];
         } else {
             NSString *name = [[NDRecordStore shared] currentRecordName];

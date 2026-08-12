@@ -140,7 +140,7 @@ local AMG = {
         return 0
     end),
 
-    -- Media/AMG/import · iGrimace · AWZ（与 App「工具」页一致）
+    -- 官方路径 /var/mobile/AMG_tar · iGrimace · AWZ（与 App「工具」页一致）
     Import_AMG_Media = (function(dir)
         Check_NewDevice()
         local q = "importAMGMedia"

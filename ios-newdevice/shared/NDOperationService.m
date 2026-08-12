@@ -311,7 +311,7 @@
         }
 
         if ([fun isEqualToString:@"importAMGRecords"]) {
-            NSString *dir = query[@"dir"] ?: @"/var/mobile/AMG";
+            NSString *dir = query[@"dir"] ?: [NDRecordStore resolvedAMGImportPath];
             NSError *err = nil;
             BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
             NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
@@ -323,7 +323,7 @@
 
         if ([fun isEqualToString:@"importIGrimace"] || [fun isEqualToString:@"importAWZ"] || [fun isEqualToString:@"importAMGMedia"]) {
             NSString *kind = @"AMG";
-            NSString *fallback = [NDRecordStore amgMediaImportPath];
+            NSString *fallback = [NDRecordStore resolvedAMGImportPath];
             if ([fun isEqualToString:@"importIGrimace"]) {
                 kind = @"iGrimace";
                 fallback = [NDRecordStore iGrimaceImportPath];
@@ -332,12 +332,6 @@
                 fallback = [NDRecordStore awzImportPath];
             }
             NSString *dir = query[@"dir"] ?: fallback;
-            if ([fun isEqualToString:@"importAMGMedia"]) {
-                BOOL isDir = NO;
-                if (![[NSFileManager defaultManager] fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
-                    dir = @"/var/mobile/AMG";
-                }
-            }
             NSError *err = nil;
             BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
             NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:dir kind:kind importKeychain:kc error:&err];
@@ -348,7 +342,7 @@
         }
 
         if ([fun isEqualToString:@"exportAMGMedia"]) {
-            NSString *dir = query[@"dir"] ?: [NDRecordStore amgMediaExportPath];
+            NSString *dir = query[@"dir"] ?: [NDRecordStore amgTarPath];
             BOOL slim = query[@"slim"] ? [query[@"slim"] boolValue] : [NDConfig shared].slimExportStripMedia;
             NSError *err = nil;
             NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];

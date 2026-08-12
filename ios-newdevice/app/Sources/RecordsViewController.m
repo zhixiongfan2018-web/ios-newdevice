@@ -1,5 +1,6 @@
 #import "RecordsViewController.h"
 #import "NDRecordStore.h"
+#import "NDRecordStore+ImportExport.h"
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
 #import "NDTheme.h"
@@ -35,13 +36,13 @@
 
 - (void)showMore {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"记录" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG 导入 (/var/mobile/AMG)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG_tar 导入（官方导出路径）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self importFromAMG];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录 (NewDevice)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportCurrent];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出 AMG 目录 (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出到 AMG_tar (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportAMGFolder];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -50,9 +51,11 @@
 
 - (void)importFromAMG {
     NSError *err = nil;
-    NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:@"/var/mobile/AMG" error:&err];
+    NSString *dir = [NDRecordStore resolvedAMGImportPath];
+    BOOL kc = [NDConfig shared].importKeychainWithData;
+    NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
     NSString *msg = n
-        ? [NSString stringWithFormat:@"已导入 %lu 条记录（含 faker 身份 / 全息 App / AppGroup / selectApp）。\n若 faker.plist 为加密导出，会生成随机身份并仍迁移 App 数据；详见记录目录 amg-import-note.txt。", (unsigned long)n]
+        ? [NSString stringWithFormat:@"已从 %@ 导入 %lu 条（Keychain：%@）。\n提示：请用 AMG「导出」到 /var/mobile/AMG_tar，不要只拷运行时 /var/mobile/AMG（faker 落盘为密文，无需也不应手工解密）。", dir, (unsigned long)n, kc ? @"开" : @"关"]
         : (err.localizedDescription ?: @"未找到可导入的 AMG 记录");
     UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
@@ -76,31 +79,15 @@
 }
 
 - (void)exportAMGFolder {
-    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
-    if (!p || [p.name isEqualToString:@"原始机器"]) {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"无法导出" message:@"请先切换到非「原始机器」记录" preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:a animated:YES completion:nil];
-        return;
-    }
-    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"AMG-export-%@", p.name]];
-    [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
     NSError *err = nil;
-    if (![p writeAMGFakerToDirectory:dir error:&err]) {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导出失败" message:err.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:a animated:YES completion:nil];
-        return;
-    }
-    // Attach ifaddrs + selectApp when present
-    NSString *ifaSrc = [NDPaths ifaddrsPathForRecord:p.name];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:ifaSrc]) {
-        [[NSFileManager defaultManager] copyItemAtPath:ifaSrc toPath:[dir stringByAppendingPathComponent:@"ifaddrs.plist"] error:nil];
-    }
-    NSArray *apps = [NDConfig shared].targetApps ?: @[];
-    [apps writeToFile:[dir stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
-    UIActivityViewController *av = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:dir]] applicationActivities:nil];
-    [self presentViewController:av animated:YES completion:nil];
+    NSString *outDir = [NDRecordStore amgTarPath];
+    NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:[NDConfig shared].slimExportStripMedia error:&err];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导出完成" : @"导出结果"
+                                                               message:n ? [NSString stringWithFormat:@"已导出 %lu 条明文记录到\n%@", (unsigned long)n, outDir]
+                                                                        : (err.localizedDescription ?: @"没有可导出的记录")
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)importProfile {

@@ -5,13 +5,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface NDRecordStore (ImportExport)
 
-/// Default AMG Media paths (match AMG UI).
+/// Official AMG import/export root (docs: /var/mobile/AMG_tar).
++ (NSString *)amgTarPath;
+/// Some AMG builds show Media paths in UI; kept as fallbacks.
 + (NSString *)amgMediaImportPath;
 + (NSString *)amgMediaExportPath;
 + (NSString *)iGrimaceImportPath;
 + (NSString *)awzImportPath;
 
-/// Import AMG-compatible tree. Optionally restore Keychain from holographic dumps.
+/// First existing among AMG_tar → Media/AMG/import → /var/mobile/AMG.
++ (NSString *)resolvedAMGImportPath;
+
+/// Import AMG-compatible tree / AMG_tar archives. Optionally restore Keychain.
 - (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir
                               importKeychain:(BOOL)importKeychain
                                        error:(NSError * _Nullable * _Nullable)error;
@@ -22,7 +27,7 @@ NS_ASSUME_NONNULL_BEGIN
                                   importKeychain:(BOOL)importKeychain
                                            error:(NSError * _Nullable * _Nullable)error;
 
-/// Export current (or all) records into AMG Media export folder.
+/// Export records into AMG_tar (plaintext faker — no AMG runtime key needed to re-import).
 - (NSUInteger)exportAMGRecordsToDirectory:(NSString *)dir
                                      slim:(BOOL)slim
                                     error:(NSError * _Nullable * _Nullable)error;

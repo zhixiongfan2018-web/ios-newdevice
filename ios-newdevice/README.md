@@ -113,8 +113,8 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | dyld 计数 / getenv | ✅ 深度防越狱 |
 | 剪贴板全息 | ✅ 切换时备份/还原（可关） |
 | Keychain 全息 | ✅ generic/internet/证书 DER（私钥仍可能拒） |
-| 记录导入导出 | ✅ AMG Media + `/var/mobile/AMG` + 明文 faker 导出 |
-| 同时导入 Keychain | ✅ 工具页开关（默认开） |
+| 记录导入导出 | ✅ 官方 `/var/mobile/AMG_tar` + 明文 faker 导出 |
+| 同时导入 Keychain | ✅ 工具页开关（默认开；AMG 官方建议非必要勿开） |
 | 导入 iGrimace / AWZ | ✅ `/var/mobile/iGrimace`、`/var/mobile/importdata` |
 | 瘦身（清图片/视频） | ✅ 立刻瘦身 + 导出时自动瘦身（长按切换） |
 | 修复中文输入 / 国行联网 / 注销 | ✅ 工具页 |
@@ -122,7 +122,7 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 | 结果文件 `amgResult.txt` | ✅ 同步写入 |
 | `prevRecord` / `getRecordCount` | ✅ |
 
-**边界**：modem NVRAM IMEI、Keychain 私钥材料、密文 AMG `faker.plist` 解密仍无法保证。
+**边界**：modem NVRAM IMEI、Keychain 私钥；**不必也不应**去解 AMG 运行时目录里的落盘密文 `faker.plist`——正确路径是 `AMG_tar` / 脚本 `Get_Param`。
 
 额外 API：`clearAppData` / `cleanApps`；`importAMGRecords` / `importAMGMedia` / `importIGrimace` / `importAWZ`；`exportAMGMedia`；`slimRecord`。
 
@@ -135,9 +135,11 @@ NewDevice → **工具**：
 | 导入其他数据（iGrimace） | `/var/mobile/iGrimace` |
 | 导入 AWZ 数据 | `/var/mobile/importdata` |
 | 同时导入 Keychain | 开关，导入时还原 `keychain-full.plist` |
-| 导入 AMG 数据 | `/var/mobile/Media/AMG/import`（不存在则回退 `/var/mobile/AMG`） |
-| 导出 AMG 数据 | `/var/mobile/Media/AMG/export` |
+| 导入 AMG 数据 | **`/var/mobile/AMG_tar`**（官方；兼容 `Media/AMG/import`；支持 `.tar.gz`） |
+| 导出 AMG 数据 | **`/var/mobile/AMG_tar`**（**明文** faker，再导入不用解密） |
 | 瘦身 | 点按瘦身当前记录；长按切换「导出自动清除媒体」 |
+
+> `/var/mobile/AMG/<记录>/faker.plist` 是 AMG **运行时落盘密文**，不是导入包。官方文档导入/导出走的是 `AMG_tar`。
 
 ### 从 AMG 导入数据
 
@@ -145,25 +147,24 @@ NewDevice → **工具**：
 
 | 文件/目录 | 含义 |
 |---|---|
-| `faker.plist` | 身份参数（IDFA/UDID/MAC/SSID/坐标/…）；**部分版本落盘为 AES 密文** |
+| `faker.plist` | 身份参数；**运行时目录**里常为密文；**AMG_tar / NewDevice 导出**应为明文 |
 | `selectApp.plist` | 目标 App bundle id 列表 |
 | `description.plist` | 记录标题 / App 显示名 |
-| `ifaddrs.plist` | 网卡/DNS 指纹（旁路保存；`en0` MAC 由 WiFiMAC 伪造） |
-| `com.*` / `net.*` | App 全息沙盒（Documents/Library） |
+| `ifaddrs.plist` | 网卡/DNS 指纹 |
+| `com.*` / `net.*` | App 全息沙盒 |
 | `AppGroup/` | App Group 全息 |
 | `Pasteboard/` | 剪贴板备份（若有） |
 
 导入行为：
 
-1. 把导出放到 `/var/mobile/Media/AMG/import/` 或 `/var/mobile/AMG/`。  
-2. NewDevice → **工具** → **导入 AMG 数据**（或记录页旧入口）。  
-3. 优先读 `faker.plist`；明文则映射 `BlueAddress`/`DiskSpace`/`SystemUptime`/`Memory` 等别名。  
-4. **密文 faker**：生成随机身份，仍导入全息 App + AppGroup，并写 `amg-import-note.txt`。  
-5. `selectApp.plist` 会合并进「应用」目标列表；「同时导入 Keychain」开启时尝试还原钥匙串。
+1. 在 AMG 里点 **导出 AMG 数据**，包会出现在 `/var/mobile/AMG_tar`（不要只拷 `/var/mobile/AMG`）。  
+2. NewDevice → **工具** → **导入 AMG 数据**（自动解 `.tar.gz`，并兼容 `Media/AMG/import`）。  
+3. 明文 `faker.plist` → 映射身份；若仍是运行时密文 → 随机身份 + 仍导入全息，写 `amg-import-note.txt`。  
+4. 需要明文参数也可用 AMG 脚本 `Get_Param`（运行时解密后写出），再导入该 plist。
 
-脚本：`http://127.0.0.1:8080/cmd?fun=importAMGMedia`（可选 `&dir=`、`&keychain=1`）；导出 `fun=exportAMGMedia`；瘦身 `fun=slimRecord`。
+脚本：`fun=importAMGMedia`（默认 `AMG_tar`）；`fun=exportAMGMedia`；`fun=slimRecord`。
 
-**仍弱于 AMG / 待优化**：modem NVRAM 级 IMEI、Keychain 私钥重放、密文 faker 解密（需 AMG 运行时密钥）。
+**仍弱于 AMG**：modem NVRAM IMEI、Keychain 私钥；运行时密文 faker 无 AMG 密钥时无法还原（应走导出路径，而不是解密）。
 
 ## 自测清单
 
