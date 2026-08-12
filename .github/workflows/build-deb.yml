@@ -218,12 +218,10 @@ jobs:
           git clean -fd
           git checkout -f "${GITHUB_REF_NAME}" || git checkout -f -
           git stash pop || true
-          git checkout -- stable apt downloads 2>/dev/null || true
-          git clean -fd stable apt downloads dist >/dev/null 2>&1 || true
-          # restore dist deb if clean removed it — copy back from published snapshot
+          git checkout HEAD -- stable apt downloads 2>/dev/null || true
           mkdir -p dist
           if ! ls dist/*.deb >/dev/null 2>&1; then
-            cp "/tmp/nd-pub-dl/${DEB_NAME}" "dist/${DEB_NAME}" || cp "downloads/${DEB_NAME}" "dist/${DEB_NAME}" || true
+            cp "/tmp/nd-pub-dl/${DEB_NAME}" "dist/${DEB_NAME}"
           fi
           git fetch origin master
           MASTER_SHA="$(git rev-parse origin/master)"
