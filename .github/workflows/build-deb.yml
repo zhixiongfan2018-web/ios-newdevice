@@ -112,23 +112,33 @@ jobs:
           mkdir -p "$REPO_ROOT/debs"
           cp dist/*.deb "$REPO_ROOT/debs/"
 
+          # Plain Packages only — do NOT publish Packages.gz/bz2 (CDN ghosts break Sileo)
           (
             cd "$REPO_ROOT"
             dpkg-scanpackages -m debs /dev/null > Packages
-            bzip2 -f -k Packages
-            gzip -f -k Packages
           )
-
-          printf '%s\n' \
-            'Origin: NewDevice' \
-            'Label: NewDevice' \
-            'Suite: stable' \
-            'Version: 1.0' \
-            'Codename: stable' \
-            'Architectures: iphoneos-arm64' \
-            'Components: main' \
-            'Description: NewDevice local Sileo source' \
-            > "$REPO_ROOT/Release"
+          python3 - "$REPO_ROOT" <<'PY'
+          import hashlib, datetime, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          pkg = (root / "Packages").read_bytes()
+          size = len(pkg)
+          now = datetime.datetime.now(datetime.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+          (root / "Release").write_text(
+              f"Date: {now}\n"
+              "Origin: NewDevice\n"
+              "Label: NewDevice\n"
+              "Suite: stable\n"
+              "Version: 1.0\n"
+              "Codename: stable\n"
+              "Architectures: iphoneos-arm64\n"
+              "Components: main\n"
+              "Description: NewDevice Sileo source\n"
+              f"MD5Sum:\n {hashlib.md5(pkg).hexdigest()} {size} Packages\n"
+              f"SHA1:\n {hashlib.sha1(pkg).hexdigest()} {size} Packages\n"
+              f"SHA256:\n {hashlib.sha256(pkg).hexdigest()} {size} Packages\n"
+          )
+          PY
 
           DEB_NAME=$(basename "$(ls dist/*.deb | head -n1)")
           cat > "$REPO_ROOT/index.html" <<HTML
@@ -149,7 +159,7 @@ jobs:
             <p>推荐直链（raw，手机浏览器可下）：</p>
             <p class="box"><code>https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/downloads/NewDevice.deb</code></p>
             <p>Sileo 固定源：</p>
-            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/repo</code></p>
+            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/apt</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>
@@ -160,6 +170,8 @@ jobs:
           ls -la "$REPO_ROOT" "$REPO_ROOT/debs"
           echo "----- Packages (head) -----"
           head -n 30 "$REPO_ROOT/Packages"
+          echo "----- Release -----"
+          cat "$REPO_ROOT/Release"
 
       - name: Setup Pages
         if: github.ref == 'refs/heads/master'

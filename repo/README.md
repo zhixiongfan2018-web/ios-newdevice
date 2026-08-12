@@ -1,13 +1,11 @@
-# Sileo 源（固定链接）
+# Sileo 固定源
 
-只添加这一条，不要再换版本号：
+**不要用**旧地址 `/repo` 或 `@master`（CDN 残留幽灵 `Packages.gz`，会带假 ellekit，刷新/安装必挂）。
+
+只用这一条：
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/repo
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/apt
 ```
 
-说明：
-- 这是固定源地址，以后升级包也不用改链接
-- `@latest` 始终指向最新发布标签（当前为可安装的 `1.0.0-23`）
-- 请删除旧的 `@master` / `@v1.0.xx` 源，只保留上面这一条
-- 添加后刷新 → 安装 NewDevice → **只 Respring**，不要完整重启
+添加后刷新 → 安装 NewDevice → **只 Respring**。

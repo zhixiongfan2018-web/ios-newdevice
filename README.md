@@ -5,10 +5,10 @@
 **Sileo 固定源（只用这一条）：**
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/repo
+https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@latest/apt
 ```
 
-请删除旧的 `@master` / `@v1.0.xx` 源。添加后刷新 → 安装 NewDevice → 只 Respring。
+旧的 `@latest/repo`、`@master/repo`、`@v1.0.xx` 都不要再用。添加后刷新 → 安装 → 只 Respring。
 
 **下载 deb（备用）：**
 
