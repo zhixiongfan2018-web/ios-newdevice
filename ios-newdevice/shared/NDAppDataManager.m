@@ -126,12 +126,46 @@ extern char **environ;
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *bid in bundleIds) {
         NSString *container = [self containerPathForBundleId:bid];
-        if (!container) continue;
-        for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
-            NSString *path = [container stringByAppendingPathComponent:sub];
-            if ([fm fileExistsAtPath:path]) {
-                [fm removeItemAtPath:path error:nil];
+        if (container) {
+            // Strong clear (AMG-style): wipe primary sandbox trees
+            for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
+                NSString *path = [container stringByAppendingPathComponent:sub];
+                if ([fm fileExistsAtPath:path]) {
+                    [fm removeItemAtPath:path error:nil];
+                    [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+                }
+            }
+            // Recreate common Library subdirs so apps don't crash on first launch
+            for (NSString *sub in @[@"Library/Preferences", @"Library/Caches", @"Library/Cookies"]) {
+                NSString *path = [container stringByAppendingPathComponent:sub];
                 [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+            }
+        }
+
+        // Also clear App Group containers when discoverable
+        Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+        if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bid];
+#pragma clang diagnostic pop
+            if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"groupContainerURLs")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                id groups = [proxy performSelector:NSSelectorFromString(@"groupContainerURLs")];
+#pragma clang diagnostic pop
+                if ([groups isKindOfClass:[NSDictionary class]]) {
+                    for (NSURL *url in [(NSDictionary *)groups allValues]) {
+                        if (![url isKindOfClass:[NSURL class]] || !url.path.length) continue;
+                        for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+                            NSString *path = [url.path stringByAppendingPathComponent:sub];
+                            if ([fm fileExistsAtPath:path]) {
+                                [fm removeItemAtPath:path error:nil];
+                                [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+                            }
+                        }
+                    }
+                }
             }
         }
     }

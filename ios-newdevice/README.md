@@ -81,14 +81,33 @@ GET http://127.0.0.1:8080/cmd?fun=setCurrentRecordParam&filePath=/path/to.plist
 
 ## Hook 范围（用户态）
 
-- IDFA / IDFV / `UIDevice` 机型与系统版本  
-- MobileGestalt：`SerialNumber`、`UniqueDeviceID`、WiFi/BT MAC、`ProductType` 等  
-- `CTCarrier` / 无线接入类型  
-- `sysctl hw.machine` / `uname`  
+- IDFA / IDFV / `UIDevice` 机型与系统版本（含 iPad）  
+- MobileGestalt：`SerialNumber`、`UniqueDeviceID`、WiFi/BT MAC、`ProductType`、**IMEI/IMEI2** 等  
+- **SSID / BSSID**（`CNCopyCurrentNetworkInfo`）  
+- `CTCarrier` / ISO `us` / 无线接入类型  
+- `sysctl hw.machine` / `hw.model` / **`kern.boottime`** / `uname`  
+- `NSTimeZone`（按美国城市时区）  
 - `CLLocationManager` 定位  
 - 常见越狱路径 `stat`/`access`/`NSFileManager`；深度模式含 `dyld` 镜像名与 `fork`
 
+## 对标 AMG 能力
+
+| AMG 能力 | NewDevice |
+|----------|-----------|
+| 一键新机 / 原始 / 上下条 | ✅ |
+| 全息备份 + 目标 App 清理 | ✅（含 App Group 强清） |
+| 防越狱检测 | ✅ 基础/深度 |
+| 智能飞行 + 公网 IP | ✅ |
+| 脚本 API `8080/cmd` | ✅（含完整 `AMG.*` 兼容表） |
+| Serial / UDID / MAC / IDFA | ✅ |
+| **IMEI / SSID / BSSID** | ✅ 用户态（非基带） |
+| iPad 机型池 | ✅ |
+| 美国运营商 / GPS / 时区 | ✅ |
+| 结果文件 `amgResult.txt` | ✅ 同步写入 |
+
 **边界**：基带级 IMEI、部分系统进程内标识、完整 Keychain 跨组迁移无法保证 100%。全息 Keychain 仅为可枚举 generic password 的尽力备份。
+
+额外 API：`clearAppData` / `cleanApps`（只清目标 App，不换身份）。
 
 ## 自测清单
 

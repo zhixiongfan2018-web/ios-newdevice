@@ -254,7 +254,23 @@
 
 - (void)writeResultCode:(NSInteger)code {
     [NDPaths ensureDirectories];
-    [[NSString stringWithFormat:@"%ld", (long)code] writeToFile:[NDPaths resultFilePath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSString *value = [NSString stringWithFormat:@"%ld", (long)code];
+    NSArray<NSString *> *paths = @[
+        [NDPaths resultFilePath],
+        // AMG drop-in scripts poll /var/mobile/amgResult.txt
+        @"/var/mobile/amgResult.txt",
+        [[NDPaths jbPrefix] stringByAppendingPathComponent:@"/var/mobile/amgResult.txt"],
+        @"/var/mobile/newdeviceResult.txt",
+    ];
+    NSMutableSet *unique = [NSMutableSet set];
+    for (NSString *path in paths) {
+        if (!path.length || [unique containsObject:path]) continue;
+        [unique addObject:path];
+        NSString *dir = [path stringByDeletingLastPathComponent];
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        [value writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [NDPaths makePathWorldReadable:path];
+    }
 }
 
 - (void)notifyReload {

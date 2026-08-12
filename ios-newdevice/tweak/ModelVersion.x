@@ -4,6 +4,7 @@
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
+#import <sys/time.h>
 #import <string.h>
 #import <substrate.h>
 #import "NDTweakState.h"
@@ -24,7 +25,8 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 %hook UIDevice
 - (NSString *)model {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.Model.length) {
+    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.ProductType.length) {
+        if ([st.profile.ProductType hasPrefix:@"iPad"]) return @"iPad";
         return @"iPhone";
     }
     return %orig;
@@ -32,7 +34,8 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 
 - (NSString *)localizedModel {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.Model.length) {
+    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.ProductType.length) {
+        if ([st.profile.ProductType hasPrefix:@"iPad"]) return @"iPad";
         return @"iPhone";
     }
     return %orig;
@@ -113,22 +116,37 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
 static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && name && oldp && oldlenp) {
-        const char *spoof = NULL;
-        if (strcmp(name, "hw.machine") == 0 && st.profile.HardwareMachine.length) {
-            spoof = st.profile.HardwareMachine.UTF8String;
-        } else if (strcmp(name, "hw.model") == 0 && st.profile.HardwareMachine.length) {
-            // Many apps probe hw.model; return ProductType-style machine id for consistency
-            spoof = st.profile.HardwareMachine.UTF8String;
-        }
-        if (spoof) {
-            size_t len = strlen(spoof) + 1;
-            if (*oldlenp < len) {
+    if ([st shouldSpoof] && name && oldp && oldlenp) {
+        if (st.config.fakeDeviceModel) {
+            const char *spoof = NULL;
+            if (strcmp(name, "hw.machine") == 0 && st.profile.HardwareMachine.length) {
+                spoof = st.profile.HardwareMachine.UTF8String;
+            } else if (strcmp(name, "hw.model") == 0 && st.profile.HardwareMachine.length) {
+                spoof = st.profile.HardwareMachine.UTF8String;
+            }
+            if (spoof) {
+                size_t len = strlen(spoof) + 1;
+                if (*oldlenp < len) {
+                    *oldlenp = len;
+                    return 0;
+                }
+                memcpy(oldp, spoof, len);
                 *oldlenp = len;
                 return 0;
             }
-            memcpy(oldp, spoof, len);
-            *oldlenp = len;
+        }
+        // AMG-style uptime fingerprint: spoof kern.boottime
+        if (strcmp(name, "kern.boottime") == 0 && st.profile.BootTime > 0) {
+            struct timeval tv;
+            memset(&tv, 0, sizeof(tv));
+            tv.tv_sec = (time_t)st.profile.BootTime;
+            tv.tv_usec = 0;
+            if (*oldlenp < sizeof(tv)) {
+                *oldlenp = sizeof(tv);
+                return 0;
+            }
+            memcpy(oldp, &tv, sizeof(tv));
+            *oldlenp = sizeof(tv);
             return 0;
         }
     }

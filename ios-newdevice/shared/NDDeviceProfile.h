@@ -16,6 +16,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *WiFiMAC;
 @property (nonatomic, copy) NSString *BTMAC;
 @property (nonatomic, copy) NSString *DeviceToken;
+@property (nonatomic, copy) NSString *IMEI;
+@property (nonatomic, copy) NSString *IMEI2;
+@property (nonatomic, copy) NSString *SSID;
+@property (nonatomic, copy) NSString *BSSID;
+@property (nonatomic, copy) NSString *OpenUDID;
+@property (nonatomic, copy) NSString *TimeZone; // e.g. America/New_York
+@property (nonatomic, assign) NSTimeInterval BootTime; // unix seconds
 
 @property (nonatomic, copy) NSString *Model;
 @property (nonatomic, copy) NSString *ProductType;

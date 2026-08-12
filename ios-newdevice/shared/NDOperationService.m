@@ -26,6 +26,7 @@
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
+            @"clearAppData", @"cleanApps",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -217,8 +218,9 @@
             NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) [p writeToPath:savePath error:&error];
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
             [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
-            done(name, p ? 200 : 500);
+            done(body ?: @"", p ? 200 : 500);
             return;
         }
 
@@ -239,6 +241,18 @@
             }
             [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
             done(@"", ok ? 200 : 500);
+            return;
+        }
+
+        // AMG-style: clear target apps without generating a new identity
+        if ([fun isEqualToString:@"clearAppData"] || [fun isEqualToString:@"cleanApps"]) {
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                (void)previousRecord;
+                NSError *err = nil;
+                BOOL success = [[NDAppDataManager shared] clearDataForApps:apps error:&err];
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(success ? @"cleared" : @"", success ? 200 : 500);
+            }];
             return;
         }
 

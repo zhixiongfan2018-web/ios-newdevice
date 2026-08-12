@@ -74,6 +74,50 @@ static NSString *NDRandomSerial(void) {
     return s;
 }
 
+static NSString *NDLuhnCheckDigit(NSString *digits) {
+    NSInteger sum = 0;
+    BOOL dbl = YES;
+    for (NSInteger i = (NSInteger)digits.length - 1; i >= 0; i--) {
+        NSInteger d = [digits characterAtIndex:(NSUInteger)i] - '0';
+        if (dbl) {
+            d *= 2;
+            if (d > 9) d -= 9;
+        }
+        sum += d;
+        dbl = !dbl;
+    }
+    return [NSString stringWithFormat:@"%ld", (long)((10 - (sum % 10)) % 10)];
+}
+
+/// Userland IMEI string (15 digits). Not baseband-level; for apps reading Gestalt / CT.
+static NSString *NDRandomIMEI(void) {
+    static NSArray<NSString *> *tacs;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // Publicly documented / commonly observed Apple TAC prefixes (8 digits)
+        tacs = @[
+            @"35391808", @"35433810", @"35693803", @"35326005", @"35929806",
+            @"35328509", @"35407110", @"35838708", @"35332210", @"35728009",
+            @"35316711", @"35499910", @"35875508", @"35307909", @"35940508",
+        ];
+    });
+    NSString *tac = tacs[arc4random_uniform((uint32_t)tacs.count)];
+    NSString *snr = [NSString stringWithFormat:@"%06u", arc4random_uniform(1000000)];
+    NSString *body = [tac stringByAppendingString:snr];
+    return [body stringByAppendingString:NDLuhnCheckDigit(body)];
+}
+
+static NSString *NDRandomOpenUDID(void) {
+    return NDRandomHex(40);
+}
+
+static NSTimeInterval NDRandomBootTime(void) {
+    // Boot sometime in the last 1–14 days
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSTimeInterval ago = 3600.0 + arc4random_uniform(14 * 24 * 3600);
+    return now - ago;
+}
+
 static NSString *NDRandomBuild(NSString *systemVer) {
     static NSDictionary<NSString *, NSString *> *known;
     static dispatch_once_t onceToken;
@@ -162,6 +206,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.WiFiMAC = @"";
     p.BTMAC = @"";
     p.DeviceToken = @"";
+    p.IMEI = @"";
+    p.IMEI2 = @"";
+    p.SSID = @"";
+    p.BSSID = @"";
+    p.OpenUDID = @"";
+    p.TimeZone = @"";
+    p.BootTime = 0;
     p.Model = @"";
     p.ProductType = @"";
     p.HardwareMachine = @"";
@@ -239,6 +290,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.WiFiMAC = NDRandomMAC();
     p.BTMAC = NDRandomMAC();
     p.DeviceToken = NDRandomHex(64);
+    p.IMEI = NDRandomIMEI();
+    p.IMEI2 = NDRandomIMEI();
+    NSDictionary *wifi = [NDDeviceCatalog randomWiFiNetwork];
+    p.SSID = wifi[@"SSID"] ?: @"HomeWiFi";
+    p.BSSID = wifi[@"BSSID"] ?: @"00:00:00:00:00:00";
+    p.OpenUDID = NDRandomOpenUDID();
+    p.BootTime = NDRandomBootTime();
 
     p.Model = dev[@"Model"];
     p.ProductType = dev[@"ProductType"];
@@ -253,6 +311,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
 
     p.Latitude = [coord[@"lat"] doubleValue];
     p.Longitude = [coord[@"lon"] doubleValue];
+    p.TimeZone = coord[@"timezone"] ?: @"America/New_York";
     // Urban altitude: mostly low buildings / street level
     p.Altitude = 8.0 + (double)arc4random_uniform(120) + ((double)arc4random_uniform(100) / 100.0);
     return p;
@@ -282,6 +341,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.WiFiMAC = dict[@"WiFiMAC"] ?: @"";
     p.BTMAC = dict[@"BTMAC"] ?: @"";
     p.DeviceToken = dict[@"DeviceToken"] ?: @"";
+    p.IMEI = dict[@"IMEI"] ?: @"";
+    p.IMEI2 = dict[@"IMEI2"] ?: @"";
+    p.SSID = dict[@"SSID"] ?: @"";
+    p.BSSID = dict[@"BSSID"] ?: @"";
+    p.OpenUDID = dict[@"OpenUDID"] ?: @"";
+    p.TimeZone = dict[@"TimeZone"] ?: @"";
+    p.BootTime = dict[@"BootTime"] ? [dict[@"BootTime"] doubleValue] : 0;
 
     p.Model = dict[@"Model"] ?: @"";
     p.ProductType = dict[@"ProductType"] ?: @"";
@@ -321,6 +387,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"WiFiMAC": self.WiFiMAC ?: @"",
         @"BTMAC": self.BTMAC ?: @"",
         @"DeviceToken": self.DeviceToken ?: @"",
+        @"IMEI": self.IMEI ?: @"",
+        @"IMEI2": self.IMEI2 ?: @"",
+        @"SSID": self.SSID ?: @"",
+        @"BSSID": self.BSSID ?: @"",
+        @"OpenUDID": self.OpenUDID ?: @"",
+        @"TimeZone": self.TimeZone ?: @"",
+        @"BootTime": @(self.BootTime),
         @"Model": self.Model ?: @"",
         @"ProductType": self.ProductType ?: @"",
         @"HardwareMachine": self.HardwareMachine ?: @"",

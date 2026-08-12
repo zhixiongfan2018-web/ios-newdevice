@@ -76,6 +76,15 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if (p.UDID.length) map[@"UniqueDeviceID"] = p.UDID;
         if (p.WiFiMAC.length) map[@"WifiAddress"] = p.WiFiMAC;
         if (p.BTMAC.length) map[@"BluetoothAddress"] = p.BTMAC;
+        // Userland IMEI (not baseband) — AMG-compatible identity fields
+        if (p.IMEI.length) {
+            map[@"InternationalMobileEquipmentIdentity"] = p.IMEI;
+            map[@"InverseDeviceID"] = p.IMEI;
+        }
+        if (p.IMEI2.length) {
+            map[@"InternationalMobileEquipmentIdentity2"] = p.IMEI2;
+        }
+        if (p.OpenUDID.length) map[@"OpenUDID"] = p.OpenUDID;
 
         if (st.config.fakeDeviceModel) {
             if (p.ProductType.length) {

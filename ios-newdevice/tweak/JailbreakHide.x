@@ -18,12 +18,16 @@ static NSArray<NSString *> *NDJBPaths(void) {
         @"/usr/bin/ssh",
         @"/bin/bash",
         @"/etc/apt",
+        @"/Applications/Dopamine.app",
         @"/var/jb",
         @"/var/lib/dpkg",
         @"/private/var/lib/cydia",
+        @"/private/preboot",
         @"/usr/lib/libsubstrate.dylib",
         @"/usr/lib/libellekit.dylib",
         @"/var/jb/usr/lib/libellekit.dylib",
+        @"/var/jb/Library/Frameworks",
+        @"/Library/Frameworks/CydiaSubstrate.framework",
     ];
 }
 

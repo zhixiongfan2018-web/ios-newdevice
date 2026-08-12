@@ -237,8 +237,11 @@
     row.spacing = 10;
     row.distribution = UIStackViewDistributionFillEqually;
 
+    UIButton *clean = [NDTheme secondaryButton:@"强效清理" target:self action:@selector(cleanApps)];
+
     [stack addArrangedSubview:primary];
     [stack addArrangedSubview:row];
+    [stack addArrangedSubview:clean];
     return stack;
 }
 
@@ -283,9 +286,12 @@
     self.recordNameLabel.text = p.name.length ? p.name : @"--";
     self.modelLabel.text = [NSString stringWithFormat:@"%@ · iOS %@", p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
     self.summaryLabel.text = [NSString stringWithFormat:
-                              @"IDFA  %@\nIDFV  %@\nSerial %@\nUDID  %@\nWiFi  %@\n运营商 %@ (%@/%@)\nGPS   %.5f, %.5f",
-                              p.IDFA ?: @"-", p.IDFV ?: @"-", p.Serial ?: @"-", p.UDID ?: @"-",
-                              p.WiFiMAC ?: @"-", p.Carrier ?: @"-", p.MCC ?: @"-", p.MNC ?: @"-",
+                              @"IDFA  %@\nIDFV  %@\nIMEI  %@\nSerial %@\nUDID  %@\nWiFi  %@\nSSID  %@\n运营商 %@ (%@/%@)\nTZ    %@\nGPS   %.5f, %.5f",
+                              p.IDFA ?: @"-", p.IDFV ?: @"-", p.IMEI ?: @"-",
+                              p.Serial ?: @"-", p.UDID ?: @"-",
+                              p.WiFiMAC ?: @"-", p.SSID ?: @"-",
+                              p.Carrier ?: @"-", p.MCC ?: @"-", p.MNC ?: @"-",
+                              p.TimeZone ?: @"-",
                               p.Latitude, p.Longitude];
 }
 
@@ -315,6 +321,7 @@
 - (void)newDevice { [self run:@"newRecord"]; }
 - (void)original { [self run:@"originRecord"]; }
 - (void)nextRecord { [self run:@"nextRecord"]; }
+- (void)cleanApps { [self run:@"clearAppData"]; }
 
 - (void)refreshIP:(BOOL)compare {
     [self refreshIP:compare expectedChangeFrom:self.lastIP];
