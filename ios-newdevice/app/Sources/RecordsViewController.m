@@ -174,19 +174,18 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSString *name = self.names[indexPath.row];
-    // Prefer in-process switch first (avoids query '+' / space mangling for imported names)
-    NSError *localErr = nil;
-    if ([[NDRecordStore shared] switchToRecord:name error:&localErr]) {
-        [[NDRecordStore shared] notifyReload];
-        [self reload];
-    }
-    [[NDAPIClient shared] call:@"setRecord" query:@{@"recordName": name} completion:^(BOOL ok, NSString *body, NSError *error) {
-        [self reload];
-        if (!ok && localErr) {
-            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败" message:error.localizedDescription ?: localErr.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
-            [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:a animated:YES completion:nil];
-        }
+    // In-process setRecord: restores App environment + avoids URL '+' encoding bugs
+    [[NDOperationService shared] runAsync:@"setRecord" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self reload];
+            if (code != 200) {
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败"
+                                                                           message:body.length ? body : @"无法切换到该记录"
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:a animated:YES completion:nil];
+            }
+        });
     }];
 }
 

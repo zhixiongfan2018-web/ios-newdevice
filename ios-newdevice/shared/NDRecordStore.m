@@ -390,8 +390,11 @@
         [d enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
             if (![key isKindOfClass:[NSString class]]) return;
             if (![[self class] NDLooksLikeBundleId:key]) return;
-            if ([obj isKindOfClass:[NSNumber class]] && ![obj boolValue]) return;
-            if ([obj isKindOfClass:[NSString class]] && ([obj isEqualToString:@"0"] || [obj.lowercaseString isEqualToString:@"false"])) return;
+            if ([obj isKindOfClass:[NSNumber class]] && ![((NSNumber *)obj) boolValue]) return;
+            if ([obj isKindOfClass:[NSString class]]) {
+                NSString *s = (NSString *)obj;
+                if ([s isEqualToString:@"0"] || [s.lowercaseString isEqualToString:@"false"]) return;
+            }
             add(key);
         }];
     }
