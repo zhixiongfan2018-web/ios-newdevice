@@ -2,21 +2,29 @@
 
 本项目是 **越狱 iPhone 上的 deb**，不能在 Windows 上直接运行，也不需要你买一台 Mac。
 
-## Sileo 固定源（推荐）
+## Sileo 固定源（推荐，无 @）
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice@master/stable
+https://zhixiongfan2018-web.github.io/ios-newdevice
 ```
 
-只用这一条。添加后刷新 → 安装 NewDevice → Respring。
+只用这一条。添加后刷新 → 安装/升级 NewDevice → Respring。
+
+备用（也无 @）：
+
+```
+https://raw.githubusercontent.com/zhixiongfan2018-web/ios-newdevice/master/stable
+```
+
+> 不要用带 `@` 的 jsDelivr 地址，Sileo 无法添加。
 
 ## 云端打包
 
 仓库工作流 [`.github/workflows/build-deb.yml`](../../.github/workflows/build-deb.yml) 在 GitHub **macos-14** 上 Theos 打包。推送后会：
 
 1. 生成 `.deb`
-2. 更新 `apt/` 固定源索引（上面的 jsDelivr 链接）
-3. 打 release 标签，让 CDN 拉取最新内容
+2. 更新 `stable/` 源索引
+3. 部署到 GitHub Pages（上面的链接）
 
 ## 其他可选
 

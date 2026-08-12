@@ -6,6 +6,7 @@ on:
     branches:
       - master
     paths:
+      - "stable/**"
       - "apt/**"
       - ".github/workflows/deploy-apt-pages.yml"
 
@@ -28,17 +29,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare site from apt/
+      # Prefer stable/ (Sileo URL without @). Fall back to apt/ mirror.
+      - name: Prepare site from stable/
         run: |
           set -euo pipefail
           rm -rf site
-          cp -a apt site
+          if [ -f stable/Packages ] && [ -d stable/debs ]; then
+            cp -a stable site
+          else
+            cp -a apt site
+          fi
           # Never ship compressed indexes (CDN/Sileo ghosts)
           rm -f site/Packages.gz site/Packages.bz2 site/Packages.xz site/Packages.lzma site/Packages.zst
           test -f site/Release
           test -f site/Packages
-          test -f site/debs/com.local.newdevice_1.0.0-23_iphoneos-arm64.deb
+          # Any current deb is fine (version bumps often)
+          ls site/debs/com.local.newdevice_*.deb | head -n1 | grep -q .
           grep -q 'Architectures:' site/Release
+          # Landing copy without @ in URL
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>NewDevice</title></head>
+          <body>
+            <h1>NewDevice</h1>
+            <p>Sileo 源（无 @）：</p>
+            <p><code>https://zhixiongfan2018-web.github.io/ios-newdevice/</code></p>
+          </body>
+          </html>
+          HTML
           ls -la site site/debs
           echo "----- Release -----"
           cat site/Release
