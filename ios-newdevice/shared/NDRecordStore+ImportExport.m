@@ -194,10 +194,10 @@
             continue;
         }
 
-        NSString *importRoot = [self NDUnwrapImportRoot:dest];
+        NSString *importRoot = [[self class] NDUnwrapImportRoot:dest];
         // If unwrap landed on a single record dir, import its parent so the record is one entry
-        if ([self NDPathLooksLikeAMGRecordDir:importRoot] &&
-            ![self NDPathLooksLikeAMGRecordDir:dest]) {
+        if ([[self class] NDPathLooksLikeAMGRecordDir:importRoot] &&
+            ![[self class] NDPathLooksLikeAMGRecordDir:dest]) {
             // keep parent that contains the record folder
             NSString *parent = [importRoot stringByDeletingLastPathComponent];
             if (parent.length) importRoot = parent;
@@ -209,7 +209,7 @@
                 // Prefer amg_extract / AMG when it contains record children
                 NSArray *kids = [fm contentsOfDirectoryAtPath:p error:nil] ?: @[];
                 for (NSString *k in kids) {
-                    if ([self NDPathLooksLikeAMGRecordDir:[p stringByAppendingPathComponent:k]]) {
+                    if ([[self class] NDPathLooksLikeAMGRecordDir:[p stringByAppendingPathComponent:k]]) {
                         importRoot = p;
                         break;
                     }
