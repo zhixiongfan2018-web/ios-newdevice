@@ -11,6 +11,10 @@ extern char **environ;
 
 @interface NDAppDataManager ()
 @property (nonatomic, copy, readwrite) NSString *lastRestoreReport;
+- (NSArray *)NDKeychainItemsFromAMGAkcDictionary:(NSDictionary *)akc;
+- (NSArray *)NDLoadKeychainItemsFromBackupDir:(NSString *)dir;
+- (BOOL)NDBackupDirHasKeychainDump:(NSString *)dir;
+- (void)NDMaterializeKeychainFullFromAMGInAppDir:(NSString *)dstRoot importKeychain:(BOOL)importKC;
 @end
 
 @implementation NDAppDataManager
@@ -431,8 +435,7 @@ extern char **environ;
                       to:[container stringByAppendingPathComponent:kid]
                    error:nil];
     }
-    BOOL hasKC = [fm fileExistsAtPath:[backupRoot stringByAppendingPathComponent:@"keychain-full.plist"]]
-        || [fm fileExistsAtPath:[backupRoot stringByAppendingPathComponent:@"keychain-hints.plist"]];
+    BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
     [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
 
     // Marker so Filza / report can prove live write (not just staging)
@@ -457,11 +460,94 @@ extern char **environ;
                       verified ? @"OK" : @"WARN",
                       bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs,
                       sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO",
-                      hasKC ? @"含 Keychain 转储，可尝试恢复登录态"
-                            : @"此包无 Keychain。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
+                      hasKC ? @"含 Keychain（keychain-full / AMG akc.plist），已尝试写入系统钥匙串"
+                            : @"此包无 Keychain/akc。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
     // Ensure app relaunches from restored files
     [self terminateApps:@[bid]];
     return verified;
+}
+
+/// AMG exports per-app keychain as Documents/akc.plist (dict of SecItem-shaped entries).
+- (NSArray *)NDKeychainItemsFromAMGAkcDictionary:(NSDictionary *)akc {
+    if (![akc isKindOfClass:[NSDictionary class]] || !akc.count) return @[];
+    NSMutableArray *items = [NSMutableArray arrayWithCapacity:akc.count];
+    [akc enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+        if (![obj isKindOfClass:[NSDictionary class]]) return;
+        NSDictionary *raw = (NSDictionary *)obj;
+        NSData *vData = raw[@"v_Data"];
+        if (![vData isKindOfClass:[NSData class]] || !vData.length) return;
+        NSString *cls = [raw[@"class"] isKindOfClass:[NSString class]] ? raw[@"class"] : @"genp";
+        NSString *outClass = @"generic";
+        if ([cls isEqualToString:@"inet"]) outClass = @"internet";
+        else if ([cls isEqualToString:@"cert"] || [cls isEqualToString:@"certificate"]) outClass = @"certificate";
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        item[@"class"] = outClass;
+        if ([raw[@"acct"] isKindOfClass:[NSString class]]) item[@"account"] = raw[@"acct"];
+        if ([raw[@"svce"] isKindOfClass:[NSString class]]) item[@"service"] = raw[@"svce"];
+        if ([raw[@"agrp"] isKindOfClass:[NSString class]]) item[@"accessGroup"] = raw[@"agrp"];
+        if ([raw[@"srvr"] isKindOfClass:[NSString class]]) item[@"server"] = raw[@"srvr"];
+        if ([raw[@"path"] isKindOfClass:[NSString class]]) item[@"path"] = raw[@"path"];
+        if ([raw[@"labl"] isKindOfClass:[NSString class]]) item[@"label"] = raw[@"labl"];
+        else if ([key isKindOfClass:[NSString class]]) item[@"label"] = key;
+        if ([raw[@"sync"] isKindOfClass:[NSNumber class]]) item[@"synchronizable"] = raw[@"sync"];
+        item[@"data"] = [vData base64EncodedStringWithOptions:0];
+        [items addObject:item];
+    }];
+    return items;
+}
+
+- (BOOL)NDBackupDirHasKeychainDump:(NSString *)dir {
+    if (!dir.length) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *name in @[@"keychain-full.plist", @"keychain-hints.plist", @"akc.plist", @"Documents/akc.plist"]) {
+        if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:name]]) return YES;
+    }
+    return NO;
+}
+
+- (NSArray *)NDLoadKeychainItemsFromBackupDir:(NSString *)dir {
+    if (!dir.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *items = [NSArray arrayWithContentsOfFile:[dir stringByAppendingPathComponent:@"keychain-full.plist"]];
+    if ([items isKindOfClass:[NSArray class]] && items.count) return items;
+    items = [NSArray arrayWithContentsOfFile:[dir stringByAppendingPathComponent:@"keychain-hints.plist"]];
+    if ([items isKindOfClass:[NSArray class]] && items.count) return items;
+
+    for (NSString *rel in @[@"akc.plist", @"Documents/akc.plist"]) {
+        NSString *path = [dir stringByAppendingPathComponent:rel];
+        if (![fm fileExistsAtPath:path]) continue;
+        NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:path];
+        NSArray *converted = [self NDKeychainItemsFromAMGAkcDictionary:akc];
+        if (converted.count) return converted;
+    }
+    return nil;
+}
+
+- (void)NDMaterializeKeychainFullFromAMGInAppDir:(NSString *)dstRoot importKeychain:(BOOL)importKC {
+    if (!importKC || !dstRoot.length) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *fullDst = [dstRoot stringByAppendingPathComponent:@"keychain-full.plist"];
+    // Prefer existing NewDevice dump; otherwise convert AMG akc.plist
+    NSArray *existing = [NSArray arrayWithContentsOfFile:fullDst];
+    if ([existing isKindOfClass:[NSArray class]] && existing.count) return;
+
+    NSString *akcPath = nil;
+    for (NSString *rel in @[@"akc.plist", @"Documents/akc.plist"]) {
+        NSString *p = [dstRoot stringByAppendingPathComponent:rel];
+        if ([fm fileExistsAtPath:p]) { akcPath = p; break; }
+    }
+    if (!akcPath) return;
+    NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:akcPath];
+    NSArray *items = [self NDKeychainItemsFromAMGAkcDictionary:akc];
+    if (!items.count) return;
+    [fm createDirectoryAtPath:dstRoot withIntermediateDirectories:YES attributes:nil error:nil];
+    // Keep a copy at app backup root for detection / Filza
+    NSString *rootAkc = [dstRoot stringByAppendingPathComponent:@"akc.plist"];
+    if (![akcPath isEqualToString:rootAkc] && ![fm fileExistsAtPath:rootAkc]) {
+        [fm copyItemAtPath:akcPath toPath:rootAkc error:nil];
+    }
+    [items writeToFile:fullDst atomically:YES];
+    [items writeToFile:[dstRoot stringByAppendingPathComponent:@"keychain-hints.plist"] atomically:YES];
 }
 
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError **)error {
@@ -631,11 +717,20 @@ extern char **environ;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName {
     for (NSString *bid in bundleIds) {
         NSString *dir = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-        NSString *fullPath = [dir stringByAppendingPathComponent:@"keychain-full.plist"];
-        NSString *hintPath = [dir stringByAppendingPathComponent:@"keychain-hints.plist"];
-        NSArray *items = [NSArray arrayWithContentsOfFile:fullPath];
-        if (![items isKindOfClass:[NSArray class]]) items = [NSArray arrayWithContentsOfFile:hintPath];
-        if (![items isKindOfClass:[NSArray class]]) continue;
+        // Materialize AMG akc → keychain-full if needed (imports that only staged Documents/)
+        [self NDMaterializeKeychainFullFromAMGInAppDir:dir importKeychain:YES];
+        NSArray *items = [self NDLoadKeychainItemsFromBackupDir:dir];
+        if (![items isKindOfClass:[NSArray class]] || !items.count) continue;
+
+        // Collect services/accounts from dump so VenmoKit / token entries get cleared even when
+        // their service string does not contain the bundle id.
+        NSMutableSet *dumpServices = [NSMutableSet set];
+        NSMutableSet *dumpAccounts = [NSMutableSet set];
+        for (NSDictionary *it in items) {
+            if (![it isKindOfClass:[NSDictionary class]]) continue;
+            if ([it[@"service"] isKindOfClass:[NSString class]] && [it[@"service"] length]) [dumpServices addObject:it[@"service"]];
+            if ([it[@"account"] isKindOfClass:[NSString class]] && [it[@"account"] length]) [dumpAccounts addObject:it[@"account"]];
+        }
 
         // Clear existing items that look related before restore (avoid duplicates)
         for (id secClass in @[ (__bridge id)kSecClassGenericPassword, (__bridge id)kSecClassInternetPassword ]) {
@@ -655,7 +750,10 @@ extern char **environ;
                 NSString *service = item[(__bridge id)kSecAttrService] ?: @"";
                 NSString *account = item[(__bridge id)kSecAttrAccount] ?: @"";
                 NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup] ?: @"";
-                if (![service containsString:bid] && ![account containsString:bid] && ![accessGroup containsString:bid]) continue;
+                BOOL related = [service containsString:bid] || [account containsString:bid] || [accessGroup containsString:bid]
+                    || (service.length && [dumpServices containsObject:service])
+                    || (account.length && [dumpAccounts containsObject:account]);
+                if (!related) continue;
                 NSMutableDictionary *del = [@{
                     (__bridge id)kSecClass: secClass,
                 } mutableCopy];
@@ -666,9 +764,17 @@ extern char **environ;
             }
         }
 
+        NSUInteger added = 0;
         for (NSDictionary *item in items) {
+            if (![item isKindOfClass:[NSDictionary class]]) continue;
             NSString *cls = item[@"class"] ?: @"generic";
-            NSData *data = [[NSData alloc] initWithBase64EncodedString:item[@"data"] ?: @"" options:0];
+            NSData *data = nil;
+            id rawData = item[@"data"];
+            if ([rawData isKindOfClass:[NSData class]]) {
+                data = rawData;
+            } else if ([rawData isKindOfClass:[NSString class]]) {
+                data = [[NSData alloc] initWithBase64EncodedString:rawData options:0];
+            }
             if ([cls isEqualToString:@"certificate"]) {
                 if (!data.length) continue;
                 NSMutableDictionary *add = [@{
@@ -680,8 +786,9 @@ extern char **environ;
                 OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
                 if (st == errSecMissingEntitlement && item[@"accessGroup"]) {
                     [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
-                    SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+                    st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
                 }
+                if (st == errSecSuccess || st == errSecDuplicateItem) added++;
                 continue;
             }
             if (!data.length) continue;
@@ -712,9 +819,16 @@ extern char **environ;
             if (st == errSecMissingEntitlement && accessGroup.length) {
                 // Retry without access group when entitlement mismatch
                 [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
-                SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+                st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
             }
+            if (st == errSecDuplicateItem) {
+                NSMutableDictionary *query = [del mutableCopy];
+                NSDictionary *attrs = @{ (__bridge id)kSecValueData: data };
+                st = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)attrs);
+            }
+            if (st == errSecSuccess) added++;
         }
+        NSLog(@"[NewDevice] keychain restore %@ items=%lu added/ok=%lu", bid, (unsigned long)items.count, (unsigned long)added);
     }
     return YES;
 }
@@ -816,9 +930,11 @@ extern char **environ;
                 copiedSub = YES;
             }
         }
-        // AMG/NewDevice may keep keychain dumps at <bid>/keychain-*.plist (not under Library/)
+        // AMG/NewDevice keychain dumps:
+        // - NewDevice: <bid>/keychain-full.plist
+        // - AMG: <bid>/akc.plist or <bid>/Documents/akc.plist (copied with Documents/)
         if (importKC) {
-            for (NSString *kcName in @[@"keychain-full.plist", @"keychain-hints.plist"]) {
+            for (NSString *kcName in @[@"keychain-full.plist", @"keychain-hints.plist", @"akc.plist"]) {
                 NSString *kcSrc = [srcRoot stringByAppendingPathComponent:kcName];
                 if (![fm fileExistsAtPath:kcSrc]) continue;
                 [fm createDirectoryAtPath:dstRoot withIntermediateDirectories:YES attributes:nil error:nil];
@@ -826,6 +942,7 @@ extern char **environ;
                 [fm removeItemAtPath:kcDst error:nil];
                 [fm copyItemAtPath:kcSrc toPath:kcDst error:nil];
             }
+            [self NDMaterializeKeychainFullFromAMGInAppDir:dstRoot importKeychain:YES];
         }
     }
 

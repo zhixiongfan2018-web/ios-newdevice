@@ -85,7 +85,9 @@
                             BOOL wroteOK = [write containsString:@"OK net.kortina.labs.Venmo"] || [write containsString:@"marker=yes"];
                             NSString *hint = @"";
                             if (wroteOK && noKC) {
-                                hint = @"\n\n重要：沙盒已写入，但此 AMG 包没有 Keychain。\nVenmo 会显示未登录/空白，这是导出包限制，不是导入没写进去。\n可用爱思查看沙盒 Documents/nd-restore-ok.txt 验证。";
+                                hint = @"\n\n重要：沙盒已写入，但未检测到 Keychain（keychain-full / AMG 的 akc.plist）。\nVenmo 会显示未登录/空白。\n可用爱思查看沙盒 Documents/nd-restore-ok.txt 验证文件写入。";
+                            } else if (wroteOK && [write containsString:@"keychainDump=yes"]) {
+                                hint = @"\n\n已检测到并尝试还原 Keychain（含 AMG akc）。请完全杀掉 Venmo 再打开；若仍未登录，多半是 token 失效或设备指纹不匹配。";
                             } else if ([write containsString:@"FAIL Containers"]) {
                                 hint = @"\n\n无法访问 Containers：请确认已装最新版并注销桌面。";
                             } else if ([write containsString:@"未找到数据容器"]) {

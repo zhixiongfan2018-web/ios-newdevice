@@ -134,7 +134,7 @@ NewDevice → **工具**：
 |---|---|
 | 导入其他数据（iGrimace） | `/var/mobile/iGrimace` |
 | 导入 AWZ 数据 | `/var/mobile/importdata` |
-| 同时导入 Keychain | 开关，导入时还原 `keychain-full.plist` |
+| 同时导入 Keychain | 开关，导入时还原 `keychain-full.plist`；也识别 AMG 的 `akc.plist` / `Documents/akc.plist` |
 | 导入 AMG 数据 | **`/var/mobile/AMG_tar`**（官方；兼容 `Media/AMG/import`；支持 `.tar.gz`） |
 | 导出 AMG 数据 | **`/var/mobile/AMG_tar`**（**明文** faker，再导入不用解密） |
 | 瘦身 | 点按瘦身当前记录；长按切换「导出自动清除媒体」 |

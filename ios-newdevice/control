@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-120
+Version: 1.0.0-122
 Architecture: iphoneos-arm64
-Description: Explain Venmo empty without Keychain; verify live sandbox marker.
+Description: Import/restore AMG akc.plist Keychain (Venmo login tokens).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

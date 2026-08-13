@@ -37,6 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Best-effort Keychain export/import (generic + internet passwords, access groups).
 /// Writes `keychain-full.plist` (+ legacy `keychain-hints.plist`).
+/// Also recognizes AMG `akc.plist` (Documents/akc.plist) and converts it on import/restore.
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
 
