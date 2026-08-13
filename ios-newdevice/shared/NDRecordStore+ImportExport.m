@@ -36,7 +36,8 @@
         BOOL entryDir = NO;
         if (![fm fileExistsAtPath:full isDirectory:&entryDir] || !entryDir) continue;
         // Record folder: faker/profile/description or app bundles
-        for (NSString *marker in @[@"faker.plist", @"profile.plist", @"description.plist", @"selectApp.plist"]) {
+        for (NSString *marker in @[@"faker.plist", @"profile.plist", @"description.plist", @"selectApp.plist",
+                                   @"faker_plaintext.plist", @"01_plaintext_identity", @"03_holographic_backups"]) {
             if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:marker]]) return YES;
         }
     }

@@ -15,20 +15,51 @@
     ];
 }
 
++ (NSArray<NSString *> *)sidecarPlaintextRelativePaths {
+    // Classic AMG record root + resolved extract layout (amg_extract / AMG_resolved_*)
+    return @[
+        @"faker_plaintext.plist",
+        @"faker_plaintext.json",
+        @"param.plist",
+        @"recordParam.plist",
+        @"Get_Param.plist",
+        @"getRecordParam.plist",
+        @"plaintext-faker.plist",
+        @"01_plaintext_identity/faker_plaintext.plist",
+        @"01_plaintext_identity/faker_plaintext.json",
+        @"01_plaintext_identity/param.plist",
+        @"01_plaintext_identity/getRecordParam.plist",
+    ];
+}
+
 + (BOOL)NDDictUsablePlaintext:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]] || !dict.count) return NO;
     if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:dict]) return NO;
     return [NDDeviceProfile dictionaryHasImportableIdentity:dict];
 }
 
++ (NSDictionary *)dictionaryAtPath:(NSString *)path {
+    if (!path.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) return nil;
+    NSString *ext = path.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"json"]) {
+        NSData *data = [NSData dataWithContentsOfFile:path];
+        if (!data.length) return nil;
+        id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        return [obj isKindOfClass:[NSDictionary class]] ? obj : nil;
+    }
+    return [NSDictionary dictionaryWithContentsOfFile:path];
+}
+
 + (NSDictionary *)plaintextParamFromSidecarsInDirectory:(NSString *)recordDir
                                             sourcePath:(NSString **)outPath {
     if (!recordDir.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *name in [self sidecarPlaintextFileNames]) {
-        NSString *p = [recordDir stringByAppendingPathComponent:name];
+    for (NSString *rel in [self sidecarPlaintextRelativePaths]) {
+        NSString *p = [recordDir stringByAppendingPathComponent:rel];
         if (![fm fileExistsAtPath:p]) continue;
-        NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:p];
+        NSDictionary *d = [self dictionaryAtPath:p];
         if ([self NDDictUsablePlaintext:d]) {
             if (outPath) *outPath = p;
             return d;

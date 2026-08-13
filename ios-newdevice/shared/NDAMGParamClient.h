@@ -11,6 +11,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Sidecar filenames checked before/with API (in record folder).
 + (NSArray<NSString *> *)sidecarPlaintextFileNames;
 
+/// Relative paths under a record / resolved-extract tree (incl. 01_plaintext_identity/).
++ (NSArray<NSString *> *)sidecarPlaintextRelativePaths;
+
+/// Load plist or JSON dict from path; nil if missing/unusable.
++ (nullable NSDictionary *)dictionaryAtPath:(NSString *)path;
+
 /// Load first usable plaintext dict from sidecars under `recordDir`.
 + (nullable NSDictionary *)plaintextParamFromSidecarsInDirectory:(NSString *)recordDir
                                                      sourcePath:(NSString * _Nullable * _Nullable)outPath;

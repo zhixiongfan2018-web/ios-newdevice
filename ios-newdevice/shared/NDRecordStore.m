@@ -556,19 +556,56 @@
         }
         recordName = [self sanitizeRecordName:recordName];
 
+        // Resolved extract layout: 01_plaintext_identity / 02_config_plists / 03_holographic_backups
+        NSString *idDir = [full stringByAppendingPathComponent:@"01_plaintext_identity"];
+        NSString *cfgDir = [full stringByAppendingPathComponent:@"02_config_plists"];
+        NSString *holoDir = [full stringByAppendingPathComponent:@"03_holographic_backups"];
+        BOOL resolvedLayout = [fm fileExistsAtPath:idDir] || [fm fileExistsAtPath:cfgDir] || [fm fileExistsAtPath:holoDir];
+        // Holographic source: nested 03/.../<record> or classic AMG folder itself
+        NSString *holoSrc = full;
+        if ([fm fileExistsAtPath:holoDir]) {
+            NSArray *holoKids = [fm contentsOfDirectoryAtPath:holoDir error:nil] ?: @[];
+            if (holoKids.count == 1) {
+                NSString *only = [holoDir stringByAppendingPathComponent:holoKids.firstObject];
+                BOOL d = NO;
+                if ([fm fileExistsAtPath:only isDirectory:&d] && d) holoSrc = only;
+                else holoSrc = holoDir;
+            } else {
+                holoSrc = holoDir;
+            }
+        }
+        // Merge config plists into a working view: copy missing markers from 02_ into full if needed
+        if ([fm fileExistsAtPath:cfgDir]) {
+            for (NSString *cfgName in @[@"selectApp.plist", @"description.plist", @"ifaddrs.plist"]) {
+                NSString *dst = [full stringByAppendingPathComponent:cfgName];
+                NSString *src = [cfgDir stringByAppendingPathComponent:cfgName];
+                if (![fm fileExistsAtPath:dst] && [fm fileExistsAtPath:src]) {
+                    [fm copyItemAtPath:src toPath:dst error:nil];
+                }
+            }
+            NSString *pbSrc = [cfgDir stringByAppendingPathComponent:@"Pasteboard"];
+            NSString *pbDst = [full stringByAppendingPathComponent:@"Pasteboard"];
+            if (![fm fileExistsAtPath:pbDst] && [fm fileExistsAtPath:pbSrc]) {
+                [fm copyItemAtPath:pbSrc toPath:pbDst error:nil];
+            }
+        }
+
         NSMutableArray<NSString *> *candidates = [NSMutableArray array];
-        // Prefer official plaintext sidecars (getRecordParam / Get_Param output)
-        for (NSString *side in [NDAMGParamClient sidecarPlaintextFileNames]) {
-            NSString *p = [full stringByAppendingPathComponent:side];
+        // Prefer official plaintext sidecars (getRecordParam / resolved 01_plaintext_identity)
+        for (NSString *rel in [NDAMGParamClient sidecarPlaintextRelativePaths]) {
+            NSString *p = [full stringByAppendingPathComponent:rel];
             if ([fm fileExistsAtPath:p]) [candidates addObject:p];
         }
         NSString *faker = [full stringByAppendingPathComponent:@"faker.plist"];
         if ([fm fileExistsAtPath:faker]) [candidates addObject:faker];
+        NSString *cipherArchive = [idDir stringByAppendingPathComponent:@"faker.plist.ciphertext"];
+        (void)cipherArchive; // keep ciphertext for archive only; never import as identity
         NSString *profile = [full stringByAppendingPathComponent:@"profile.plist"];
         if ([fm fileExistsAtPath:profile]) [candidates addObject:profile];
         NSArray *inner = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
         for (NSString *f in inner) {
-            if (![[f pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
+            if (![[f pathExtension].lowercaseString isEqualToString:@"plist"] &&
+                ![[f pathExtension].lowercaseString isEqualToString:@"json"]) continue;
             if ([metaPlists containsObject:f.lowercaseString]) continue;
             if ([f.lowercaseString isEqualToString:@"faker.plist"] || [f.lowercaseString isEqualToString:@"profile.plist"]) continue;
             if ([[NDAMGParamClient sidecarPlaintextFileNames] containsObject:f]) continue;
@@ -576,13 +613,17 @@
             if (![candidates containsObject:p]) [candidates addObject:p];
         }
 
-        // App env markers: selectApp / AppGroup / bundle-id folders
-        NSArray *discoveredApps = [[self class] discoverAppBundleIdsInDirectory:full];
+        // App env markers: selectApp / AppGroup / bundle-id folders (classic or 03_holographic)
+        NSArray *discoveredApps = [[self class] discoverAppBundleIdsInDirectory:holoSrc];
+        if (!discoveredApps.count && resolvedLayout) {
+            discoveredApps = [[self class] discoverAppBundleIdsInDirectory:full];
+        }
         BOOL hasHolo = discoveredApps.count > 0
-            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"AppGroup"]]
-            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"Pasteboard"]]
-            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"apps"]]
-            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectApp.plist"]];
+            || [fm fileExistsAtPath:[holoSrc stringByAppendingPathComponent:@"AppGroup"]]
+            || [fm fileExistsAtPath:[holoSrc stringByAppendingPathComponent:@"Pasteboard"]]
+            || [fm fileExistsAtPath:[holoSrc stringByAppendingPathComponent:@"apps"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectApp.plist"]]
+            || [fm fileExistsAtPath:[cfgDir stringByAppendingPathComponent:@"selectApp.plist"]];
 
         NDDeviceProfile *saved = nil;
         BOOL fakerEncrypted = NO;
@@ -612,17 +653,27 @@
         }
 
         for (NSString *plistPath in candidates) {
-            NSDictionary *raw = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+            NSDictionary *raw = [NDAMGParamClient dictionaryAtPath:plistPath];
+            if (!raw) raw = [NSDictionary dictionaryWithContentsOfFile:plistPath];
             if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:raw]) {
                 if (!resolvedPlaintext) fakerEncrypted = YES;
                 continue;
             }
-            saved = [self importProfileAtPath:plistPath preferredName:recordName error:nil];
+            // JSON sidecars: write a temp plist for importProfileAtPath
+            NSString *importPath = plistPath;
+            if ([plistPath.pathExtension.lowercaseString isEqualToString:@"json"] && raw) {
+                importPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                              [NSString stringWithFormat:@"nd-plain-%@.plist", recordName]];
+                [raw writeToFile:importPath atomically:YES];
+            }
+            saved = [self importProfileAtPath:importPath preferredName:recordName error:nil];
             if (saved) {
                 saved.spoofDeviceIdentity = YES;
                 [self saveProfile:saved error:nil];
-                if (paramSourceNote.length) {
-                    NSString *note = [NSString stringWithFormat:@"Identity from %@ (AMG plaintext API/sidecar).", paramSourceNote];
+                if (paramSourceNote.length || resolvedLayout) {
+                    NSString *note = [NSString stringWithFormat:@"Identity from %@%@.",
+                                      paramSourceNote.length ? paramSourceNote : plistPath.lastPathComponent,
+                                      resolvedLayout ? @" (AMG_resolved layout)" : @" (AMG plaintext API/sidecar)"];
                     [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                           atomically:YES encoding:NSUTF8StringEncoding error:nil];
                 }
@@ -704,12 +755,20 @@
             [fm copyItemAtPath:pbSrc toPath:pbDst error:nil];
         }
 
-        [[NDAppDataManager shared] importAMGHolographicFromDirectory:full intoRecord:saved.name];
+        [[NDAppDataManager shared] importAMGHolographicFromDirectory:holoSrc intoRecord:saved.name];
         // Also pull apps nested under apps/
-        NSString *nestedApps = [full stringByAppendingPathComponent:@"apps"];
-        BOOL nestedDir = NO;
-        if ([fm fileExistsAtPath:nestedApps isDirectory:&nestedDir] && nestedDir) {
-            [[NDAppDataManager shared] importAMGHolographicFromDirectory:nestedApps intoRecord:saved.name];
+        for (NSString *base in @[holoSrc, full]) {
+            NSString *nestedApps = [base stringByAppendingPathComponent:@"apps"];
+            BOOL nestedDir = NO;
+            if ([fm fileExistsAtPath:nestedApps isDirectory:&nestedDir] && nestedDir) {
+                [[NDAppDataManager shared] importAMGHolographicFromDirectory:nestedApps intoRecord:saved.name];
+            }
+        }
+        // Persist plaintext AMG faker next to profile when we resolved identity
+        if (resolvedPlaintext || resolvedLayout) {
+            NSString *dstFaker = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"faker.plist"];
+            [saved writeAMGFakerToDirectory:[NDPaths recordDir:saved.name] error:nil];
+            (void)dstFaker;
         }
         NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
         for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:appsRoot]) [toMerge addObject:b];
