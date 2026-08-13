@@ -134,7 +134,9 @@
         return NO;
     }
     BOOL ok = [profile writeToPath:[NDPaths profilePathForRecord:profile.name] error:error];
-    if (ok) [self notifyReload];
+    // During import session, defer notify — mid-import notify_post on a background
+    // queue was aborting AMG_resolved imports (archiveImport=0 with extract OK).
+    if (ok && self.importingNames == nil) [self notifyReload];
     return ok;
 }
 
@@ -639,9 +641,19 @@
 
         NSMutableArray<NSString *> *candidates = [NSMutableArray array];
         // Prefer official plaintext sidecars (getRecordParam / resolved 01_plaintext_identity)
+        // Build nested paths component-wise — some iOS versions mishandle "/" inside appendingPathComponent.
         for (NSString *rel in [NDAMGParamClient sidecarPlaintextRelativePaths]) {
-            NSString *p = [full stringByAppendingPathComponent:rel];
+            NSString *p = full;
+            for (NSString *comp in [rel componentsSeparatedByString:@"/"]) {
+                if (!comp.length) continue;
+                p = [p stringByAppendingPathComponent:comp];
+            }
             if ([fm fileExistsAtPath:p]) [candidates addObject:p];
+        }
+        // Explicit resolved-layout fallbacks
+        for (NSString *name in @[@"faker_plaintext.plist", @"faker_plaintext.json", @"param.plist"]) {
+            NSString *p = [idDir stringByAppendingPathComponent:name];
+            if ([fm fileExistsAtPath:p] && ![candidates containsObject:p]) [candidates insertObject:p atIndex:0];
         }
         NSString *faker = [full stringByAppendingPathComponent:@"faker.plist"];
         if ([fm fileExistsAtPath:faker]) [candidates addObject:faker];
@@ -884,11 +896,25 @@
                               entry, ex.name ?: @"?", ex.reason ?: @"?"];
             NSLog(@"[NewDevice] %@", note);
             if (self.importingHoloLines) [self.importingHoloLines addObject:note];
+            // Persist immediately so nd-last-import / Filza can show why archiveImport=0
+            NSString *crashLog = [@"/var/mobile/Media/AMG/import/nd-last-import.txt" stringByAppendingString:@""];
+            NSString *prev = [NSString stringWithContentsOfFile:crashLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+            [[prev stringByAppendingFormat:@"\n%@\n", note] writeToFile:crashLog atomically:YES encoding:NSUTF8StringEncoding error:nil];
         }
     }
-    // Defer notify while an import session is open (parent endImportSession / UI will refresh).
-    // Mid-import notify_post from a background queue has caused 导入异常 on some devices.
-    if (imported && self.importingNames == nil) [self notifyReload];
+    // Nested under beginImportSession: parent endImportSession notifies once.
+    // Standalone call: clean up and notify here.
+    if (!nestedInSession) {
+        if (!self.lastImportedRecordNames.count && self.importingNames.count) {
+            self.lastImportedRecordNames = [self.importingNames copy];
+        }
+        if (self.importingHoloLines.count) {
+            self.lastImportHoloSummary = [self.importingHoloLines componentsJoinedByString:@"\n"];
+        }
+        self.importingNames = nil;
+        self.importingHoloLines = nil;
+        if (imported) [self notifyReload];
+    }
     return imported;
 }
 

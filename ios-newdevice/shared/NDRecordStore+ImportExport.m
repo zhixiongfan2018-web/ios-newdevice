@@ -293,6 +293,18 @@
                 }
             }
             [log addObject:[@"importRoot=" stringByAppendingString:importRoot ?: @""]];
+            // List what extract actually produced (debug archiveImport=0)
+            NSArray *rootKids = [fm contentsOfDirectoryAtPath:importRoot error:nil] ?: @[];
+            [log addObject:[NSString stringWithFormat:@"importRootKids=%lu", (unsigned long)rootKids.count]];
+            for (NSString *k in rootKids) {
+                NSString *kp = [importRoot stringByAppendingPathComponent:k];
+                BOOL kd = NO;
+                [fm fileExistsAtPath:kp isDirectory:&kd];
+                BOOL has01 = [fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"01_plaintext_identity"]];
+                BOOL hasPlain = [fm fileExistsAtPath:[[kp stringByAppendingPathComponent:@"01_plaintext_identity"] stringByAppendingPathComponent:@"faker_plaintext.plist"]];
+                [log addObject:[NSString stringWithFormat:@"  kid=%@ dir=%@ 01=%@ plain=%@",
+                                k, kd ? @"YES" : @"NO", has01 ? @"YES" : @"NO", hasPlain ? @"YES" : @"NO"]];
+            }
             NSUInteger n = 0;
             @try {
                 n = [self NDImportUnpackedTree:importRoot importKeychain:importKeychain error:nil];
@@ -301,6 +313,12 @@
             }
             total += n;
             [log addObject:[NSString stringWithFormat:@"archiveImport=%lu", (unsigned long)n]];
+            NSString *holo = self.lastImportHoloSummary;
+            // lastImportHoloSummary is only set at endImportSession; capture live notes via result file instead
+            if (!n) {
+                [log addObject:@"HINT: extract OK but 0 records. Check kid 01=/plain= above. If 01=YES plain=YES, identity import failed — see exception lines."];
+            }
+            (void)holo;
         }
 
         // Keep scratch on failure for Filza debug; remove only when something imported
