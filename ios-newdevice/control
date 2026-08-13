@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-122
+Version: 1.0.0-123
 Architecture: iphoneos-arm64
-Description: Import/restore AMG akc.plist Keychain (Venmo login tokens).
+Description: In-app akc Keychain restore via tweak (Venmo access group).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

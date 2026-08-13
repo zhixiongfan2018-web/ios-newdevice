@@ -436,31 +436,67 @@ extern char **environ;
                    error:nil];
     }
     BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
-    [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
+    NSString *kcStats = [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
+
+    // Ensure live Documents has akc.plist for in-app tweak restore (access-group safe)
+    NSString *liveDocsPath = [container stringByAppendingPathComponent:@"Documents"];
+    if (hasKC) {
+        NSString *liveAkc = [liveDocsPath stringByAppendingPathComponent:@"akc.plist"];
+        if (![fm fileExistsAtPath:liveAkc]) {
+            for (NSString *rel in @[@"akc.plist", @"Documents/akc.plist"]) {
+                NSString *src = [backupRoot stringByAppendingPathComponent:rel];
+                if (![fm fileExistsAtPath:src]) continue;
+                [fm createDirectoryAtPath:liveDocsPath withIntermediateDirectories:YES attributes:nil error:nil];
+                [fm removeItemAtPath:liveAkc error:nil];
+                if ([fm copyItemAtPath:src toPath:liveAkc error:nil]) {
+                    [self relaxProtectionAtPath:liveAkc];
+                    break;
+                }
+            }
+        }
+        // Pending pointer for tweak (world-readable under /var/jb/Library/NewDevice)
+        NSString *pendingDir = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"];
+        [fm createDirectoryAtPath:pendingDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *akcForPending = [fm fileExistsAtPath:liveAkc] ? liveAkc : nil;
+        if (!akcForPending.length) {
+            for (NSString *rel in @[@"akc.plist", @"Documents/akc.plist", @"keychain-full.plist"]) {
+                NSString *p = [backupRoot stringByAppendingPathComponent:rel];
+                if ([fm fileExistsAtPath:p]) { akcForPending = p; break; }
+            }
+        }
+        if (akcForPending.length) {
+            NSString *pendingFile = [pendingDir stringByAppendingPathComponent:[bid stringByAppendingString:@".txt"]];
+            [akcForPending writeToFile:pendingFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [NDPaths makePathWorldReadable:pendingFile];
+            [NDPaths makePathWorldReadable:pendingDir];
+        }
+    }
 
     // Marker so Filza / report can prove live write (not just staging)
-    NSString *marker = [[container stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"nd-restore-ok.txt"];
-    NSString *markText = [NSString stringWithFormat:@"record=%@\nbundle=%@\ntime=%@\nstagedKB=%llu\n",
-                          recordName, bid, [NSDate date], staged / 1024];
-    [fm createDirectoryAtPath:[marker stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *marker = [liveDocsPath stringByAppendingPathComponent:@"nd-restore-ok.txt"];
+    NSString *markText = [NSString stringWithFormat:@"record=%@\nbundle=%@\ntime=%@\nstagedKB=%llu\nkeychain=%@\n",
+                          recordName, bid, [NSDate date], staged / 1024, kcStats ?: @"-"];
+    [fm createDirectoryAtPath:liveDocsPath withIntermediateDirectories:YES attributes:nil error:nil];
     [markText writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [self relaxProtectionAtPath:marker];
 
-    unsigned long long liveDocs = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Documents"]];
+    unsigned long long liveDocs = [self byteSizeAtPath:liveDocsPath];
     unsigned long long liveLib = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Library"]];
-    NSString *sqlite = [container stringByAppendingPathComponent:@"Documents/Model.sqlite"];
+    NSString *sqlite = [liveDocsPath stringByAppendingPathComponent:@"Model.sqlite"];
     NSString *prefs = [container stringByAppendingPathComponent:@"Library/Preferences"];
     prefs = [prefs stringByAppendingPathComponent:[bid stringByAppendingString:@".plist"]];
     unsigned long long sqliteSz = [self byteSizeAtPath:sqlite];
     unsigned long long prefsSz = [self byteSizeAtPath:prefs];
     BOOL markerOk = [fm fileExistsAtPath:marker];
+    BOOL liveAkcOk = [fm fileExistsAtPath:[liveDocsPath stringByAppendingPathComponent:@"akc.plist"]];
     BOOL verified = markerOk && ((liveDocs + liveLib) >= (staged / 4) || sqliteSz > 0 || prefsSz > 1024);
     [lines addObject:[NSString stringWithFormat:
-                      @"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB subs=%lu Model.sqlite=%llu prefs=%llu marker=%@ keychainDump=%@\n  说明：%@",
+                      @"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB subs=%lu Model.sqlite=%llu prefs=%llu marker=%@ keychainDump=%@ liveAkc=%@\n  keychainWrite: %@\n  说明：%@",
                       verified ? @"OK" : @"WARN",
                       bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs,
-                      sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO",
-                      hasKC ? @"含 Keychain（keychain-full / AMG akc.plist），已尝试写入系统钥匙串"
+                      sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO", liveAkcOk ? @"yes" : @"NO",
+                      kcStats.length ? kcStats : @"none",
+                      hasKC ? @"已暂存 akc；NewDevice 进程尝试写入 + 打开 App 时插件在进程内再写（看 Documents/nd-akc-ok.txt）"
                             : @"此包无 Keychain/akc。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
     // Ensure app relaunches from restored files
     [self terminateApps:@[bid]];
@@ -474,8 +510,14 @@ extern char **environ;
     [akc enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
         if (![obj isKindOfClass:[NSDictionary class]]) return;
         NSDictionary *raw = (NSDictionary *)obj;
-        NSData *vData = raw[@"v_Data"];
-        if (![vData isKindOfClass:[NSData class]] || !vData.length) return;
+        NSData *vData = nil;
+        id rawV = raw[@"v_Data"];
+        if ([rawV isKindOfClass:[NSData class]]) vData = rawV;
+        else if ([rawV isKindOfClass:[NSString class]]) {
+            vData = [[NSData alloc] initWithBase64EncodedString:rawV options:0];
+            if (!vData.length) vData = [rawV dataUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (!vData.length) return;
         NSString *cls = [raw[@"class"] isKindOfClass:[NSString class]] ? raw[@"class"] : @"genp";
         NSString *outClass = @"generic";
         if ([cls isEqualToString:@"inet"]) outClass = @"internet";
@@ -572,6 +614,11 @@ extern char **environ;
         if ([self restoreOneApp:bid fromRecord:recordName lines:lines missing:missing]) ok++;
     }
     [self restoreAppGroupsForRecord:recordName];
+    NSString *importNote = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"amg-import-note.txt"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:importNote]) {
+        NSString *note = [NSString stringWithContentsOfFile:importNote encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        [lines addObject:[NSString stringWithFormat:@"WARN identity: %@", note.length ? note : @"faker ciphertext → randomized identity"]];
+    }
     [lines addObject:[NSString stringWithFormat:@"done ok=%lu missing=%lu", (unsigned long)ok, (unsigned long)missing.count]];
     [self writeRestoreReport:[lines componentsJoinedByString:@"\n"]];
     if (missing.count && error && !*error) {
@@ -714,13 +761,17 @@ extern char **environ;
     return YES;
 }
 
-- (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName {
+- (NSString *)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName {
+    NSMutableArray *parts = [NSMutableArray array];
     for (NSString *bid in bundleIds) {
         NSString *dir = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
         // Materialize AMG akc → keychain-full if needed (imports that only staged Documents/)
         [self NDMaterializeKeychainFullFromAMGInAppDir:dir importKeychain:YES];
         NSArray *items = [self NDLoadKeychainItemsFromBackupDir:dir];
-        if (![items isKindOfClass:[NSArray class]] || !items.count) continue;
+        if (![items isKindOfClass:[NSArray class]] || !items.count) {
+            [parts addObject:[NSString stringWithFormat:@"%@: items=0", bid]];
+            continue;
+        }
 
         // Collect services/accounts from dump so VenmoKit / token entries get cleared even when
         // their service string does not contain the bundle id.
@@ -765,6 +816,8 @@ extern char **environ;
         }
 
         NSUInteger added = 0;
+        NSUInteger failed = 0;
+        NSMutableArray *failCodes = [NSMutableArray array];
         for (NSDictionary *item in items) {
             if (![item isKindOfClass:[NSDictionary class]]) continue;
             NSString *cls = item[@"class"] ?: @"generic";
@@ -789,6 +842,10 @@ extern char **environ;
                     st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
                 }
                 if (st == errSecSuccess || st == errSecDuplicateItem) added++;
+                else {
+                    failed++;
+                    if (failCodes.count < 6) [failCodes addObject:[NSString stringWithFormat:@"%d", (int)st]];
+                }
                 continue;
             }
             if (!data.length) continue;
@@ -814,23 +871,35 @@ extern char **environ;
             if (item[@"port"]) add[(__bridge id)kSecAttrPort] = item[@"port"];
             if (item[@"synchronizable"]) add[(__bridge id)kSecAttrSynchronizable] = item[@"synchronizable"];
             // Prefer AfterFirstUnlock so background restore works
-            add[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlock;
+            add[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
             OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+            BOOL strippedAgrp = NO;
             if (st == errSecMissingEntitlement && accessGroup.length) {
-                // Retry without access group when entitlement mismatch
+                // Retry without access group when entitlement mismatch (may be invisible to Venmo)
                 [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
                 st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+                strippedAgrp = YES;
             }
             if (st == errSecDuplicateItem) {
                 NSMutableDictionary *query = [del mutableCopy];
                 NSDictionary *attrs = @{ (__bridge id)kSecValueData: data };
                 st = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)attrs);
             }
-            if (st == errSecSuccess) added++;
+            if (st == errSecSuccess) {
+                added++;
+                if (strippedAgrp && failCodes.count < 6) [failCodes addObject:@"strippedAgrp"];
+            } else {
+                failed++;
+                if (failCodes.count < 6) [failCodes addObject:[NSString stringWithFormat:@"%d", (int)st]];
+            }
         }
-        NSLog(@"[NewDevice] keychain restore %@ items=%lu added/ok=%lu", bid, (unsigned long)items.count, (unsigned long)added);
+        NSString *line = [NSString stringWithFormat:@"%@: items=%lu added=%lu failed=%lu%@",
+                          bid, (unsigned long)items.count, (unsigned long)added, (unsigned long)failed,
+                          failCodes.count ? [NSString stringWithFormat:@" codes=%@", [failCodes componentsJoinedByString:@","]] : @""];
+        [parts addObject:line];
+        NSLog(@"[NewDevice] keychain restore %@", line);
     }
-    return YES;
+    return parts.count ? [parts componentsJoinedByString:@"; "] : @"none";
 }
 
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {

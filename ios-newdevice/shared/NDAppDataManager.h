@@ -39,7 +39,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// Writes `keychain-full.plist` (+ legacy `keychain-hints.plist`).
 /// Also recognizes AMG `akc.plist` (Documents/akc.plist) and converts it on import/restore.
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
-- (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
+/// Restores Keychain dumps; returns a short stats string (items/added/failed) for reports.
+- (NSString *)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
 
 /// Strip image/video files under a holographic apps backup (AMG 瘦身).
 - (NSUInteger)slimMediaInRecord:(NSString *)recordName;

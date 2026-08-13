@@ -87,7 +87,7 @@
                             if (wroteOK && noKC) {
                                 hint = @"\n\n重要：沙盒已写入，但未检测到 Keychain（keychain-full / AMG 的 akc.plist）。\nVenmo 会显示未登录/空白。\n可用爱思查看沙盒 Documents/nd-restore-ok.txt 验证文件写入。";
                             } else if (wroteOK && [write containsString:@"keychainDump=yes"]) {
-                                hint = @"\n\n已检测到并尝试还原 Keychain（含 AMG akc）。请完全杀掉 Venmo 再打开；若仍未登录，多半是 token 失效或设备指纹不匹配。";
+                                hint = @"\n\n已检测到 akc/Keychain。请完全杀掉 Venmo 再打开一次（插件会在 App 进程内写钥匙串）。\n打开后用爱思看 Documents/nd-akc-ok.txt：ok 应 >0。\n若 faker 是密文，身份被随机化，仍可能登不上——请用 AMG「导出 AMG 数据」的明文包。";
                             } else if ([write containsString:@"FAIL Containers"]) {
                                 hint = @"\n\n无法访问 Containers：请确认已装最新版并注销桌面。";
                             } else if ([write containsString:@"未找到数据容器"]) {
