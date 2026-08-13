@@ -515,8 +515,11 @@
         return 0;
     }
 
-    if (!self.importingNames) self.importingNames = [NSMutableArray array];
-    if (!self.importingHoloLines) self.importingHoloLines = [NSMutableArray array];
+    BOOL nestedInSession = (self.importingNames != nil);
+    if (!nestedInSession) {
+        self.importingNames = [NSMutableArray array];
+        self.importingHoloLines = [NSMutableArray array];
+    }
 
     static NSSet *metaPlists;
     static dispatch_once_t onceToken;
@@ -529,10 +532,47 @@
 
     NSUInteger imported = 0;
     NSArray *entries = [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    // Build work list: top-level entries + children under wrappers (amg_extract / AMG)
+    NSMutableArray<NSString *> *workEntries = [NSMutableArray array];
+    NSMutableArray<NSString *> *workFulls = [NSMutableArray array];
+    void (^addWork)(NSString *, NSString *) = ^(NSString *name, NSString *full) {
+        if (!name.length || !full.length) return;
+        if ([workFulls containsObject:full]) return;
+        [workEntries addObject:name];
+        [workFulls addObject:full];
+    };
     for (NSString *entry in entries) {
         if ([entry hasPrefix:@"."]) continue;
-        if ([[self class] isReservedRecordFolderName:entry]) continue;
         NSString *full = [dir stringByAppendingPathComponent:entry];
+        BOOL entryIsDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&entryIsDir];
+        if (!entryIsDir) {
+            addWork(entry, full);
+            continue;
+        }
+        // Wrapper dirs are reserved — descend one level to real records
+        NSString *lower = entry.lowercaseString;
+        BOOL wrapper = [lower isEqualToString:@"amg_extract"] || [lower isEqualToString:@"amg"] || [lower isEqualToString:@"amg_tar"];
+        BOOL resolvedHere = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"01_plaintext_identity"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"03_holographic_backups"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"faker.plist"]]
+            || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"faker_plaintext.plist"]];
+        if (wrapper && !resolvedHere) {
+            NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+            for (NSString *k in kids) {
+                if ([k hasPrefix:@"."]) continue;
+                if ([[self class] isReservedRecordFolderName:k]) continue;
+                addWork(k, [full stringByAppendingPathComponent:k]);
+            }
+            continue;
+        }
+        if ([[self class] isReservedRecordFolderName:entry] && !resolvedHere) continue;
+        addWork(entry, full);
+    }
+
+    for (NSUInteger wi = 0; wi < workEntries.count; wi++) {
+        NSString *entry = workEntries[wi];
+        NSString *full = workFulls[wi];
         BOOL entryIsDir = NO;
         [fm fileExistsAtPath:full isDirectory:&entryIsDir];
 
@@ -540,15 +580,26 @@
             if (![[entry pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
             if ([metaPlists containsObject:entry.lowercaseString]) continue;
             if ([[self class] isReservedRecordFolderName:[entry stringByDeletingPathExtension]]) continue;
-            if ([self importProfileAtPath:full preferredName:[entry stringByDeletingPathExtension] error:nil]) {
-                imported++;
-            }
+            @try {
+                if ([self importProfileAtPath:full preferredName:[entry stringByDeletingPathExtension] error:nil]) {
+                    imported++;
+                }
+            } @catch (__unused NSException *ex) {}
             continue;
         }
 
+        // Resolved extract layout: 01_plaintext_identity / 02_config_plists / 03_holographic_backups
+        NSString *idDir = [full stringByAppendingPathComponent:@"01_plaintext_identity"];
+        NSString *cfgDir = [full stringByAppendingPathComponent:@"02_config_plists"];
+        NSString *holoDir = [full stringByAppendingPathComponent:@"03_holographic_backups"];
+        BOOL resolvedLayout = [fm fileExistsAtPath:idDir] || [fm fileExistsAtPath:cfgDir] || [fm fileExistsAtPath:holoDir];
+
         NSString *recordName = entry;
         NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"description.plist"]];
-        if ([desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
+        if (![desc isKindOfClass:[NSDictionary class]] && resolvedLayout) {
+            desc = [NSDictionary dictionaryWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"description.plist"]];
+        }
+        if ([desc isKindOfClass:[NSDictionary class]] && [desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
             recordName = desc[@"title"];
         }
         if ([[self class] isReservedRecordFolderName:recordName]) {
@@ -556,12 +607,7 @@
             if ([[self class] isReservedRecordFolderName:recordName]) continue;
         }
         recordName = [self sanitizeRecordName:recordName];
-
-        // Resolved extract layout: 01_plaintext_identity / 02_config_plists / 03_holographic_backups
-        NSString *idDir = [full stringByAppendingPathComponent:@"01_plaintext_identity"];
-        NSString *cfgDir = [full stringByAppendingPathComponent:@"02_config_plists"];
-        NSString *holoDir = [full stringByAppendingPathComponent:@"03_holographic_backups"];
-        BOOL resolvedLayout = [fm fileExistsAtPath:idDir] || [fm fileExistsAtPath:cfgDir] || [fm fileExistsAtPath:holoDir];
+        @try {
         // Holographic source: nested 03/.../<record> or classic AMG folder itself
         NSString *holoSrc = full;
         if ([fm fileExistsAtPath:holoDir]) {
@@ -832,9 +878,17 @@
             [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → %@", saved.name, [bits componentsJoinedByString:@", "]]];
         }
 
-        // Keychain: stage only during holographic import. Live restore happens on record switch / auto-apply.
+        // Keychain: stage only during holographic import. Live restore happens on record switch.
+        } @catch (NSException *ex) {
+            NSString *note = [NSString stringWithFormat:@"record %@ import exception: %@ — %@",
+                              entry, ex.name ?: @"?", ex.reason ?: @"?"];
+            NSLog(@"[NewDevice] %@", note);
+            if (self.importingHoloLines) [self.importingHoloLines addObject:note];
+        }
     }
-    if (imported) [self notifyReload];
+    // Defer notify while an import session is open (parent endImportSession / UI will refresh).
+    // Mid-import notify_post from a background queue has caused 导入异常 on some devices.
+    if (imported && self.importingNames == nil) [self notifyReload];
     return imported;
 }
 
@@ -854,8 +908,10 @@
     } else {
         self.lastImportHoloSummary = nil;
     }
+    NSUInteger count = self.lastImportedRecordNames.count;
     self.importingNames = nil;
     self.importingHoloLines = nil;
+    if (count) [self notifyReload];
 }
 
 - (void)writeResultCode:(NSInteger)code {

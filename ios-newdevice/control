@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-136
+Version: 1.0.0-137
 Architecture: iphoneos-arm64
-Description: Harden AMG_resolved import; accept mangled .gz names; no auto-restore.
+Description: Fix AMG_resolved import exception; descend amg_extract; safer notify.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

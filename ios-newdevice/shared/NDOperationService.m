@@ -427,8 +427,10 @@
             @try {
                 n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
             } @catch (NSException *ex) {
+                NSString *detail = [NSString stringWithFormat:@"导入异常：%@ — %@\n(详见 Media/AMG/import/nd-last-import.txt)",
+                                    ex.name ?: @"NSException", ex.reason ?: @"?"];
                 err = [NSError errorWithDomain:@"NDRecordStore" code:99
-                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"导入异常：%@", ex.reason ?: @"?"]}];
+                                     userInfo:@{NSLocalizedDescriptionKey: detail}];
             }
             // Stage only — do NOT auto-apply sandbox restore here (jetsam/闪退).
             // User taps the record (or 强制写入) afterward.
