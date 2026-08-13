@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-130
+Version: 1.0.0-134
 Architecture: iphoneos-arm64
-Description: Import AMG plaintext via getRecordParam / faker_plaintext sidecar.
+Description: Unwrap amg_extract wrapper; import AMG_resolved plaintext packs.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

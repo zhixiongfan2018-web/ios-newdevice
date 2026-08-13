@@ -22,6 +22,60 @@
         || [lower isEqualToString:@"amg_tar"] || [lower isEqualToString:@"newdevice"];
 }
 
++ (BOOL)NDPathLooksLikeAMGRecordDir:(NSString *)full {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:full isDirectory:&isDir] || !isDir) return NO;
+    for (NSString *marker in @[@"faker.plist", @"profile.plist", @"description.plist", @"selectApp.plist",
+                               @"faker_plaintext.plist", @"01_plaintext_identity", @"03_holographic_backups",
+                               @"02_config_plists"]) {
+        if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:marker]]) return YES;
+    }
+    return NO;
+}
+
+/// Unwrap amg_extract / var/mobile/AMG / single-folder wrappers to the directory that
+/// *contains* record folders (or is itself a record).
++ (NSString *)NDUnwrapImportRoot:(NSString *)dest {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *cur = dest;
+    for (NSInteger depth = 0; depth < 6; depth++) {
+        NSArray *top = [fm contentsOfDirectoryAtPath:cur error:nil] ?: @[];
+        NSMutableArray<NSString *> *dirs = [NSMutableArray array];
+        for (NSString *e in top) {
+            if ([e hasPrefix:@"."]) continue;
+            NSString *p = [cur stringByAppendingPathComponent:e];
+            BOOL d = NO;
+            if ([fm fileExistsAtPath:p isDirectory:&d] && d) [dirs addObject:p];
+        }
+        // If any child is a record dir, cur is the import root
+        for (NSString *p in dirs) {
+            if ([self NDPathLooksLikeAMGRecordDir:p]) return cur;
+        }
+        // Prefer known wrappers
+        NSString *wrapper = nil;
+        for (NSString *p in dirs) {
+            NSString *leaf = p.lastPathComponent.lowercaseString;
+            if ([leaf isEqualToString:@"amg_extract"] || [leaf isEqualToString:@"amg"] || [leaf isEqualToString:@"amg_tar"]
+                || [leaf isEqualToString:@"var"] || [leaf isEqualToString:@"private"]) {
+                wrapper = p;
+                break;
+            }
+        }
+        if (wrapper) {
+            cur = wrapper;
+            continue;
+        }
+        // Single directory → descend
+        if (dirs.count == 1) {
+            cur = dirs.firstObject;
+            continue;
+        }
+        break;
+    }
+    return dest;
+}
+
 + (BOOL)NDDirectoryLooksImportable:(NSString *)dir {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
@@ -35,10 +89,19 @@
         NSString *full = [dir stringByAppendingPathComponent:entry];
         BOOL entryDir = NO;
         if (![fm fileExistsAtPath:full isDirectory:&entryDir] || !entryDir) continue;
-        // Record folder: faker/profile/description or app bundles
-        for (NSString *marker in @[@"faker.plist", @"profile.plist", @"description.plist", @"selectApp.plist",
-                                   @"faker_plaintext.plist", @"01_plaintext_identity", @"03_holographic_backups"]) {
-            if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:marker]]) return YES;
+        if ([self NDPathLooksLikeAMGRecordDir:full]) return YES;
+        // Wrapper like amg_extract/
+        if ([self NDPathLooksLikeAMGRecordDir:[self NDUnwrapImportRoot:full]] ||
+            [self NDPathLooksLikeAMGRecordDir:[[self NDUnwrapImportRoot:full] stringByAppendingPathComponent:entry]]) {
+            // unwrap may point at parent; also check children of wrapper
+            NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+            for (NSString *k in kids) {
+                if ([self NDPathLooksLikeAMGRecordDir:[full stringByAppendingPathComponent:k]]) return YES;
+            }
+        }
+        NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+        for (NSString *k in kids) {
+            if ([self NDPathLooksLikeAMGRecordDir:[full stringByAppendingPathComponent:k]]) return YES;
         }
     }
     return NO;
@@ -131,35 +194,24 @@
             continue;
         }
 
-        NSString *importRoot = dest;
-        NSArray *nestedCandidates = @[
-            @"var/mobile/AMG", @"var/mobile/AMG_tar",
-            @"private/var/mobile/AMG", @"private/var/mobile/AMG_tar",
-            @"AMG", @"AMG_tar",
-        ];
-        for (NSString *nested in nestedCandidates) {
-            NSString *p = [dest stringByAppendingPathComponent:nested];
-            if ([fm fileExistsAtPath:p]) { importRoot = p; break; }
+        NSString *importRoot = [self NDUnwrapImportRoot:dest];
+        // If unwrap landed on a single record dir, import its parent so the record is one entry
+        if ([self NDPathLooksLikeAMGRecordDir:importRoot] &&
+            ![self NDPathLooksLikeAMGRecordDir:dest]) {
+            // keep parent that contains the record folder
+            NSString *parent = [importRoot stringByDeletingLastPathComponent];
+            if (parent.length) importRoot = parent;
         }
-        // Single top-level folder wrapping the tree
-        if ([importRoot isEqualToString:dest]) {
-            NSArray *top = [fm contentsOfDirectoryAtPath:dest error:nil] ?: @[];
-            if (top.count == 1) {
-                NSString *only = [dest stringByAppendingPathComponent:top.firstObject];
-                BOOL d = NO;
-                if ([fm fileExistsAtPath:only isDirectory:&d] && d) {
-                    for (NSString *nested in nestedCandidates) {
-                        NSString *p = [only stringByAppendingPathComponent:nested];
-                        if ([fm fileExistsAtPath:p]) { importRoot = p; break; }
-                    }
-                    if ([importRoot isEqualToString:dest]) {
-                        // record folder itself (has faker/profile)
-                        for (NSString *m in @[@"faker.plist", @"profile.plist", @"description.plist"]) {
-                            if ([fm fileExistsAtPath:[only stringByAppendingPathComponent:m]]) {
-                                importRoot = dest; // import children of dest (the one folder)
-                                break;
-                            }
-                        }
+        // Common nested roots
+        for (NSString *nested in @[@"var/mobile/AMG", @"var/mobile/AMG_tar", @"AMG", @"AMG_tar", @"amg_extract"]) {
+            NSString *p = [dest stringByAppendingPathComponent:nested];
+            if ([fm fileExistsAtPath:p]) {
+                // Prefer amg_extract / AMG when it contains record children
+                NSArray *kids = [fm contentsOfDirectoryAtPath:p error:nil] ?: @[];
+                for (NSString *k in kids) {
+                    if ([self NDPathLooksLikeAMGRecordDir:[p stringByAppendingPathComponent:k]]) {
+                        importRoot = p;
+                        break;
                     }
                 }
             }
