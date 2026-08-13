@@ -9,6 +9,8 @@ FOUNDATION_EXPORT NSInteger const NDHTTPPort;
 
 @interface NDPaths : NSObject
 + (NSString *)jbPrefix;
+/// Prefixed path when /var/jb exists (rootless), else absolutePath unchanged.
++ (NSString *)jbPath:(NSString *)absolutePath;
 + (NSString *)preferencesDir;
 + (NSString *)configPlistPath;
 + (NSString *)recordsRoot;

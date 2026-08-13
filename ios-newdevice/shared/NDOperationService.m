@@ -432,17 +432,33 @@
                 err = [NSError errorWithDomain:@"NDRecordStore" code:99
                                      userInfo:@{NSLocalizedDescriptionKey: detail}];
             }
-            // Stage only — do NOT auto-apply sandbox restore here (jetsam/闪退).
-            // User taps the record (or 强制写入) afterward.
             NSString *names = [[[NDRecordStore shared] lastImportedRecordNames] componentsJoinedByString:@", "] ?: @"";
             NSString *holo = [[NDRecordStore shared] lastImportHoloSummary] ?: @"";
+            NSString *applyMsg = @"";
             if (n > 0) {
-                body = [NSString stringWithFormat:@"%lu\n%@\n staged:%@\n(未自动写入沙盒，请点选该记录或「强制写入」)\n%@",
-                        (unsigned long)n, holo, names, err.localizedDescription ?: @""];
+                NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
+                if (applyName.length) {
+                    @try {
+                        // Set current + restore staged Venmo/etc. into live sandboxes
+                        [[NDRecordStore shared] setCurrentRecordName:applyName];
+                        NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:applyName];
+                        if (!bids.count) bids = @[@"net.kortina.labs.Venmo"];
+                        [[NDAppDataManager shared] terminateApps:bids];
+                        NSError *rErr = nil;
+                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:&rErr];
+                        [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
+                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
+                                    [NDAppDataManager shared].lastRestoreReport ?: (rErr.localizedDescription ?: @"")];
+                    } @catch (NSException *ex) {
+                        applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                    }
+                }
+                body = [NSString stringWithFormat:@"%lu\n%@\nstaged:%@\n%@\n%@",
+                        (unsigned long)n, holo, names, applyMsg, err.localizedDescription ?: @""];
             } else {
                 body = err.localizedDescription.length
                     ? err.localizedDescription
-                    : [NSString stringWithFormat:@"0\n未导入。扫描目录：%@", dir];
+                    : [NSString stringWithFormat:@"0\n未导入。扫描目录：%@\n见 Media/AMG/import/nd-last-import.txt", dir];
             }
             [[NDRecordStore shared] writeResultCode:(n > 0) ? 1 : 0];
             done(body, (n > 0) ? 200 : 500);

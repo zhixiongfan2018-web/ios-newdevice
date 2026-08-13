@@ -76,12 +76,12 @@
                     NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
                     NSString *msg = nil;
                     if (code == 200 && names.length) {
-                        msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n路径：%@\n\n下一步：点选该记录写入沙盒（或右上角「强制写入」），再杀掉 Venmo 重开。\n日志：Media/AMG/import/nd-last-import.txt",
+                        msg = [NSString stringWithFormat:@"已导入：%@\n\n%@\n\n%@\n\n请完全杀掉 Venmo 再打开。\n状态：Media/AMG/import/nd-import-status.txt\n日志：Media/AMG/import/nd-last-import.txt",
                                names,
                                holo.length ? holo : @"(无 apps 摘要)",
-                               dir];
+                               body.length ? body : @""];
                     } else {
-                        msg = body.length ? body : @"导入失败（目录可能是空的，或文件名不是 .tar.gz）\n见 Media/AMG/import/nd-last-import.txt";
+                        msg = body.length ? body : @"导入失败\n见 Media/AMG/import/nd-last-import.txt";
                     }
                     UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
                                                                                message:msg
@@ -173,6 +173,17 @@
     return self.names.count;
 }
 
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    NSUInteger imported = 0;
+    for (NSString *n in self.names) {
+        if (![n isEqualToString:@"原始机器"]) imported++;
+    }
+    if (imported == 0) {
+        return @"还没有导入记录。把 AMG_resolved_*.tar.gz 放到 /var/mobile/Media/AMG/import，点左上角「导入」。\n成功后看同目录 nd-import-status.txt（需 venmoKB>0 akc=YES）。";
+    }
+    return @"点选记录写入沙盒后，完全杀掉 Venmo 再打开。状态：Media/AMG/import/nd-import-status.txt";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
@@ -186,7 +197,18 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.numberOfLines = 2;
     NSString *state = p.enabled ? @"" : @" · 已禁用";
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state];
+    NSString *appsHint = @"";
+    if (![name isEqualToString:@"原始机器"]) {
+        NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+        NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        NSString *venmo = [appsRoot stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+        NSString *docsAkc = [[venmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"];
+        BOOL akc = [[NSFileManager defaultManager] fileExistsAtPath:docsAkc]
+            || [[NSFileManager defaultManager] fileExistsAtPath:[venmo stringByAppendingPathComponent:@"akc.plist"]];
+        appsHint = [NSString stringWithFormat:@" · apps:%lu%@%@",
+                    (unsigned long)apps.count, akc ? @" akc" : @"", apps.count ? @"" : @" (空)"];
+    }
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
 
     if (current) {
         cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];

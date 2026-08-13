@@ -597,39 +597,127 @@
             holoSrc = holoDir;
         }
     }
-    [[NDAppDataManager shared] importAMGHolographicFromDirectory:holoSrc intoRecord:saved.name];
+    // Resolved packs always carry akc — force keychain staging on for this import
+    BOOL prevKC = [NDConfig shared].importKeychainWithData;
+    [NDConfig shared].importKeychainWithData = YES;
+    @try {
+        [[NDAppDataManager shared] importAMGHolographicFromDirectory:holoSrc intoRecord:saved.name];
+        // Classic nested apps/ (sibling of AppGroup)
+        for (NSString *base in @[holoSrc, holoDir, recordPath]) {
+            if (!base.length || ![fm fileExistsAtPath:base]) continue;
+            NSString *nestedApps = [base stringByAppendingPathComponent:@"apps"];
+            BOOL nestedDir = NO;
+            if ([fm fileExistsAtPath:nestedApps isDirectory:&nestedDir] && nestedDir) {
+                [[NDAppDataManager shared] importAMGHolographicFromDirectory:nestedApps intoRecord:saved.name];
+            }
+        }
+        // Fallback: deep-search Venmo and stage parent + direct Documents/Library copy
+        NSString *venmoStaged = [NDPaths appsBackupDirForRecord:saved.name bundleId:@"net.kortina.labs.Venmo"];
+        NSString *venmoDocs = [venmoStaged stringByAppendingPathComponent:@"Documents"];
+        BOOL venmoOK = [fm fileExistsAtPath:[venmoDocs stringByAppendingPathComponent:@"akc.plist"]]
+            || [fm fileExistsAtPath:[venmoDocs stringByAppendingPathComponent:@"Model.sqlite"]]
+            || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"akc.plist"]];
+        if (!venmoOK) {
+            NSDirectoryEnumerator *en = [fm enumeratorAtPath:recordPath];
+            for (NSString *rel in en) {
+                if (![rel.lastPathComponent isEqualToString:@"net.kortina.labs.Venmo"]) continue;
+                NSString *found = [recordPath stringByAppendingPathComponent:rel];
+                BOOL d = NO;
+                if (![fm fileExistsAtPath:found isDirectory:&d] || !d) continue;
+                [[NDAppDataManager shared] importAMGHolographicFromDirectory:[found stringByDeletingLastPathComponent]
+                                                                 intoRecord:saved.name];
+                // Direct copy if holographic importer still missed (odd layouts)
+                [fm createDirectoryAtPath:venmoStaged withIntermediateDirectories:YES attributes:nil error:nil];
+                for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+                    NSString *src = [found stringByAppendingPathComponent:sub];
+                    if (![fm fileExistsAtPath:src]) continue;
+                    NSString *dst = [venmoStaged stringByAppendingPathComponent:sub];
+                    [fm removeItemAtPath:dst error:nil];
+                    [fm copyItemAtPath:src toPath:dst error:nil];
+                }
+                for (NSString *kcName in @[@"akc.plist", @"keychain-full.plist"]) {
+                    NSString *kcSrc = [found stringByAppendingPathComponent:kcName];
+                    if (![fm fileExistsAtPath:kcSrc]) {
+                        kcSrc = [[found stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:kcName];
+                    }
+                    if (![fm fileExistsAtPath:kcSrc]) continue;
+                    NSString *kcDst = [venmoStaged stringByAppendingPathComponent:kcName];
+                    if ([kcName isEqualToString:@"akc.plist"]) {
+                        // Prefer Documents/akc.plist layout used by restore
+                        NSString *docsAkc = [venmoDocs stringByAppendingPathComponent:@"akc.plist"];
+                        [fm createDirectoryAtPath:venmoDocs withIntermediateDirectories:YES attributes:nil error:nil];
+                        [fm removeItemAtPath:docsAkc error:nil];
+                        [fm copyItemAtPath:kcSrc toPath:docsAkc error:nil];
+                    }
+                    [fm removeItemAtPath:kcDst error:nil];
+                    [fm copyItemAtPath:kcSrc toPath:kcDst error:nil];
+                }
+                break;
+            }
+        }
+    } @catch (NSException *ex) {
+        NSString *note = [NSString stringWithFormat:@"holo stage exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+        [self.importingHoloLines addObject:note];
+        NSString *logPath = @"/var/mobile/Media/AMG/import/nd-last-import.txt";
+        NSString *prev = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        [[prev stringByAppendingFormat:@"\n%@\n", note] writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+    [NDConfig shared].importKeychainWithData = prevKC;
+
+    NSString *venmoStaged = [NDPaths appsBackupDirForRecord:saved.name bundleId:@"net.kortina.labs.Venmo"];
+    NSString *venmoDocs = [venmoStaged stringByAppendingPathComponent:@"Documents"];
 
     NSMutableOrderedSet *apps = [NSMutableOrderedSet orderedSet];
     for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:holoSrc]) [apps addObject:b];
     id sel = [NSArray arrayWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"selectApp.plist"]];
     if (!sel) sel = [NSDictionary dictionaryWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"selectApp.plist"]];
     for (NSString *b in [[self class] parseAppBundleIdsFromValue:sel]) [apps addObject:b];
+    [apps addObject:@"net.kortina.labs.Venmo"];
     if (apps.count) {
         [apps.array writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
-        // Merge targets without notify/save storms: write config disk merge lightly
         NDConfig *cfg = [NDConfig shared];
         NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
         for (NSString *b in apps.array) {
             if ([[self class] NDLooksLikeBundleId:b]) [set addObject:b];
         }
         cfg.targetApps = set.array;
-        // Write config plist only — skip RuntimeState/notify during import
         NSMutableDictionary *disk = [[NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]] mutableCopy] ?: [NSMutableDictionary dictionary];
         disk[@"targetApps"] = cfg.targetApps ?: @[];
         [disk writeToFile:[NDPaths configPlistPath] atomically:YES];
     }
 
     [saved writeAMGFakerToDirectory:[NDPaths recordDir:saved.name] error:nil];
-    NSString *note = [NSString stringWithFormat:@"Identity from faker_plaintext (AMG_resolved direct). holo=%@", holoSrc.lastPathComponent];
-    [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
-          atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
-    if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
     NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
     NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
-    [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → apps=%lu (%@)",
-                                        saved.name, (unsigned long)staged.count, [staged componentsJoinedByString:@","]]];
-    if (outNote) *outNote = [NSString stringWithFormat:@"OK %@", saved.name];
+    unsigned long long venmoKB = 0;
+    NSDirectoryEnumerator *ven = [fm enumeratorAtPath:venmoStaged];
+    for (__unused NSString *r in ven) {
+        NSDictionary *attrs = ven.fileAttributes;
+        if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) venmoKB += [attrs fileSize];
+    }
+    venmoKB /= 1024;
+    BOOL akc = [fm fileExistsAtPath:[venmoDocs stringByAppendingPathComponent:@"akc.plist"]]
+        || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"akc.plist"]]
+        || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"keychain-full.plist"]];
+
+    NSString *note = [NSString stringWithFormat:
+                      @"Identity from faker_plaintext (AMG_resolved direct).\n"
+                      @"recordsRoot=%@\nrecord=%@\nholoSrc=%@\nstagedApps=%@\nvenmoKB=%llu akc=%@\n",
+                      [NDPaths recordsRoot], saved.name, holoSrc,
+                      [staged componentsJoinedByString:@","],
+                      venmoKB, akc ? @"YES" : @"NO"];
+    [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
+          atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    // Also drop a copy where Aisi can see it
+    [note writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
+    [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → apps=%lu venmoKB=%llu akc=%@",
+                                        saved.name, (unsigned long)staged.count, venmoKB, akc ? @"YES" : @"NO"]];
+    if (outNote) {
+        *outNote = [NSString stringWithFormat:@"OK %@ venmoKB=%llu akc=%@", saved.name, venmoKB, akc ? @"YES" : @"NO"];
+    }
     return YES;
 }
 

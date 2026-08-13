@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-141
+Version: 1.0.0-144
 Architecture: iphoneos-arm64
-Description: Fix NSString unsignedLongLongValue crash on AMG DiskSpace/Memory.
+Description: Stage apps/ + Venmo deep-copy; auto-restore after AMG_resolved import.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

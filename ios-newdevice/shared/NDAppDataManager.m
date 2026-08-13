@@ -18,6 +18,7 @@ extern char **environ;
 - (NSArray *)NDLoadKeychainItemsFromBackupDir:(NSString *)dir;
 - (BOOL)NDBackupDirHasKeychainDump:(NSString *)dir;
 - (void)NDMaterializeKeychainFullFromAMGInAppDir:(NSString *)dstRoot importKeychain:(BOOL)importKC;
+- (void)NDImportAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName depth:(NSInteger)depth;
 @end
 
 @implementation NDAppDataManager
@@ -972,67 +973,108 @@ extern char **environ;
 }
 
 - (void)importAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName {
-    if (!amgRecordDir.length || !recordName.length) return;
+    [self NDImportAMGHolographicFromDirectory:amgRecordDir intoRecord:recordName depth:0];
+}
+
+/// Stage AMG holographic app trees. Descends into apps/ and UUID wrappers
+/// (AMG_resolved often has AppGroup + apps/ as siblings — old code skipped both).
+- (void)NDImportAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName depth:(NSInteger)depth {
+    if (!amgRecordDir.length || !recordName.length || depth > 5) return;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *entries = [fm contentsOfDirectoryAtPath:amgRecordDir error:nil] ?: @[];
     static NSSet *skip;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        skip = [NSSet setWithArray:@[@"AppGroup", @"Pasteboard", @"Documents", @"Library", @"tmp", @"SystemData"]];
+        skip = [NSSet setWithArray:@[@"AppGroup", @"Pasteboard", @"Documents", @"Library", @"tmp", @"SystemData",
+                                     @"01_plaintext_identity", @"02_config_plists", @"03_holographic_backups"]];
     });
 
     BOOL importKC = [NDConfig shared].importKeychainWithData;
+    NSMutableArray<NSString *> *descend = [NSMutableArray array];
 
     for (NSString *entry in entries) {
         if ([entry hasPrefix:@"."]) continue;
         if ([skip containsObject:entry]) continue;
         if ([entry.pathExtension.lowercaseString isEqualToString:@"plist"]) continue;
         if ([entry.pathExtension.lowercaseString isEqualToString:@"txt"]) continue;
-        // Bundle-id folders look like com.foo.bar
-        if ([entry rangeOfString:@"."].location == NSNotFound) continue;
         NSString *srcRoot = [amgRecordDir stringByAppendingPathComponent:entry];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:srcRoot isDirectory:&isDir] || !isDir) continue;
-        NSString *dstRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:entry];
-        BOOL copiedSub = NO;
-        for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
-            NSString *src = [srcRoot stringByAppendingPathComponent:sub];
-            if (![fm fileExistsAtPath:src]) continue;
-            [self copyItem:src to:[dstRoot stringByAppendingPathComponent:sub] error:nil];
-            copiedSub = YES;
-        }
-        // Some AMG dumps put container contents directly under the bid folder
-        if (!copiedSub) {
-            NSArray *kids = [fm contentsOfDirectoryAtPath:srcRoot error:nil] ?: @[];
-            for (NSString *kid in kids) {
-                if ([kid hasPrefix:@"."]) continue;
-                if ([kid.pathExtension.lowercaseString isEqualToString:@"plist"] && [kid.lowercaseString containsString:@"keychain"]) continue;
-                NSString *src = [srcRoot stringByAppendingPathComponent:kid];
-                [self copyItem:src to:[dstRoot stringByAppendingPathComponent:kid] error:nil];
+
+        // Bundle-id folders look like com.foo.bar / net.kortina.labs.Venmo
+        BOOL looksBid = ([entry rangeOfString:@"."].location != NSNotFound)
+            && [entry componentsSeparatedByString:@"."].count >= 2;
+        if (looksBid) {
+            NSString *dstRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:entry];
+            BOOL copiedSub = NO;
+            for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
+                NSString *src = [srcRoot stringByAppendingPathComponent:sub];
+                if (![fm fileExistsAtPath:src]) continue;
+                [self copyItem:src to:[dstRoot stringByAppendingPathComponent:sub] error:nil];
                 copiedSub = YES;
             }
-        }
-        // AMG/NewDevice keychain dumps:
-        // - NewDevice: <bid>/keychain-full.plist
-        // - AMG: <bid>/akc.plist or <bid>/Documents/akc.plist (copied with Documents/)
-        if (importKC) {
-            for (NSString *kcName in @[@"keychain-full.plist", @"keychain-hints.plist", @"akc.plist"]) {
-                NSString *kcSrc = [srcRoot stringByAppendingPathComponent:kcName];
-                if (![fm fileExistsAtPath:kcSrc]) continue;
-                [fm createDirectoryAtPath:dstRoot withIntermediateDirectories:YES attributes:nil error:nil];
-                NSString *kcDst = [dstRoot stringByAppendingPathComponent:kcName];
-                [fm removeItemAtPath:kcDst error:nil];
-                [fm copyItemAtPath:kcSrc toPath:kcDst error:nil];
+            // Some AMG dumps put container contents directly under the bid folder
+            if (!copiedSub) {
+                NSArray *kids = [fm contentsOfDirectoryAtPath:srcRoot error:nil] ?: @[];
+                for (NSString *kid in kids) {
+                    if ([kid hasPrefix:@"."]) continue;
+                    if ([kid.pathExtension.lowercaseString isEqualToString:@"plist"] && [kid.lowercaseString containsString:@"keychain"]) continue;
+                    NSString *src = [srcRoot stringByAppendingPathComponent:kid];
+                    [self copyItem:src to:[dstRoot stringByAppendingPathComponent:kid] error:nil];
+                    copiedSub = YES;
+                }
             }
-            [self NDMaterializeKeychainFullFromAMGInAppDir:dstRoot importKeychain:YES];
+            // AMG/NewDevice keychain dumps
+            if (importKC) {
+                for (NSString *kcName in @[@"keychain-full.plist", @"keychain-hints.plist", @"akc.plist"]) {
+                    NSString *kcSrc = [srcRoot stringByAppendingPathComponent:kcName];
+                    if (![fm fileExistsAtPath:kcSrc]) continue;
+                    [fm createDirectoryAtPath:dstRoot withIntermediateDirectories:YES attributes:nil error:nil];
+                    NSString *kcDst = [dstRoot stringByAppendingPathComponent:kcName];
+                    [fm removeItemAtPath:kcDst error:nil];
+                    [fm copyItemAtPath:kcSrc toPath:kcDst error:nil];
+                }
+                [self NDMaterializeKeychainFullFromAMGInAppDir:dstRoot importKeychain:YES];
+            }
+            continue;
         }
+
+        // Non-bid dirs: apps/, UUID wrappers, phone folders — descend if they hold bids
+        if ([entry.lowercaseString isEqualToString:@"apps"]) {
+            [descend addObject:srcRoot];
+            continue;
+        }
+        NSArray *kids = [fm contentsOfDirectoryAtPath:srcRoot error:nil] ?: @[];
+        for (NSString *kid in kids) {
+            if ([kid hasPrefix:@"."]) continue;
+            if ([skip containsObject:kid]) continue;
+            if ([kid rangeOfString:@"."].location == NSNotFound) continue;
+            BOOL kidDir = NO;
+            if ([fm fileExistsAtPath:[srcRoot stringByAppendingPathComponent:kid] isDirectory:&kidDir] && kidDir) {
+                [descend addObject:srcRoot];
+                break;
+            }
+        }
+    }
+
+    for (NSString *d in descend) {
+        [self NDImportAMGHolographicFromDirectory:d intoRecord:recordName depth:depth + 1];
     }
 
     NSString *agSrc = [amgRecordDir stringByAppendingPathComponent:@"AppGroup"];
     if ([fm fileExistsAtPath:agSrc]) {
         NSString *agDst = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"AppGroup"];
-        [fm removeItemAtPath:agDst error:nil];
-        [fm copyItemAtPath:agSrc toPath:agDst error:nil];
+        // Merge: keep existing AppGroup if already copied from a sibling
+        if (![fm fileExistsAtPath:agDst]) {
+            [fm copyItemAtPath:agSrc toPath:agDst error:nil];
+        } else {
+            // Prefer non-empty overwrite when destination is empty
+            NSArray *dstKids = [fm contentsOfDirectoryAtPath:agDst error:nil] ?: @[];
+            if (!dstKids.count) {
+                [fm removeItemAtPath:agDst error:nil];
+                [fm copyItemAtPath:agSrc toPath:agDst error:nil];
+            }
+        }
     }
 }
 

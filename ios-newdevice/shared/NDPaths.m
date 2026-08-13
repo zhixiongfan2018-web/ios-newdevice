@@ -20,8 +20,17 @@ NSInteger const NDHTTPPort = 8080;
     return prefix;
 }
 
+/// Join jb prefix with an absolute rooted path like "/var/mobile/..."
++ (NSString *)jbPath:(NSString *)absolutePath {
+    NSString *prefix = [self jbPrefix];
+    if (!absolutePath.length) return prefix ?: @"";
+    if (!prefix.length) return absolutePath;
+    if ([absolutePath hasPrefix:prefix]) return absolutePath;
+    return [prefix stringByAppendingString:absolutePath];
+}
+
 + (NSString *)preferencesDir {
-    return [[self jbPrefix] stringByAppendingPathComponent:@"/var/mobile/Library/Preferences/com.local.newdevice"];
+    return [self jbPath:@"/var/mobile/Library/Preferences/com.local.newdevice"];
 }
 
 + (NSString *)configPlistPath {
@@ -29,7 +38,7 @@ NSInteger const NDHTTPPort = 8080;
 }
 
 + (NSString *)recordsRoot {
-    return [[self jbPrefix] stringByAppendingPathComponent:@"/var/mobile/NewDevice/Records"];
+    return [self jbPath:@"/var/mobile/NewDevice/Records"];
 }
 
 + (NSString *)recordDir:(NSString *)name {
@@ -53,7 +62,7 @@ NSInteger const NDHTTPPort = 8080;
 }
 
 + (NSString *)resultFilePath {
-    return [[self jbPrefix] stringByAppendingPathComponent:@"/var/mobile/newdeviceResult.txt"];
+    return [self jbPath:@"/var/mobile/newdeviceResult.txt"];
 }
 
 + (NSString *)currentRecordPointerPath {
@@ -61,7 +70,7 @@ NSInteger const NDHTTPPort = 8080;
 }
 
 + (NSString *)runtimeStateDir {
-    return [[self jbPrefix] stringByAppendingPathComponent:@"/Library/NewDevice"];
+    return [self jbPath:@"/Library/NewDevice"];
 }
 
 + (NSString *)runtimeStatePath {
