@@ -453,9 +453,9 @@ extern char **environ;
     BOOL markerOk = [fm fileExistsAtPath:marker];
     BOOL verified = markerOk && ((liveDocs + liveLib) >= (staged / 4) || sqliteSz > 0 || prefsSz > 1024);
     [lines addObject:[NSString stringWithFormat:
-                      @"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB Model.sqlite=%llu prefs=%llu marker=%@ keychainDump=%@\n  说明：%@ ",
+                      @"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB subs=%lu Model.sqlite=%llu prefs=%llu marker=%@ keychainDump=%@\n  说明：%@",
                       verified ? @"OK" : @"WARN",
-                      bid, container, staged / 1024, (liveDocs + liveLib) / 1024,
+                      bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs,
                       sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO",
                       hasKC ? @"含 Keychain 转储，可尝试恢复登录态"
                             : @"此包无 Keychain。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
