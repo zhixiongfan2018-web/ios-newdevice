@@ -499,6 +499,13 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!d[@"DiskCapacity"] && d[@"TotalDiskCapacity"]) d[@"DiskCapacity"] = d[@"TotalDiskCapacity"];
     if (!d[@"PhysicalMemory"] && d[@"Memory"]) d[@"PhysicalMemory"] = d[@"Memory"];
     if (!d[@"PhysicalMemory"] && d[@"PhysicalMemorySize"]) d[@"PhysicalMemory"] = d[@"PhysicalMemorySize"];
+    // Coerce string disk/RAM to NSNumber so profileFromDictionary never messages NSString with unsignedLongLongValue
+    if (d[@"DiskCapacity"] && ![d[@"DiskCapacity"] isKindOfClass:[NSNumber class]]) {
+        d[@"DiskCapacity"] = @(NDUnsignedLongLongFrom(d[@"DiskCapacity"]));
+    }
+    if (d[@"PhysicalMemory"] && ![d[@"PhysicalMemory"] isKindOfClass:[NSNumber class]]) {
+        d[@"PhysicalMemory"] = @(NDUnsignedLongLongFrom(d[@"PhysicalMemory"]));
+    }
     if (!d[@"Brightness"] && d[@"ScreenBrightness"]) d[@"Brightness"] = d[@"ScreenBrightness"];
     // AMG may store brightness as 0..100 percent
     if (d[@"Brightness"] != nil) {
@@ -541,6 +548,19 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     return d;
 }
 
+/// AMG faker stores DiskSpace/Memory as decimal strings — NSString has no unsignedLongLongValue on some iOS builds.
+static unsigned long long NDUnsignedLongLongFrom(id v) {
+    if (!v || v == [NSNull null]) return 0;
+    if ([v isKindOfClass:[NSNumber class]]) return [(NSNumber *)v unsignedLongLongValue];
+    if ([v isKindOfClass:[NSString class]]) {
+        NSString *s = [(NSString *)v stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!s.length) return 0;
+        return strtoull(s.UTF8String, NULL, 10);
+    }
+    if ([v respondsToSelector:@selector(longLongValue)]) return (unsigned long long)[v longLongValue];
+    return 0;
+}
+
 + (instancetype)profileFromDictionary:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]]) return nil;
     dict = [self normalizedImportDictionary:dict];
@@ -575,8 +595,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.TimeZone = dict[@"TimeZone"] ?: @"";
     p.BootTime = dict[@"BootTime"] ? [dict[@"BootTime"] doubleValue] : 0;
     p.DeviceColor = dict[@"DeviceColor"] ?: @"";
-    p.DiskCapacity = dict[@"DiskCapacity"] ? [dict[@"DiskCapacity"] unsignedLongLongValue] : 0;
-    p.PhysicalMemory = dict[@"PhysicalMemory"] ? [dict[@"PhysicalMemory"] unsignedLongLongValue] : 0;
+    p.DiskCapacity = NDUnsignedLongLongFrom(dict[@"DiskCapacity"]);
+    p.PhysicalMemory = NDUnsignedLongLongFrom(dict[@"PhysicalMemory"]);
     if (dict[@"Brightness"] != nil) {
         p.Brightness = [dict[@"Brightness"] floatValue];
     } else {
