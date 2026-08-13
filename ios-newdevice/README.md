@@ -139,7 +139,11 @@ NewDevice → **工具**：
 | 导出 AMG 数据 | **`/var/mobile/AMG_tar`**（**明文** faker，再导入不用解密） |
 | 瘦身 | 点按瘦身当前记录；长按切换「导出自动清除媒体」 |
 
-> `/var/mobile/AMG/<记录>/faker.plist` 是 AMG **运行时落盘密文**，不是导入包。官方文档导入/导出走的是 `AMG_tar`。
+> **两种包不要混用：**
+> - **桌面经典包** `+1916… 2026-….tar.gz`：解开后必须是 `/var/mobile/AMG/<记录名>/…`，这是 AMG **唯一认的写回结构**。NewDevice 导入时会原名安装到该路径并暂存 Venmo。
+> - **`AMG_resolved_*.tar.gz`**（`01_plaintext_identity` / `02_config_plists` / `03_holographic_backups`）：电脑上的**分析包**，给 NewDevice 读明文身份用；**不能**当 AMG 写回/还原包，Filza 覆盖进 `/var/mobile/AMG` 也无效。
+>
+> `/var/mobile/AMG/<记录>/faker.plist` 在设备上常为**运行时落盘密文**；明文身份仍优先走 `AMG_tar` / `Get_Param` / `faker_plaintext.plist`。
 
 ### 从 AMG 导入数据
 

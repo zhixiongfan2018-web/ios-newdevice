@@ -110,7 +110,7 @@ extern char **environ;
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"导入 AMG 数据";
-            cell.detailTextLabel.text = @"Media/AMG/import 或 AMG_tar 的 .tar";
+            cell.detailTextLabel.text = @"经典包→/var/mobile/AMG/<记录名>（勿用 resolved 分析包）";
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];
         } else if (indexPath.row == 1) {
             cell.textLabel.text = @"拉取 AMG 明文参数";

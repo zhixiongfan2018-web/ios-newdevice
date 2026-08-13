@@ -34,6 +34,40 @@
     return NO;
 }
 
+/// Classic runtime / desktop export layout AMG itself recognizes under /var/mobile/AMG/<name>/.
++ (BOOL)NDPathLooksLikeClassicAMGRecordDir:(NSString *)full {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:full isDirectory:&isDir] || !isDir) return NO;
+    // Resolved analysis packs use 01_/02_/03_ — not classic even if nested
+    BOOL has01 = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"01_plaintext_identity"]];
+    BOOL has03 = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"03_holographic_backups"]];
+    BOOL hasFaker = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"faker.plist"]];
+    BOOL hasSelect = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectApp.plist"]]
+        || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectapp.plist"]];
+    BOOL hasDesc = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"description.plist"]];
+    if (hasFaker) return YES;
+    // Desktop classic often has selectApp + bid folders at root without needing faker readable
+    if ((hasSelect || hasDesc) && !has01) return YES;
+    // Bid folder at root (e.g. net.kortina.labs.Venmo) ⇒ classic holographic tree
+    if (!has01 && !has03) {
+        NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+        for (NSString *k in kids) {
+            if ([k rangeOfString:@"."].location == NSNotFound) continue;
+            if ([k.pathExtension.lowercaseString isEqualToString:@"plist"]) continue;
+            BOOL d = NO;
+            if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:k] isDirectory:&d] && d) return YES;
+        }
+    }
+    return NO;
+}
+
++ (BOOL)NDPathLooksLikeResolvedAMGRecordDir:(NSString *)full {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    return [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"01_plaintext_identity"]]
+        || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"03_holographic_backups"]];
+}
+
 /// Unwrap amg_extract / var/mobile/AMG / single-folder wrappers to the directory that
 /// *contains* record folders (or is itself a record).
 + (NSString *)NDUnwrapImportRoot:(NSString *)dest {
@@ -201,7 +235,9 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
-        NSString *msg = [NSString stringWithFormat:@"AMG 导入目录不存在: %@\n请把 AMG_resolved_*.tar.gz 放到\n/var/mobile/Media/AMG/import", dir];
+        NSString *msg = [NSString stringWithFormat:
+                         @"AMG 导入目录不存在: %@\n请把桌面经典包（如 +1916… 2026-….tar.gz）放到\n/var/mobile/Media/AMG/import\n"
+                         @"（AMG 只认 /var/mobile/AMG/<记录名>/；AMG_resolved 是分析包不能写回）", dir];
         [[self class] NDWriteImportLog:msg];
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:30 userInfo:@{NSLocalizedDescriptionKey: msg}];
         return 0;
@@ -219,16 +255,63 @@
     }
 
     @try {
-        // 1) Folder trees (incl. amg_extract unwrap)
+        // 1) Classic folders already on disk → install to /var/mobile/AMG/<记录名>/ + NewDevice
         {
+            NSMutableArray<NSString *> *classicRoots = [NSMutableArray array];
+            void (^collectClassic)(NSString *) = ^(NSString *root) {
+                NSArray *kids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
+                for (NSString *k in kids) {
+                    if ([k hasPrefix:@"."]) continue;
+                    NSString *kp = [root stringByAppendingPathComponent:k];
+                    if ([[self class] NDPathLooksLikeClassicAMGRecordDir:kp]) {
+                        // Skip resolved-only analysis trees
+                        if ([[self class] NDPathLooksLikeResolvedAMGRecordDir:kp]
+                            && ![fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"faker.plist"]]) {
+                            continue;
+                        }
+                        if (![classicRoots containsObject:kp]) [classicRoots addObject:kp];
+                    }
+                }
+            };
+            collectClassic(dir);
+            NSString *unwrapped = [[self class] NDUnwrapImportRoot:dir];
+            if (unwrapped.length && ![unwrapped isEqualToString:dir]) collectClassic(unwrapped);
+            for (NSString *nested in @[@"amg_extract", @"AMG", @"var/mobile/AMG"]) {
+                NSString *p = [dir stringByAppendingPathComponent:nested];
+                BOOL d = NO;
+                if ([fm fileExistsAtPath:p isDirectory:&d] && d) collectClassic(p);
+            }
+            NSUInteger classicN = 0;
+            for (NSString *kp in classicRoots) {
+                NSString *note = nil;
+                NSError *oneErr = nil;
+                BOOL ok = NO;
+                @try {
+                    ok = [self importClassicAMGRecordAtPath:kp note:&note error:&oneErr];
+                } @catch (NSException *ex) {
+                    note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                    ok = NO;
+                }
+                [log addObject:[NSString stringWithFormat:@"folderClassic=%@ ok=%@ note=%@",
+                                kp.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
+                if (ok) classicN++;
+            }
+            total += classicN;
+            [log addObject:[NSString stringWithFormat:@"folderClassicImport=%lu", (unsigned long)classicN]];
+        }
+
+        // 2) Remaining folder trees (resolved analysis / leftovers)
+        if (total == 0) {
             NSError *err = nil;
             NSUInteger n = [self NDImportUnpackedTree:dir importKeychain:importKeychain error:&err];
             total += n;
             [log addObject:[NSString stringWithFormat:@"folderImport=%lu", (unsigned long)n]];
             if (error && err) *error = err;
+        } else {
+            [log addObject:@"folderImport=skipped (classic live install already succeeded)"];
         }
 
-        // 2) Archives (accept mangled .tar_*.gz names from chat/Aisi)
+        // 3) Archives (accept mangled .tar_*.gz names from chat/Aisi)
         NSString *scratchRoot = @"/var/mobile/Media/AMG/.nd-extract";
         if (![fm createDirectoryAtPath:scratchRoot withIntermediateDirectories:YES attributes:nil error:nil]) {
             scratchRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-amg-import"];
@@ -264,7 +347,10 @@
                 extracted = NO;
             }
             if (!extracted) {
-                NSString *msg = [NSString stringWithFormat:@"无法解压 %@\n%@\n建议：电脑解压后，把文件夹\namg_extract/+1916…（含 01_plaintext_identity）\n直接放进 /var/mobile/Media/AMG/import/",
+                NSString *msg = [NSString stringWithFormat:
+                                 @"无法解压 %@\n%@\n建议：用桌面经典包 +1916… 2026-….tar.gz\n"
+                                 @"解压后路径必须是 /var/mobile/AMG/<记录名>/\n"
+                                 @"或把该文件夹放进 Media/AMG/import 再导入",
                                  entry, exErr.localizedDescription ?: @""];
                 [log addObject:msg];
                 if (error) {
@@ -280,12 +366,15 @@
                 NSString *parent = [importRoot stringByDeletingLastPathComponent];
                 if (parent.length) importRoot = parent;
             }
-            for (NSString *nested in @[@"var/mobile/AMG", @"var/mobile/AMG_tar", @"AMG", @"AMG_tar", @"amg_extract"]) {
+            // Prefer classic live layout paths first (what AMG recognizes)
+            for (NSString *nested in @[@"var/mobile/AMG", @"AMG", @"var/mobile/AMG_tar", @"AMG_tar", @"amg_extract"]) {
                 NSString *p = [dest stringByAppendingPathComponent:nested];
                 if ([fm fileExistsAtPath:p]) {
                     NSArray *kids = [fm contentsOfDirectoryAtPath:p error:nil] ?: @[];
                     for (NSString *k in kids) {
-                        if ([[self class] NDPathLooksLikeAMGRecordDir:[p stringByAppendingPathComponent:k]]) {
+                        NSString *kp = [p stringByAppendingPathComponent:k];
+                        if ([[self class] NDPathLooksLikeClassicAMGRecordDir:kp]
+                            || [[self class] NDPathLooksLikeAMGRecordDir:kp]) {
                             importRoot = p;
                             break;
                         }
@@ -293,54 +382,126 @@
                 }
             }
             [log addObject:[@"importRoot=" stringByAppendingString:importRoot ?: @""]];
-            // List what extract actually produced (debug archiveImport=0)
             NSArray *rootKids = [fm contentsOfDirectoryAtPath:importRoot error:nil] ?: @[];
             [log addObject:[NSString stringWithFormat:@"importRootKids=%lu", (unsigned long)rootKids.count]];
             for (NSString *k in rootKids) {
                 NSString *kp = [importRoot stringByAppendingPathComponent:k];
                 BOOL kd = NO;
                 [fm fileExistsAtPath:kp isDirectory:&kd];
-                BOOL has01 = [fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"01_plaintext_identity"]];
-                BOOL hasPlain = [fm fileExistsAtPath:[[kp stringByAppendingPathComponent:@"01_plaintext_identity"] stringByAppendingPathComponent:@"faker_plaintext.plist"]];
-                [log addObject:[NSString stringWithFormat:@"  kid=%@ dir=%@ 01=%@ plain=%@",
-                                k, kd ? @"YES" : @"NO", has01 ? @"YES" : @"NO", hasPlain ? @"YES" : @"NO"]];
+                BOOL classic = [[self class] NDPathLooksLikeClassicAMGRecordDir:kp];
+                BOOL resolved = [[self class] NDPathLooksLikeResolvedAMGRecordDir:kp];
+                [log addObject:[NSString stringWithFormat:@"  kid=%@ dir=%@ classic=%@ resolved=%@",
+                                k, kd ? @"YES" : @"NO", classic ? @"YES" : @"NO", resolved ? @"YES" : @"NO"]];
             }
             NSUInteger n = 0;
-            // Prefer direct resolved-record import (avoids scanner edge cases with '+' folder names)
+
+            // 1) Classic desktop / runtime packs → write /var/mobile/AMG/<记录名>/ + NewDevice
+            // Restore AMG record name from archive basename when extract sanitized '+' / spaces.
+            NSString *archiveLogical = [[self class] NDArchiveLogicalBaseName:entry];
             for (NSString *k in rootKids) {
                 NSString *kp = [importRoot stringByAppendingPathComponent:k];
-                BOOL has01 = [fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"01_plaintext_identity"]];
-                BOOL hasPlain = [fm fileExistsAtPath:[[kp stringByAppendingPathComponent:@"01_plaintext_identity"] stringByAppendingPathComponent:@"faker_plaintext.plist"]];
-                if (!has01) continue;
-                (void)hasPlain;
-                // Copy to a '+' -free path before import (some FS APIs mishandle '+')
-                NSString *safeName = [[[k stringByReplacingOccurrencesOfString:@"+" withString:@""]
-                                       stringByReplacingOccurrencesOfString:@" " withString:@"_"]
-                                      stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-                if (!safeName.length) safeName = @"amg-resolved-record";
-                NSString *safePath = [[importRoot stringByDeletingLastPathComponent] stringByAppendingPathComponent:safeName];
-                if (![safePath isEqualToString:kp]) {
-                    [fm removeItemAtPath:safePath error:nil];
-                    NSError *cpErr = nil;
-                    if (![fm copyItemAtPath:kp toPath:safePath error:&cpErr]) {
-                        [log addObject:[NSString stringWithFormat:@"safeCopy fail %@ — %@; using original", safeName, cpErr.localizedDescription ?: @"?"]];
-                        safePath = kp;
-                    } else {
-                        [log addObject:[@"safeCopy OK → " stringByAppendingString:safeName]];
+                BOOL classicKid = [[self class] NDPathLooksLikeClassicAMGRecordDir:kp];
+                // Tar extracted flat into dest (dest itself is the record)
+                if (!classicKid && [[self class] NDPathLooksLikeClassicAMGRecordDir:importRoot]
+                    && [importRoot isEqualToString:kp] == NO) {
+                    // only evaluate kids
+                }
+                if (!classicKid) continue;
+                if ([[self class] NDPathLooksLikeResolvedAMGRecordDir:kp]
+                    && ![fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"faker.plist"]]) {
+                    continue;
+                }
+                // Prefer original archive name (keeps + and spaces) for /var/mobile/AMG/<记录名>
+                NSString *importPath = kp;
+                if (archiveLogical.length
+                    && ![k isEqualToString:archiveLogical]
+                    && ([archiveLogical hasPrefix:@"+"] || [archiveLogical containsString:@" "])) {
+                    NSString *renamed = [[importRoot stringByDeletingLastPathComponent] stringByAppendingPathComponent:archiveLogical];
+                    // If importRoot IS the record (single flat extract), rename that folder
+                    if ([[self class] NDPathLooksLikeClassicAMGRecordDir:importRoot]
+                        && rootKids.count <= 2 /* allow faker + apps */) {
+                        // handled below via flat case
+                    }
+                    [fm removeItemAtPath:renamed error:nil];
+                    if ([fm moveItemAtPath:kp toPath:renamed error:nil] || [fm copyItemAtPath:kp toPath:renamed error:nil]) {
+                        importPath = renamed;
+                        [log addObject:[NSString stringWithFormat:@"restoreLiveName %@ → %@", k, archiveLogical]];
                     }
                 }
                 NSString *note = nil;
                 NSError *oneErr = nil;
                 BOOL ok = NO;
                 @try {
-                    ok = [self importAMGResolvedRecordAtPath:safePath note:&note error:&oneErr];
+                    ok = [self importClassicAMGRecordAtPath:importPath note:&note error:&oneErr];
                 } @catch (NSException *ex) {
                     note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
                     ok = NO;
                 }
-                [log addObject:[NSString stringWithFormat:@"directResolved=%@ ok=%@ note=%@",
-                                safePath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
+                [log addObject:[NSString stringWithFormat:@"classicLive=%@ ok=%@ note=%@",
+                                importPath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
                 if (ok) n++;
+            }
+            // Flat extract: importRoot itself is classic (no child record folders)
+            if (n == 0 && [[self class] NDPathLooksLikeClassicAMGRecordDir:importRoot]
+                && ![[self class] NDPathLooksLikeResolvedAMGRecordDir:importRoot]) {
+                NSString *flatPath = importRoot;
+                if (archiveLogical.length
+                    && ![importRoot.lastPathComponent isEqualToString:archiveLogical]) {
+                    NSString *renamed = [[importRoot stringByDeletingLastPathComponent] stringByAppendingPathComponent:archiveLogical];
+                    [fm removeItemAtPath:renamed error:nil];
+                    if ([fm moveItemAtPath:importRoot toPath:renamed error:nil]
+                        || [fm copyItemAtPath:importRoot toPath:renamed error:nil]) {
+                        flatPath = renamed;
+                        [log addObject:[NSString stringWithFormat:@"restoreFlatLiveName → %@", archiveLogical]];
+                    }
+                }
+                NSString *note = nil;
+                NSError *oneErr = nil;
+                BOOL ok = NO;
+                @try {
+                    ok = [self importClassicAMGRecordAtPath:flatPath note:&note error:&oneErr];
+                } @catch (NSException *ex) {
+                    note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                    ok = NO;
+                }
+                [log addObject:[NSString stringWithFormat:@"classicFlat=%@ ok=%@ note=%@",
+                                flatPath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
+                if (ok) n++;
+            }
+
+            // 2) AMG_resolved analysis packs → NewDevice only (does NOT install into /var/mobile/AMG)
+            if (n == 0) {
+                for (NSString *k in rootKids) {
+                    NSString *kp = [importRoot stringByAppendingPathComponent:k];
+                    if (![[self class] NDPathLooksLikeResolvedAMGRecordDir:kp]) continue;
+                    NSString *safeName = [[[k stringByReplacingOccurrencesOfString:@"+" withString:@""]
+                                           stringByReplacingOccurrencesOfString:@" " withString:@"_"]
+                                          stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+                    if (!safeName.length) safeName = @"amg-resolved-record";
+                    NSString *safePath = [[importRoot stringByDeletingLastPathComponent] stringByAppendingPathComponent:safeName];
+                    if (![safePath isEqualToString:kp]) {
+                        [fm removeItemAtPath:safePath error:nil];
+                        NSError *cpErr = nil;
+                        if (![fm copyItemAtPath:kp toPath:safePath error:&cpErr]) {
+                            [log addObject:[NSString stringWithFormat:@"safeCopy fail %@ — %@; using original", safeName, cpErr.localizedDescription ?: @"?"]];
+                            safePath = kp;
+                        } else {
+                            [log addObject:[@"safeCopy OK → " stringByAppendingString:safeName]];
+                        }
+                    }
+                    NSString *note = nil;
+                    NSError *oneErr = nil;
+                    BOOL ok = NO;
+                    @try {
+                        ok = [self importAMGResolvedRecordAtPath:safePath note:&note error:&oneErr];
+                    } @catch (NSException *ex) {
+                        note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                        ok = NO;
+                    }
+                    [log addObject:[NSString stringWithFormat:@"directResolved=%@ ok=%@ note=%@ (analysis-only, not AMG live)",
+                                    safePath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
+                    if (ok) n++;
+                }
             }
             if (n == 0) {
                 @try {
@@ -352,7 +513,7 @@
             total += n;
             [log addObject:[NSString stringWithFormat:@"archiveImport=%lu", (unsigned long)n]];
             if (!n) {
-                [log addObject:@"HINT: extract OK but directResolved failed. See notes above."];
+                [log addObject:@"HINT: extract OK but no classic/resolved record imported. Prefer desktop +1916….tar.gz → /var/mobile/AMG/<记录名>/"];
             }
         }
 
@@ -384,7 +545,11 @@
 
     if (total == 0 && error && !*error) {
         NSString *msg = [NSString stringWithFormat:
-                         @"未找到可导入的 AMG 记录。\n当前扫描：%@\n目录内：%@\n\n请确认：\n1) 文件在 /var/mobile/Media/AMG/import\n2) 用 AMG_resolved_ 明文包\n3) 或电脑解压后放 amg_extract 里那层记录文件夹\n\n详见 nd-last-import.txt",
+                         @"未找到可导入的 AMG 记录。\n当前扫描：%@\n目录内：%@\n\n"
+                         @"请用桌面经典包（不是 AMG_resolved 分析包）：\n"
+                         @"1) 把 +1916… 2026-….tar.gz 放到 /var/mobile/Media/AMG/import\n"
+                         @"2) 或电脑解压后保证路径是 /var/mobile/AMG/<记录名>/\n"
+                         @"3) AMG_resolved（01_/02_/03_）只能给 NewDevice 看明文，AMG 不认\n\n详见 nd-last-import.txt",
                          dir,
                          entries.count ? [entries componentsJoinedByString:@", "] : @"(空)"];
         *error = [NSError errorWithDomain:@"NDRecordStore" code:31 userInfo:@{NSLocalizedDescriptionKey: msg}];

@@ -179,9 +179,9 @@
         if (![n isEqualToString:@"原始机器"]) imported++;
     }
     if (imported == 0) {
-        return @"还没有导入记录。把 AMG_resolved_*.tar.gz 放到 /var/mobile/Media/AMG/import，点左上角「导入」。\n成功后看同目录 nd-import-status.txt（需 venmoKB>0 akc=YES）。";
+        return @"还没有导入记录。请用桌面经典包 +1916… 2026-….tar.gz（不是 AMG_resolved 分析包）放到 Media/AMG/import 后点「导入」。\n会写入 /var/mobile/AMG/<记录名>/（AMG 只认这个路径）。\n看 nd-import-status.txt：需 venmoKB>0 akc=YES。";
     }
-    return @"点选记录写入沙盒后，完全杀掉 Venmo 再打开。状态：Media/AMG/import/nd-import-status.txt";
+    return @"点选记录写入沙盒后，完全杀掉 Venmo 再打开。经典包会落在 /var/mobile/AMG/<记录名>/。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

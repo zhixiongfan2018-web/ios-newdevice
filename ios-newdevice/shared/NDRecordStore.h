@@ -32,9 +32,17 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(nullable NSString *)name error:(NSError * _Nullable * _Nullable)error;
 
 /// Direct import of one AMG_resolved record folder (has 01_plaintext_identity / 03_holographic_backups).
+/// Analysis pack only — does NOT write `/var/mobile/AMG/<record>/` (AMG ignores that layout).
 - (BOOL)importAMGResolvedRecordAtPath:(NSString *)recordPath
                                  note:(NSString * _Nullable * _Nullable)outNote
                                 error:(NSError * _Nullable * _Nullable)error;
+
+/// Classic AMG record folder (faker.plist + holographic apps at root).
+/// 1) Installs to `/var/mobile/AMG/<folderName>/` so AMG recognizes it
+/// 2) Imports identity + holographic apps into NewDevice (Venmo-hardened)
+- (BOOL)importClassicAMGRecordAtPath:(NSString *)recordPath
+                                note:(NSString * _Nullable * _Nullable)outNote
+                               error:(NSError * _Nullable * _Nullable)error;
 
 /// Bundle IDs for a record's App environment (selectApp.plist + apps/ folders).
 - (NSArray<NSString *> *)appBundleIdsForRecord:(NSString *)name;

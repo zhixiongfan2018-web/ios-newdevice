@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-144
+Version: 1.0.0-145
 Architecture: iphoneos-arm64
-Description: Stage apps/ + Venmo deep-copy; auto-restore after AMG_resolved import.
+Description: Classic AMG tar write-back to /var/mobile/AMG/<record>/; resolved is analysis-only.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
