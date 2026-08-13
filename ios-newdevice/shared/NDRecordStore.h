@@ -23,8 +23,36 @@ NS_ASSUME_NONNULL_BEGIN
 - (NDDeviceProfile *)createNewRecordAndActivate:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToOriginal:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToNext:(NSError * _Nullable * _Nullable)error;
+- (BOOL)switchToPrevious:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToFirst:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToRecord:(NSString *)name error:(NSError * _Nullable * _Nullable)error;
+
+/// Import AMG (or compatible) identity plists. Returns number imported.
+- (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
+- (nullable NDDeviceProfile *)importProfileAtPath:(NSString *)path preferredName:(nullable NSString *)name error:(NSError * _Nullable * _Nullable)error;
+
+/// Direct import of one AMG_resolved record folder (has 01_plaintext_identity / 03_holographic_backups).
+/// Analysis pack only — does NOT write `/var/mobile/AMG/<record>/` (AMG ignores that layout).
+- (BOOL)importAMGResolvedRecordAtPath:(NSString *)recordPath
+                                 note:(NSString * _Nullable * _Nullable)outNote
+                                error:(NSError * _Nullable * _Nullable)error;
+
+/// Classic AMG record folder (faker.plist + holographic apps at root).
+/// 1) Installs to `/var/mobile/AMG/<folderName>/` so AMG recognizes it
+/// 2) Imports identity + holographic apps into NewDevice (Venmo-hardened)
+- (BOOL)importClassicAMGRecordAtPath:(NSString *)recordPath
+                                note:(NSString * _Nullable * _Nullable)outNote
+                               error:(NSError * _Nullable * _Nullable)error;
+
+/// Bundle IDs for a record's App environment (selectApp.plist + apps/ folders).
+- (NSArray<NSString *> *)appBundleIdsForRecord:(NSString *)name;
+
+/// Names imported by the most recent AMG import (for auto-activate / UI summary).
+@property (nonatomic, copy, readonly) NSArray<NSString *> *lastImportedRecordNames;
+/// Human-readable holographic staging summary from last import (apps + bytes).
+@property (nonatomic, copy, readonly, nullable) NSString *lastImportHoloSummary;
+- (void)beginImportSession;
+- (void)endImportSession;
 
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;

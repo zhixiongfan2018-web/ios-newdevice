@@ -2,16 +2,31 @@
 #import "NDHTTPServer.h"
 #import "NDPaths.h"
 #import "NDRecordStore.h"
+#import "NDRuntimeState.h"
+#import "NDConfig.h"
 #import <errno.h>
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         [NDPaths ensureDirectories];
-        [[NDRecordStore shared] currentRecordName];
+
+        // Publish world-readable runtime snapshot at boot so sandboxed target apps
+        // can spoof even before the NewDevice UI is opened.
+        @try {
+            [[NDRecordStore shared] notifyReload];
+        } @catch (__unused NSException *e) {
+            NSLog(@"[newdeviced] runtime publish failed: %@", e);
+            NDConfig *cfg = [NDConfig shared];
+            [cfg reload];
+            [NDRuntimeState publishWithConfig:cfg
+                                      profile:[[NDRecordStore shared] currentProfile]
+                                  currentName:[[NDRecordStore shared] currentRecordName]];
+        }
 
         NSError *error = nil;
         if (![[NDHTTPServer shared] startWithPort:(uint16_t)NDHTTPPort error:&error]) {
             // If App already holds the port, exit quietly — App is serving API.
+            // Runtime snapshot was already published above.
             if (error.code == EADDRINUSE || [error.localizedDescription containsString:@"bind"]) {
                 NSLog(@"[newdeviced] port in use, exit (App may be serving API)");
                 return 0;

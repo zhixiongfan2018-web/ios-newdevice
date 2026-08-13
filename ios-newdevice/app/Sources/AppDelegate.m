@@ -2,6 +2,7 @@
 #import "HomeViewController.h"
 #import "RecordsViewController.h"
 #import "AppsViewController.h"
+#import "ToolsViewController.h"
 #import "SettingsViewController.h"
 #import "NDPaths.h"
 #import "NDHTTPServer.h"
@@ -42,17 +43,22 @@
                                                     image:[UIImage systemImageNamed:@"square.grid.2x2"]
                                             selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
 
+    UINavigationController *tools = [[UINavigationController alloc] initWithRootViewController:[ToolsViewController new]];
+    tools.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"工具"
+                                                     image:[UIImage systemImageNamed:@"wrench.and.screwdriver"]
+                                             selectedImage:[UIImage systemImageNamed:@"wrench.and.screwdriver.fill"]];
+
     UINavigationController *set = [[UINavigationController alloc] initWithRootViewController:[SettingsViewController new]];
     set.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置"
                                                    image:[UIImage systemImageNamed:@"gearshape"]
                                            selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
 
-    for (UINavigationController *nav in @[home, recs, apps, set]) {
+    for (UINavigationController *nav in @[home, recs, apps, tools, set]) {
         nav.navigationBar.prefersLargeTitles = YES;
         nav.navigationBar.tintColor = [NDTheme accent];
     }
 
-    tab.viewControllers = @[home, recs, apps, set];
+    tab.viewControllers = @[home, recs, apps, tools, set];
     self.window.rootViewController = tab;
     [self.window makeKeyAndVisible];
 

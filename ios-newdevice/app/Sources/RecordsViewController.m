@@ -1,9 +1,13 @@
 #import "RecordsViewController.h"
 #import "NDRecordStore.h"
+#import "NDRecordStore+ImportExport.h"
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
-#import "NDAMGImporter.h"
+#import "NDOperationService.h"
+#import "NDAppDataManager.h"
 #import "NDTheme.h"
+#import "NDPaths.h"
+#import "NDConfig.h"
 #import "ProfileDetailViewController.h"
 
 @interface RecordsViewController ()
@@ -21,39 +25,138 @@
     [super viewDidLoad];
     self.title = @"记录";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"导入AMG" style:UIBarButtonItemStylePlain target:self action:@selector(importAMG)];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
+    UIBarButtonItem *reload = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
+    UIBarButtonItem *more = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showMore)];
+    self.navigationItem.rightBarButtonItems = @[reload, more];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"导入" style:UIBarButtonItemStylePlain target:self action:@selector(importProfile)];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 72;
 }
 
-- (void)importAMG {
-    UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"导入 AMG"
-                                                                   message:@"正在扫描 /var/mobile/AMG_tar 与 /var/mobile/AMG …\n大包可能需几分钟"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:busy animated:YES completion:nil];
-    // In-process: avoids HTTP async 120s poll timeout on large holographic trees.
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSError *err = nil;
-        BOOL ok = [NDAMGImporter importFromAMGTarDirectory:@"/var/mobile/AMG_tar" error:&err];
-        NSString *detail = err.localizedDescription ?: @"";
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [busy dismissViewControllerAnimated:YES completion:^{
-                [self reload];
-                NSString *msg = ok
-                    ? (detail.length
-                           ? detail
-                           : @"已写入记录列表（未自动切换）。密文 faker 请在记录目录旁放 faker_plaintext.plist。")
-                    : (detail.length ? detail : @"导入失败，请确认 /var/mobile/AMG_tar 或 /var/mobile/AMG 有备份");
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"导入完成" : @"导入失败"
-                                                                           message:msg
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:a animated:YES completion:nil];
-            }];
-        });
-    });
+- (void)showMore {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"记录" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG_tar 导入（官方导出路径）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromAMG];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录 (NewDevice)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self exportCurrent];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出到 AMG_tar (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self exportAMGFolder];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"强制写入当前记录 App 沙盒" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSString *name = [[NDRecordStore shared] currentRecordName] ?: @"";
+        [[NDOperationService shared] runAsync:@"restoreHolo" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIAlertController *al = [UIAlertController alertControllerWithTitle:(code == 200) ? @"写入结果" : @"写入失败"
+                                                                             message:body.length ? body : @"无报告"
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:al animated:YES completion:nil];
+            });
+        }];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)importFromAMG {
+    NSString *dir = [NDRecordStore resolvedAMGImportPath];
+    BOOL kc = [NDConfig shared].importKeychainWithData;
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"解压并写入 App 沙盒…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
+            // Import only stages data — restore separately to avoid jetsam/闪退.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
+                    NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
+                    NSString *msg = nil;
+                    if (code == 200 && names.length) {
+                        msg = [NSString stringWithFormat:@"已导入：%@\n\n%@\n\n%@\n\n请完全杀掉 Venmo 再打开。\n状态：Media/AMG/import/nd-import-status.txt\n日志：Media/AMG/import/nd-last-import.txt",
+                               names,
+                               holo.length ? holo : @"(无 apps 摘要)",
+                               body.length ? body : @""];
+                    } else {
+                        msg = body.length ? body : @"导入失败\n见 Media/AMG/import/nd-last-import.txt";
+                    }
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
+                                                                               message:msg
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:a animated:YES completion:nil];
+                    [self reload];
+                }];
+            });
+        }];
+    }];
+}
+
+- (void)exportCurrent {
+    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+    if (!p) return;
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", p.name ?: @"record"]];
+    NSError *err = nil;
+    if (![p writeToPath:path error:&err]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导出失败" message:err.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    UIActivityViewController *av = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+    [self presentViewController:av animated:YES completion:nil];
+}
+
+- (void)exportAMGFolder {
+    NSError *err = nil;
+    NSString *outDir = [NDRecordStore amgTarPath];
+    NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:[NDConfig shared].slimExportStripMedia error:&err];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导出完成" : @"导出结果"
+                                                               message:n ? [NSString stringWithFormat:@"已导出 %lu 条明文记录到\n%@", (unsigned long)n, outDir]
+                                                                        : (err.localizedDescription ?: @"没有可导出的记录")
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)importProfile {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"导入" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG 目录导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromAMG];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"从 plist 路径导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self importFromPathPrompt];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)importFromPathPrompt {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导入记录" message:@"支持 NewDevice / AMG 参数 plist（自动映射 SerialNum、MAC 等别名）" preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"/var/mobile/AMG/某记录/profile.plist";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *path = a.textFields.firstObject.text ?: @"";
+        NSError *e = nil;
+        NDDeviceProfile *p = [[NDRecordStore shared] importProfileAtPath:path preferredName:nil error:&e];
+        if (!p) {
+            UIAlertController *err = [UIAlertController alertControllerWithTitle:@"导入失败" message:e.localizedDescription ?: @"无法读取 plist" preferredStyle:UIAlertControllerStyleAlert];
+            [err addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:err animated:YES completion:nil];
+            return;
+        }
+        [self reload];
+        UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"已导入" message:p.name preferredStyle:UIAlertControllerStyleAlert];
+        [ok addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ok animated:YES completion:nil];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -70,6 +173,17 @@
     return self.names.count;
 }
 
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    NSUInteger imported = 0;
+    for (NSString *n in self.names) {
+        if (![n isEqualToString:@"原始机器"]) imported++;
+    }
+    if (imported == 0) {
+        return @"还没有导入记录。把桌面 +1916… 2026-….tar.gz 放到 Media/AMG/import 后导入。\n成功条件：nd-import-status.txt 含 Classic…OK / liveAkc=YES / venmoKB>0。\n若只有同名空壳=失败（146 已拒绝空壳）。";
+    }
+    return @"列表应显示 apps:N akc。点选写入沙盒后杀掉 Venmo 再开。live 路径：/var/mobile/AMG/<记录名>/";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
@@ -83,7 +197,18 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.numberOfLines = 2;
     NSString *state = p.enabled ? @"" : @" · 已禁用";
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state];
+    NSString *appsHint = @"";
+    if (![name isEqualToString:@"原始机器"]) {
+        NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+        NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        NSString *venmo = [appsRoot stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+        NSString *docsAkc = [[venmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"];
+        BOOL akc = [[NSFileManager defaultManager] fileExistsAtPath:docsAkc]
+            || [[NSFileManager defaultManager] fileExistsAtPath:[venmo stringByAppendingPathComponent:@"akc.plist"]];
+        appsHint = [NSString stringWithFormat:@" · apps:%lu%@%@",
+                    (unsigned long)apps.count, akc ? @" akc" : @"", apps.count ? @"" : @" (空)"];
+    }
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
 
     if (current) {
         cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
@@ -102,13 +227,16 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSString *name = self.names[indexPath.row];
-    [[NDAPIClient shared] call:@"setRecord" query:@{@"recordName": name} completion:^(BOOL ok, NSString *body, NSError *error) {
-        [self reload];
-        if (!ok) {
-            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+    // In-process setRecord: restores App environment + avoids URL '+' encoding bugs
+    [[NDOperationService shared] runAsync:@"setRecord" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self reload];
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"已切换并写入沙盒" : @"切换失败"
+                                                                       message:body.length ? body : @"无法切换到该记录"
+                                                                preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
-        }
+        });
     }];
 }
 

@@ -2,10 +2,8 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: One-tap new device identity (Sileo-safe build).
+Description: Classic AMG Media/AMG/import + akc KeychainRestore (cloud writeback line).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
-Depends: firmware (>= 15.0)
-Recommends: ellekit | mobilesubstrate
-Homepage: https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable/
+Homepage: https://zhixiongfan2018-web.github.io/ios-newdevice/

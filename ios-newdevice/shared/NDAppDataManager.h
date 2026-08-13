@@ -15,18 +15,41 @@ NS_ASSUME_NONNULL_BEGIN
 /// Backup app sandboxes into record folder.
 - (BOOL)backupApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
-/// Restore app sandboxes from record folder (Documents/Library/tmp + AppGroup + akc Keychain).
+/// Restore app sandboxes from record folder.
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
-/// AMG-style Documents/akc.plist → SecItem restore (per-app Keychain snapshot).
-- (NSInteger)restoreAKCPlistAtPath:(NSString *)path;
+/// Restore every staged app under Records/<name>/apps/ (source of truth after AMG import).
+- (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
-/// Best-effort Keychain export/import for given access groups (plist under backup).
+/// Human-readable report from the last restore (also written to Media/NewDevice/last-restore.txt).
+@property (nonatomic, copy, readonly, nullable) NSString *lastRestoreReport;
+
+/// Import AMG holographic trees (bundleId/Documents|Library + AppGroup) into a NewDevice record.
+- (void)importAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName;
+
+/// Restore App Group containers previously imported/backed up under Records/<name>/AppGroup.
+- (BOOL)restoreAppGroupsForRecord:(NSString *)recordName;
+
+/// Pasteboard holographic: backup current general pasteboard into record, restore from record.
+- (void)backupPasteboardToRecord:(NSString *)recordName;
+- (void)restorePasteboardFromRecord:(NSString *)recordName;
+- (void)clearGeneralPasteboard;
+
+/// Best-effort Keychain export/import (generic + internet passwords, access groups).
+/// Writes `keychain-full.plist` (+ legacy `keychain-hints.plist`).
+/// Also recognizes AMG `akc.plist` (Documents/akc.plist) and converts it on import/restore.
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
-- (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
+/// Restores Keychain dumps; returns a short stats string (items/added/failed) for reports.
+- (NSString *)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
+
+/// Strip image/video files under a holographic apps backup (AMG 瘦身).
+- (NSUInteger)slimMediaInRecord:(NSString *)recordName;
+- (NSUInteger)slimMediaInDirectory:(NSString *)root;
 
 - (nullable NSString *)containerPathForBundleId:(NSString *)bundleId;
-- (nullable NSString *)sharedContainerPathForGroupId:(NSString *)groupId;
+
+/// Best-effort: open app once so iOS creates its data container (restoreHolo only).
+- (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
 
 @end
 

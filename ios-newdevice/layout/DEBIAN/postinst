@@ -26,8 +26,18 @@ fi
 
 mkdir -p "${JB_PREFIX}/var/mobile/NewDevice/Records" 2>/dev/null || true
 mkdir -p "${JB_PREFIX}/var/mobile/Library/Preferences/com.local.newdevice" 2>/dev/null || true
+# World-readable runtime snapshot dir for sandboxed target apps (tweak injection)
+mkdir -p "${JB_PREFIX}/Library/NewDevice" 2>/dev/null || true
+chmod 755 "${JB_PREFIX}/Library/NewDevice" 2>/dev/null || true
+# Prefer traversable Library for injected processes reading runtime.plist
+chmod 755 "${JB_PREFIX}/Library" 2>/dev/null || true
 chown -R mobile:mobile "${JB_PREFIX}/var/mobile/NewDevice" 2>/dev/null || true
 chown -R mobile:mobile "${JB_PREFIX}/var/mobile/Library/Preferences/com.local.newdevice" 2>/dev/null || true
+chown -R mobile:mobile "${JB_PREFIX}/Library/NewDevice" 2>/dev/null || true
+# If a previous runtime.plist exists, keep it world-readable
+if [ -f "${JB_PREFIX}/Library/NewDevice/runtime.plist" ]; then
+  chmod 644 "${JB_PREFIX}/Library/NewDevice/runtime.plist" 2>/dev/null || true
+fi
 
 # Load daemon gently (failure must not break install)
 if [ -f "$PLIST" ] && command -v launchctl >/dev/null 2>&1; then

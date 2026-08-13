@@ -1,11 +1,11 @@
 #import "NDOperationService.h"
 #import "NDRecordStore.h"
+#import "NDRecordStore+ImportExport.h"
 #import "NDConfig.h"
 #import "NDAppDataManager.h"
 #import "NDAirplane.h"
 #import "NDPaths.h"
 #import "NDDeviceProfile.h"
-#import "NDAMGImporter.h"
 
 @implementation NDOperationService
 
@@ -23,40 +23,125 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         set = [NSSet setWithArray:@[
-            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"setRecord",
+            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"prevRecord", @"previousRecord", @"setRecord",
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
-            @"importAMGData", @"importAMGRecord",
+            @"clearAppData", @"cleanApps", @"importAMGRecords",
+            @"importIGrimace", @"importAWZ", @"importAMGMedia",
+            @"exportAMGMedia", @"slimRecord", @"restoreHolo",
         ]];
     });
     return fun.length && [set containsObject:fun];
 }
 
-- (void)prepareTargets:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
+- (NSArray<NSString *> *)appsForSwitchTo:(NSString *)current previous:(NSString *)previous {
     [[NDConfig shared] reload];
-    NSArray *apps = [NDConfig shared].targetApps ?: @[];
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[NDConfig shared].targetApps ?: @[]];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [set addObject:b];
+    // Keep global targetApps in sync so「目标应用」页能看到导入的 App 环境
+    if (set.count && set.count != ([NDConfig shared].targetApps.count ?: 0)) {
+        [NDConfig shared].targetApps = set.array;
+        [[NDConfig shared] save];
+    }
+    return set.array;
+}
+
+- (void)prepareTargets:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
+    [self prepareTargetsForDestination:nil block:block];
+}
+
+- (void)prepareTargetsForDestination:(NSString *)destination
+                               block:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
     NSString *prev = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self appsForSwitchTo:prev previous:prev]];
+    // Include destination App env BEFORE kill/restore (imported Venmo etc.)
+    if (destination.length) {
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:destination]) [set addObject:b];
+    }
+    NSArray *apps = set.array;
     [[NDAppDataManager shared] terminateApps:apps];
     block(apps, prev);
 }
 
+- (BOOL)recordHasStagedApps:(NSString *)name {
+    if (!name.length || [name isEqualToString:@"原始机器"]) return NO;
+    NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+    NSArray *entries = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+    for (NSString *e in entries) {
+        if ([e hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:[appsRoot stringByAppendingPathComponent:e] isDirectory:&isDir] && isDir) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
     NDConfig *cfg = [NDConfig shared];
-    if (cfg.holographicBackup && apps.count) {
-        if (previous.length && ![previous isEqualToString:@"原始机器"]) {
-            [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+    @try {
+        // Destination record apps only — do NOT permanently union every historical import
+        // into global targetApps (that bloated lists and broke 一键新机 with huge backups).
+        NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
+        // Working set for this switch: configured targets + both records' apps
+        NSMutableOrderedSet *work = [NSMutableOrderedSet orderedSetWithArray:apps ?: @[]];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [work addObject:b];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [work addObject:b];
+        apps = work.array;
+        if (set.count) {
+            cfg.targetApps = set.array;
+            [cfg save];
         }
-        if ([current isEqualToString:@"原始机器"]) {
+
+        BOOL hasStaged = [self recordHasStagedApps:current];
+        if (cfg.holographicBackup && apps.count) {
+            BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
+            // Only snapshot outgoing record when it already has / will keep holographic data.
+            // Skip giant backup when leaving a record during 一键新机 if destination is a fresh empty record.
+            if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && hasStaged) {
+                [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+            } else if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && [self recordHasStagedApps:previous]) {
+                // Leaving an imported record for a new empty one — backup previous only
+                [[NDAppDataManager shared] backupApps:[[NDRecordStore shared] appBundleIdsForRecord:previous]
+                                            toRecord:previous
+                                               error:nil];
+            }
+
+            if ([current isEqualToString:@"原始机器"]) {
+                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            } else if (hasStaged) {
+                NSError *restoreErr = nil;
+                [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
+                [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
+                if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
+            } else {
+                // 一键新机 / empty record: wipe target apps for a clean slate (do not hang on restore)
+                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            }
+        } else if (apps.count) {
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
-        } else {
-            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
         }
-    } else if (apps.count) {
-        [[NDAppDataManager shared] clearDataForApps:apps error:nil];
-    }
-    if (cfg.smartAirplane) {
-        [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+
+        if (cfg.clearPasteboardOnSwitch) {
+            NDAppDataManager *adm = [NDAppDataManager shared];
+            if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+                [adm backupPasteboardToRecord:previous];
+            }
+            if ([current isEqualToString:@"原始机器"]) {
+                [adm clearGeneralPasteboard];
+            } else {
+                [adm restorePasteboardFromRecord:current];
+            }
+        }
+        if (cfg.smartAirplane) {
+            [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+        }
+    } @catch (NSException *ex) {
+        NSLog(@"[NewDevice] afterSwitch exception: %@", ex);
+        // Never leave result stuck at 2 — identity switch already happened
     }
 }
 
@@ -80,9 +165,10 @@
                     done(@"", 500);
                     return;
                 }
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                // Mark success BEFORE holographic work so UI never sticks if app wipe is slow/fails
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
             }];
             return;
         }
@@ -122,15 +208,73 @@
             return;
         }
 
-        if ([fun isEqualToString:@"setRecord"]) {
-            NSString *name = query[@"recordName"] ?: @"";
+        if ([fun isEqualToString:@"prevRecord"] || [fun isEqualToString:@"previousRecord"]) {
             [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
-                BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
-                if (success) [self afterSwitchFrom:previousRecord to:name apps:apps];
+                BOOL success = [[NDRecordStore shared] switchToPrevious:&err];
+                NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+                if (success) [self afterSwitchFrom:previousRecord to:cur apps:apps];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
-                done(name, success ? 200 : 500);
+                done(cur, success ? 200 : 500);
             }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"getRecordCount"]) {
+            NSUInteger count = [[NDRecordStore shared] allRecordNames].count;
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)count];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"setRecord"]) {
+            NSString *name = query[@"recordName"] ?: @"";
+            [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
+                if (success) {
+                    [[NDRecordStore shared] writeResultCode:1];
+                    [self afterSwitchFrom:previousRecord to:name apps:apps];
+                } else {
+                    [[NDRecordStore shared] writeResultCode:0];
+                }
+                NSString *report = [NDAppDataManager shared].lastRestoreReport ?: @"";
+                NSString *msg = success
+                    ? [NSString stringWithFormat:@"%@\n\n%@", name, report]
+                    : (err.localizedDescription ?: name);
+                done(msg, success ? 200 : 500);
+            }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"restoreHolo"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName] ?: @"";
+            if (!name.length || [name isEqualToString:@"原始机器"]) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"无当前记录", 500);
+                return;
+            }
+            NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
+            [[NDAppDataManager shared] terminateApps:bids];
+            // Explicit force path: try open apps once if container missing
+            NSMutableArray *lines = [NSMutableArray array];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+            for (NSString *bid in ([fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[])) {
+                if ([bid hasPrefix:@"."]) continue;
+                if (![[NDAppDataManager shared] containerPathForBundleId:bid]) {
+                    [[NDAppDataManager shared] tryLaunchAppToCreateContainer:bid];
+                    [lines addObject:[NSString stringWithFormat:@"launch-try %@", bid]];
+                }
+            }
+            NSError *err = nil;
+            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
+            [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
+            NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
+            if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(report, 200);
             return;
         }
 
@@ -214,13 +358,32 @@
             return;
         }
 
+        if ([fun isEqualToString:@"getAMGFaker"] || [fun isEqualToString:@"exportAMGFaker"]) {
+            NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+            NSString *dir = query[@"dir"] ?: query[@"saveFilePath"];
+            if (p && dir.length) {
+                [p writeAMGFakerToDirectory:dir error:&error];
+                NSString *ifaSrc = [NDPaths ifaddrsPathForRecord:p.name];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:ifaSrc]) {
+                    [[NSFileManager defaultManager] copyItemAtPath:ifaSrc toPath:[dir stringByAppendingPathComponent:@"ifaddrs.plist"] error:nil];
+                }
+                NSArray *apps = [NDConfig shared].targetApps ?: @[];
+                [apps writeToFile:[dir stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+            }
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toAMGFakerDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
+            [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
+            done(body ?: @"", p ? 200 : 500);
+            return;
+        }
+
         if ([fun isEqualToString:@"getRecordParam"]) {
             NSString *name = query[@"recordName"] ?: @"";
             NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) [p writeToPath:savePath error:&error];
+            body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
             [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
-            done(name, p ? 200 : 500);
+            done(body ?: @"", p ? 200 : 500);
             return;
         }
 
@@ -244,41 +407,106 @@
             return;
         }
 
-        if ([fun isEqualToString:@"importAMGData"]) {
-            NSString *path = query[@"path"] ?: query[@"filePath"] ?: @"/var/mobile/AMG_tar";
-            NSError *err = nil;
-            ok = [NDAMGImporter importFromAMGTarDirectory:path error:&err];
-            body = ok ? (err.localizedDescription.length ? err.localizedDescription : @"ok") : (err.localizedDescription ?: @"import failed");
-            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(body, ok ? 200 : 500);
+        // AMG-style: clear target apps without generating a new identity
+        if ([fun isEqualToString:@"clearAppData"] || [fun isEqualToString:@"cleanApps"]) {
+            [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                (void)previousRecord;
+                NSError *err = nil;
+                BOOL success = [[NDAppDataManager shared] clearDataForApps:apps error:&err];
+                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                done(success ? @"cleared" : @"", success ? 200 : 500);
+            }];
             return;
         }
 
-        if ([fun isEqualToString:@"importAMGRecord"]) {
-            NSString *path = query[@"path"] ?: query[@"filePath"] ?: @"";
-            NSString *recordName = query[@"recordName"] ?: @"";
-            if (!path.length && recordName.length) {
-                NSArray *candidates = @[
-                    [@"/var/mobile/AMG" stringByAppendingPathComponent:recordName],
-                    [@"/var/mobile/AMG_tar" stringByAppendingPathComponent:recordName],
-                ];
-                for (NSString *c in candidates) {
-                    if ([[NSFileManager defaultManager] fileExistsAtPath:c]) {
-                        path = c;
-                        break;
+        if ([fun isEqualToString:@"importAMGRecords"]) {
+            NSString *dir = query[@"dir"] ?: [NDRecordStore resolvedAMGImportPath];
+            NSError *err = nil;
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = 0;
+            @try {
+                n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
+            } @catch (NSException *ex) {
+                NSString *detail = [NSString stringWithFormat:@"导入异常：%@ — %@\n(详见 Media/AMG/import/nd-last-import.txt)",
+                                    ex.name ?: @"NSException", ex.reason ?: @"?"];
+                err = [NSError errorWithDomain:@"NDRecordStore" code:99
+                                     userInfo:@{NSLocalizedDescriptionKey: detail}];
+            }
+            NSString *names = [[[NDRecordStore shared] lastImportedRecordNames] componentsJoinedByString:@", "] ?: @"";
+            NSString *holo = [[NDRecordStore shared] lastImportHoloSummary] ?: @"";
+            NSString *applyMsg = @"";
+            if (n > 0) {
+                NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
+                if (applyName.length) {
+                    @try {
+                        // Set current + restore staged Venmo/etc. into live sandboxes
+                        [[NDRecordStore shared] setCurrentRecordName:applyName];
+                        NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:applyName];
+                        if (!bids.count) bids = @[@"net.kortina.labs.Venmo"];
+                        [[NDAppDataManager shared] terminateApps:bids];
+                        NSError *rErr = nil;
+                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:&rErr];
+                        [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
+                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
+                                    [NDAppDataManager shared].lastRestoreReport ?: (rErr.localizedDescription ?: @"")];
+                    } @catch (NSException *ex) {
+                        applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
                     }
                 }
+                body = [NSString stringWithFormat:@"%lu\n%@\nstaged:%@\n%@\n%@",
+                        (unsigned long)n, holo, names, applyMsg, err.localizedDescription ?: @""];
+            } else {
+                body = err.localizedDescription.length
+                    ? err.localizedDescription
+                    : [NSString stringWithFormat:@"0\n未导入。扫描目录：%@\n见 Media/AMG/import/nd-last-import.txt", dir];
             }
-            if (!path.length) {
+            [[NDRecordStore shared] writeResultCode:(n > 0) ? 1 : 0];
+            done(body, (n > 0) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"importIGrimace"] || [fun isEqualToString:@"importAWZ"] || [fun isEqualToString:@"importAMGMedia"]) {
+            NSString *kind = @"AMG";
+            NSString *fallback = [NDRecordStore resolvedAMGImportPath];
+            if ([fun isEqualToString:@"importIGrimace"]) {
+                kind = @"iGrimace";
+                fallback = [NDRecordStore iGrimaceImportPath];
+            } else if ([fun isEqualToString:@"importAWZ"]) {
+                kind = @"AWZ";
+                fallback = [NDRecordStore awzImportPath];
+            }
+            NSString *dir = query[@"dir"] ?: fallback;
+            NSError *err = nil;
+            BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
+            NSUInteger n = [[NDRecordStore shared] importForeignRecordsFromDirectory:dir kind:kind importKeychain:kc error:&err];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"exportAMGMedia"]) {
+            NSString *dir = query[@"dir"] ?: [NDRecordStore amgTarPath];
+            BOOL slim = query[@"slim"] ? [query[@"slim"] boolValue] : [NDConfig shared].slimExportStripMedia;
+            NSError *err = nil;
+            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];
+            body = [NSString stringWithFormat:@"%lu\n%@", (unsigned long)n, dir];
+            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
+            done(body, (n > 0 || !err) ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"slimRecord"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName];
+            if (!name.length || [name isEqualToString:@"原始机器"]) {
                 [[NDRecordStore shared] writeResultCode:0];
-                done(@"missing path or recordName", 500);
+                done(@"no record", 400);
                 return;
             }
-            NSError *err = nil;
-            ok = [NDAMGImporter importFromPath:path recordName:recordName.length ? recordName : nil error:&err];
-            body = ok ? (err.localizedDescription.length ? err.localizedDescription : (recordName.length ? recordName : path.lastPathComponent)) : (err.localizedDescription ?: @"import failed");
-            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(body, ok ? 200 : 500);
+            NSUInteger n = [[NDAppDataManager shared] slimMediaInRecord:name];
+            body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
             return;
         }
 

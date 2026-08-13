@@ -28,6 +28,10 @@
     self.jailbreakHideBasic = NO;
     self.jailbreakHideDeep = NO;
     self.holographicBackup = YES;
+    self.allowIPadSpoof = NO;
+    self.clearPasteboardOnSwitch = YES;
+    self.importKeychainWithData = YES;
+    self.slimExportStripMedia = NO;
     self.targetApps = @[];
     self.preferredModels = @[];
     self.preferredSystems = @[];
@@ -44,6 +48,10 @@
     self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : NO;
     self.jailbreakHideDeep = dict[@"jailbreakHideDeep"] ? [dict[@"jailbreakHideDeep"] boolValue] : NO;
     self.holographicBackup = dict[@"holographicBackup"] ? [dict[@"holographicBackup"] boolValue] : YES;
+    self.allowIPadSpoof = dict[@"allowIPadSpoof"] ? [dict[@"allowIPadSpoof"] boolValue] : NO;
+    self.clearPasteboardOnSwitch = dict[@"clearPasteboardOnSwitch"] ? [dict[@"clearPasteboardOnSwitch"] boolValue] : YES;
+    self.importKeychainWithData = dict[@"importKeychainWithData"] ? [dict[@"importKeychainWithData"] boolValue] : YES;
+    self.slimExportStripMedia = dict[@"slimExportStripMedia"] ? [dict[@"slimExportStripMedia"] boolValue] : NO;
     self.targetApps = dict[@"targetApps"] ?: @[];
     self.preferredModels = dict[@"preferredModels"] ?: @[];
     self.preferredSystems = dict[@"preferredSystems"] ?: @[];
@@ -56,11 +64,17 @@
     NSDictionary *runtime = [NDRuntimeState dictionary];
     if (runtime) {
         [self applyDictionary:runtime];
-        // preferred* may only live in full config plist
+        // preferred* + Tools toggles may only live in full config plist on older runtime.plist
         NSDictionary *full = [NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]];
         if ([full isKindOfClass:[NSDictionary class]]) {
             self.preferredModels = full[@"preferredModels"] ?: self.preferredModels;
             self.preferredSystems = full[@"preferredSystems"] ?: self.preferredSystems;
+            if (!runtime[@"importKeychainWithData"] && full[@"importKeychainWithData"]) {
+                self.importKeychainWithData = [full[@"importKeychainWithData"] boolValue];
+            }
+            if (!runtime[@"slimExportStripMedia"] && full[@"slimExportStripMedia"]) {
+                self.slimExportStripMedia = [full[@"slimExportStripMedia"] boolValue];
+            }
         }
         return;
     }
@@ -87,6 +101,10 @@
         @"jailbreakHideBasic": @(self.jailbreakHideBasic),
         @"jailbreakHideDeep": @(self.jailbreakHideDeep),
         @"holographicBackup": @(self.holographicBackup),
+        @"allowIPadSpoof": @(self.allowIPadSpoof),
+        @"clearPasteboardOnSwitch": @(self.clearPasteboardOnSwitch),
+        @"importKeychainWithData": @(self.importKeychainWithData),
+        @"slimExportStripMedia": @(self.slimExportStripMedia),
         @"targetApps": self.targetApps ?: @[],
         @"preferredModels": self.preferredModels ?: @[],
         @"preferredSystems": self.preferredSystems ?: @[],

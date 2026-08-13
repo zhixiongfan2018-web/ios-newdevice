@@ -30,10 +30,25 @@
     self.view.backgroundColor = [NDTheme canvas];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(save)];
-    [[NDConfig shared] reload];
-    self.selected = [NSMutableSet setWithArray:[NDConfig shared].targetApps ?: @[]];
+    [self reloadSelection];
     [self loadApps];
     [self updateTitleBadge];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // Import may have updated targetApps while this tab was off-screen
+    [self reloadSelection];
+    [self updateTitleBadge];
+    [self.tableView reloadData];
+}
+
+- (void)reloadSelection {
+    [[NDConfig shared] reload];
+    NSMutableSet *set = [NSMutableSet setWithArray:[NDConfig shared].targetApps ?: @[]];
+    NSString *cur = [[NDRecordStore shared] currentRecordName];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:cur]) [set addObject:b];
+    self.selected = set;
 }
 
 - (void)updateTitleBadge {

@@ -2,22 +2,28 @@
 
 本项目是 **越狱 iPhone 上的 deb**，不能在 Windows 上直接运行，也不需要你买一台 Mac。
 
-## Sileo 固定源（推荐）
+## Sileo 固定源（可直接添加，无 @）
 
 ```
-https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable
+https://zhixiongfan2018-web.github.io/ios-newdevice
 ```
 
-只用这一条（不要加 `@`）。添加后刷新 → 安装/升级 NewDevice → Respring。
+只用这一条。添加后刷新 → 安装/升级 NewDevice → Respring。
 
-## 云端打包
+### 关于 zhixiongfan.top
 
-仓库工作流 [`.github/workflows/build-deb.yml`](../../.github/workflows/build-deb.yml) 在 GitHub **macos-14** 上 Theos 打包。推送后会：
+`https://zhixiongfan.top/stable` **当前不能当 Sileo 源**：服务器会把请求 302 到 Dial 页面，Sileo 会超时、无法添加。
 
-1. 生成 `.deb`
-2. 更新 `stable/` 源索引
-3. 打 GitHub Release，让上述 jsDelivr 链接（无 `@`）指向最新包
+要启用域名源，先在服务器加入 `deploy/nginx-zhixiongfan.top-stable.conf`，再执行 `nginx -t && systemctl reload nginx`，并用下面命令确认返回的是 Packages 而不是 HTML：
 
-## 你仍需要的东西
+```bash
+curl -sSI https://zhixiongfan.top/stable/Packages
+curl -sS https://zhixiongfan.top/stable/Packages | head
+```
 
-- 一台 **已越狱** 的 iPhone（Dopamine / rootless，含 iOS 18）
+## AMG 数据格式
+
+导入/导出使用 **`.tar`**：
+
+- 导入：`/var/mobile/Media/NewDevice/import/` 或 `Media/AMG/import/`
+- 导出：`Media/NewDevice/export/`
