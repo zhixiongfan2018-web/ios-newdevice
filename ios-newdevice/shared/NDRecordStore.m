@@ -594,6 +594,11 @@
             if (!hasHolo) continue;
             NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
             fresh.enabled = YES;
+            // Ciphertext faker: do NOT spoof random IDFA/UDID — that breaks Venmo session
+            // even when akc Keychain restore succeeds. Passthrough real device identity.
+            if (fakerEncrypted) {
+                fresh.spoofDeviceIdentity = NO;
+            }
             // Best-effort: seed Wi‑Fi MAC from ifaddrs.plist when faker is ciphertext
             NSDictionary *ifa = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"ifaddrs.plist"]];
             NSDictionary *en0 = [ifa[@"en0"] isKindOfClass:[NSDictionary class]] ? ifa[@"en0"] : nil;
@@ -604,7 +609,7 @@
             if ([self saveProfile:fresh error:nil]) {
                 saved = fresh;
                 NSString *note = fakerEncrypted
-                    ? @"faker.plist here is AMG at-rest ciphertext. Holographic app data was still imported; identity was randomized. For login-state restore use AMG_tar plaintext faker export."
+                    ? @"faker.plist is AMG at-rest ciphertext. App data + akc imported; device spoof DISABLED (passthrough). For full AMG-like identity use AMG_tar plaintext faker export."
                     : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
                 [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                       atomically:YES encoding:NSUTF8StringEncoding error:nil];

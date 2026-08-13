@@ -199,6 +199,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     NDDeviceProfile *p = [NDDeviceProfile new];
     p.name = @"原始机器";
     p.enabled = YES;
+    p.spoofDeviceIdentity = NO;
     p.createdAt = [NSDate date];
     p.IDFA = @"";
     p.IDFV = @"";
@@ -244,6 +245,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     NDDeviceProfile *p = [NDDeviceProfile new];
     p.name = name;
     p.enabled = YES;
+    p.spoofDeviceIdentity = YES;
     p.createdAt = [NSDate date];
 
     NSDictionary *dev = nil;
@@ -545,6 +547,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     NDDeviceProfile *p = [NDDeviceProfile new];
     p.name = dict[@"name"] ?: @"unnamed";
     p.enabled = dict[@"enabled"] ? [dict[@"enabled"] boolValue] : YES;
+    p.spoofDeviceIdentity = dict[@"spoofDeviceIdentity"] ? [dict[@"spoofDeviceIdentity"] boolValue] : YES;
     id created = dict[@"createdAt"];
     if ([created isKindOfClass:[NSDate class]]) {
         p.createdAt = created;
@@ -637,6 +640,7 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     return @{
         @"name": self.name ?: @"",
         @"enabled": @(self.enabled),
+        @"spoofDeviceIdentity": @(self.spoofDeviceIdentity),
         @"createdAt": [f stringFromDate:self.createdAt ?: [NSDate date]],
         @"IDFA": self.IDFA ?: @"",
         @"IDFV": self.IDFV ?: @"",

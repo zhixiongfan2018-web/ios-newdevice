@@ -47,16 +47,19 @@
         || [self.bundleId isEqualToString:@"com.apple.CommCenter"];
     self.identityHost = isCommCenter;
     BOOL profileOK = !isOriginal && self.profile.enabled && self.profile != nil;
-    self.active = targeted && profileOK;
+    // spoofDeviceIdentity defaults YES for old profiles (nil/missing key → YES via load)
+    BOOL allowSpoof = self.profile.spoofDeviceIdentity;
+    self.active = targeted && profileOK && allowSpoof;
 }
 
 - (BOOL)shouldSpoof {
-    return self.active && self.profile != nil;
+    return self.active && self.profile != nil && self.profile.spoofDeviceIdentity;
 }
 
 - (BOOL)shouldSpoofIdentity {
     // Target apps + telephony daemons (baseband-adjacent IMEI / equipment info)
-    return self.profile != nil && (self.active || self.identityHost);
+    if (!self.profile || !self.profile.spoofDeviceIdentity) return NO;
+    return self.active || self.identityHost;
 }
 
 @end

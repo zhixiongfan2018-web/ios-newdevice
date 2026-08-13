@@ -618,6 +618,16 @@ extern char **environ;
     if ([[NSFileManager defaultManager] fileExistsAtPath:importNote]) {
         NSString *note = [NSString stringWithContentsOfFile:importNote encoding:NSUTF8StringEncoding error:nil] ?: @"";
         [lines addObject:[NSString stringWithFormat:@"WARN identity: %@", note.length ? note : @"faker ciphertext → randomized identity"]];
+        // Existing imports created with random spoof: turn spoof off so Venmo session can stick
+        if ([note.lowercaseString containsString:@"ciphertext"] || [note.lowercaseString containsString:@"randomized"]) {
+            NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:recordName];
+            if (p && p.spoofDeviceIdentity) {
+                p.spoofDeviceIdentity = NO;
+                [[NDRecordStore shared] saveProfile:p error:nil];
+                [lines addObject:@"identity: spoofDeviceIdentity=NO (passthrough real device; faker ciphertext)"];
+                notify_post([NDNotifyReload UTF8String]);
+            }
+        }
     }
     [lines addObject:[NSString stringWithFormat:@"done ok=%lu missing=%lu", (unsigned long)ok, (unsigned long)missing.count]];
     [self writeRestoreReport:[lines componentsJoinedByString:@"\n"]];
