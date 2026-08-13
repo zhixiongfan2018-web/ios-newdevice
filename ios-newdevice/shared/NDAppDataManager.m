@@ -1,11 +1,14 @@
 #import "NDAppDataManager.h"
 #import "NDPaths.h"
 #import "NDConfig.h"
+#import "NDRecordStore.h"
+#import "NDDeviceProfile.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <spawn.h>
 #import <sys/wait.h>
+#import <notify.h>
 
 extern char **environ;
 
