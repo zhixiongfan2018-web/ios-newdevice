@@ -54,7 +54,18 @@ def main() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="nd-sim-"))
     try:
         with tarfile.open(args.archive, "r:*") as tf:
-            tf.extractall(tmp)
+            # AMG tars often use absolute members like //var/mobile/AMG/...
+            for m in tf.getmembers():
+                name = m.name.lstrip("/")
+                if not name or name.endswith("/"):
+                    continue
+                dest = tmp / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                src = tf.extractfile(m)
+                if src is None:
+                    continue
+                dest.write_bytes(src.read())
+                m = m  # keep linter quiet
         root = find_record_root(tmp)
         venmo_src = root / "net.kortina.labs.Venmo"
         stage = tmp / "Records" / "sim"
