@@ -239,67 +239,81 @@ extern char **environ;
     [self alert:@"国行联网提示" message:@"1. 设置 → 蜂窝网络 → 打开 Sileo/NewDevice 的无线局域网与蜂窝数据\n2. 若仍失败：设置 → 通用 → 传输或还原 iPhone → 还原 → 还原网络设置\n3. 本环境为 Dopamine，无需 Cydia 专项补丁"];
 }
 
+- (void)NDFinishPullWait:(UIAlertController *)wait title:(NSString *)title message:(NSString *)msg {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [wait dismissViewControllerAnimated:YES completion:^{
+            [self alert:title message:msg];
+        }];
+    });
+}
+
+- (void)NDRunPullAMGPlaintextNamed:(NSString *)name wait:(UIAlertController *)wait {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *dir = [NDRecordStore resolvedAMGImportPath];
+        NSString *amgRoot = @"/var/mobile/AMG";
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *targetDir = dir;
+        if (name.length && [fm fileExistsAtPath:amgRoot]) {
+            NSString *direct = [amgRoot stringByAppendingPathComponent:name];
+            if ([fm fileExistsAtPath:direct]) {
+                targetDir = direct;
+            } else {
+                for (NSString *e in [fm contentsOfDirectoryAtPath:amgRoot error:nil] ?: @[]) {
+                    if ([e isEqualToString:name] || [e containsString:name] || [name containsString:e]) {
+                        targetDir = [amgRoot stringByAppendingPathComponent:e];
+                        break;
+                    }
+                }
+            }
+        }
+        [fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *note = nil;
+        NSDictionary *plain = [NDAMGParamClient resolvePlaintextParamForAMGRecordDir:targetDir
+                                                                        recordTitle:name
+                                                                         sourceNote:&note];
+        NSString *outPath = [targetDir stringByAppendingPathComponent:@"faker_plaintext.plist"];
+        if (plain.count) {
+            [plain writeToFile:outPath atomically:YES];
+            NDDeviceProfile *p = [NDDeviceProfile profileFromDictionary:plain];
+            if (p) {
+                NSString *cur = [[NDRecordStore shared] currentRecordName];
+                if (cur.length && ![cur isEqualToString:@"原始机器"]) p.name = cur;
+                else if (name.length) p.name = name;
+                p.spoofDeviceIdentity = YES;
+                p.enabled = YES;
+                [[NDRecordStore shared] saveProfile:p error:nil];
+            }
+            NSString *msg = [NSString stringWithFormat:@"已写入明文：\n%@\n来源：%@\n键数：%lu\n\n请再执行「导入 AMG 数据」。",
+                             outPath, note ?: @"-", (unsigned long)plain.count];
+            [self NDFinishPullWait:wait title:@"拉取完成" message:msg];
+        } else {
+            NSString *msg = [NSString stringWithFormat:@"未拿到明文。\n%@\n\n做法：AMG 前台选中该记录，用 Get_Param/getRecordParam 写出 plist，保存为该记录目录下 faker_plaintext.plist 后再导入。",
+                             note ?: @"-"];
+            [self NDFinishPullWait:wait title:@"拉取失败" message:msg];
+        }
+    });
+}
+
 - (void)pullAMGPlaintextParam {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"拉取 AMG 明文参数"
-                                                               message:@"调用本机 8080 getRecordParam（需 AMG 前台提供解密；若 8080 已被 NewDevice 占用，请先用脚本/AMG 写出明文）。\n记录名与 AMG 一致，可含 + 与空格。"
+                                                               message:@"调用本机 8080 getRecordParam。需 AMG 前台解密；若 8080 已被 NewDevice 占用，请先写出 faker_plaintext.plist。记录名与 AMG 一致，可含 + 与空格。"
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"recordName，如 +1916… 2026-08-05-…";
+        tf.placeholder = @"recordName";
         NSString *cur = [[NDRecordStore shared] currentRecordName];
         if (cur.length && ![cur isEqualToString:@"原始机器"]) tf.text = cur;
     }];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
     [a addAction:[UIAlertAction actionWithTitle:@"拉取" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action;
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
         NSString *name = a.textFields.firstObject.text ?: @"";
         name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在拉取" message:@"getRecordParam…" preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在拉取" message:@"getRecordParam" preferredStyle:UIAlertControllerStyleAlert];
         [self presentViewController:wait animated:YES completion:^{
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                NSString *dir = [NDRecordStore resolvedAMGImportPath];
-                // Prefer matching AMG runtime folder under /var/mobile/AMG
-                NSString *amgRoot = @"/var/mobile/AMG";
-                NSFileManager *fm = [NSFileManager defaultManager];
-                NSString *targetDir = dir;
-                if (name.length && [fm fileExistsAtPath:amgRoot]) {
-                    for (NSString *e in [fm contentsOfDirectoryAtPath:amgRoot error:nil] ?: @[]) {
-                        if ([e isEqualToString:name] || [e containsString:name] || [name containsString:e]) {
-                            targetDir = [amgRoot stringByAppendingPathComponent:e];
-                            break;
-                        }
-                    }
-                    NSString *direct = [amgRoot stringByAppendingPathComponent:name];
-                    if ([fm fileExistsAtPath:direct]) targetDir = direct;
-                }
-                [fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:nil];
-                NSString *note = nil;
-                NSDictionary *plain = [NDAMGParamClient resolvePlaintextParamForAMGRecordDir:targetDir
-                                                                                recordTitle:name
-                                                                                 sourceNote:&note];
-                NSString *outPath = [targetDir stringByAppendingPathComponent:@"faker_plaintext.plist"];
-                NSString *msg = nil;
-                    if (plain.count) {
-                    [plain writeToFile:outPath atomically:YES];
-                    NDDeviceProfile *p = [NDDeviceProfile profileFromDictionary:plain];
-                    if (p) {
-                        NSString *cur = [[NDRecordStore shared] currentRecordName];
-                        if (cur.length && ![cur isEqualToString:@"原始机器"]) p.name = cur;
-                        else if (name.length) p.name = name;
-                        p.spoofDeviceIdentity = YES;
-                        p.enabled = YES;
-                        [[NDRecordStore shared] saveProfile:p error:nil];
-                    }
-                    msg = [NSString stringWithFormat:@"已写入明文：\n%@\n来源：%@\n键数：%lu\n\n请再执行「导入 AMG 数据」。",
-                           outPath, note ?: @"-", (unsigned long)plain.count];
-                } else {
-                    msg = [NSString stringWithFormat:@"未拿到明文。\n%@\n\n做法：AMG 前台选中该记录 → 脚本 Get_Param / getRecordParam 写出 plist → 重命名为该记录目录下 faker_plaintext.plist → 再导入。",
-                           note ?: @"-"];
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [wait dismissViewControllerAnimated:YES completion:^{
-                        [self alert:plain.count ? @"拉取完成" : @"拉取失败" message:msg];
-                    }];
-                }];
-            });
+            [self NDRunPullAMGPlaintextNamed:name wait:wait];
         }];
     }]];
     [self presentViewController:a animated:YES completion:nil];
