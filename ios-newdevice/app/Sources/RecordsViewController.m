@@ -2,6 +2,7 @@
 #import "NDRecordStore.h"
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
+#import "NDAMGImporter.h"
 #import "NDTheme.h"
 #import "ProfileDetailViewController.h"
 
@@ -21,9 +22,38 @@
     self.title = @"记录";
     self.view.backgroundColor = [NDTheme canvas];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"导入AMG" style:UIBarButtonItemStylePlain target:self action:@selector(importAMG)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 72;
+}
+
+- (void)importAMG {
+    UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"导入 AMG"
+                                                                   message:@"正在扫描 /var/mobile/AMG_tar 与 /var/mobile/AMG …\n大包可能需几分钟"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:busy animated:YES completion:nil];
+    // In-process: avoids HTTP async 120s poll timeout on large holographic trees.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *err = nil;
+        BOOL ok = [NDAMGImporter importFromAMGTarDirectory:@"/var/mobile/AMG_tar" error:&err];
+        NSString *detail = err.localizedDescription ?: @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [busy dismissViewControllerAnimated:YES completion:^{
+                [self reload];
+                NSString *msg = ok
+                    ? (detail.length
+                           ? detail
+                           : @"已写入记录列表（未自动切换）。密文 faker 请在记录目录旁放 faker_plaintext.plist。")
+                    : (detail.length ? detail : @"导入失败，请确认 /var/mobile/AMG_tar 或 /var/mobile/AMG 有备份");
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"导入完成" : @"导入失败"
+                                                                           message:msg
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:a animated:YES completion:nil];
+            }];
+        });
+    });
 }
 
 - (void)viewWillAppear:(BOOL)animated {

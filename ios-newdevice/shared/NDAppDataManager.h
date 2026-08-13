@@ -15,14 +15,18 @@ NS_ASSUME_NONNULL_BEGIN
 /// Backup app sandboxes into record folder.
 - (BOOL)backupApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
-/// Restore app sandboxes from record folder.
+/// Restore app sandboxes from record folder (Documents/Library/tmp + AppGroup + akc Keychain).
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
+
+/// AMG-style Documents/akc.plist → SecItem restore (per-app Keychain snapshot).
+- (NSInteger)restoreAKCPlistAtPath:(NSString *)path;
 
 /// Best-effort Keychain export/import for given access groups (plist under backup).
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName;
 - (BOOL)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName;
 
 - (nullable NSString *)containerPathForBundleId:(NSString *)bundleId;
+- (nullable NSString *)sharedContainerPathForGroupId:(NSString *)groupId;
 
 @end
 

@@ -34,35 +34,9 @@ static NSString *NDRandomSerial(void) {
 }
 
 static NSString *NDRandomBuild(NSString *systemVer) {
-    // Prefer known public builds for modern iOS (esp. 18.x)
-    static NSDictionary<NSString *, NSString *> *known;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        known = @{
-            @"16.6.1": @"20G81",
-            @"16.7.2": @"20H115",
-            @"17.0": @"21A329",
-            @"17.1.1": @"21B91",
-            @"17.4.1": @"21E236",
-            @"17.5.1": @"21F90",
-            @"17.6.1": @"21G93",
-            @"18.0": @"22A3354",
-            @"18.1": @"22B83",
-            @"18.2.1": @"22C161",
-            @"18.3.1": @"22D72",
-            @"18.4": @"22E240",
-            @"18.5": @"22F76",
-        };
-    });
-    NSString *hit = known[systemVer ?: @""];
-    if (hit.length) return hit;
-
     NSArray *parts = [systemVer componentsSeparatedByString:@"."];
-    NSInteger major = parts.count ? [parts[0] integerValue] : 18;
-    // iOS N → (N+4)Axxx  (15→19A, 16→20A, 17→21A, 18→22A)
-    NSInteger train = major + 4;
-    if (train < 19) train = 19;
-    return [NSString stringWithFormat:@"%ldA%u", (long)train, 100u + arc4random_uniform(800)];
+    NSInteger major = parts.count ? [parts[0] integerValue] : 16;
+    return [NSString stringWithFormat:@"%ldA%d", (long)(major + 100), arc4random_uniform(900) + 100];
 }
 
 @implementation NDDeviceProfile
@@ -150,7 +124,8 @@ static NSString *NDRandomBuild(NSString *systemVer) {
 + (instancetype)profileFromDictionary:(NSDictionary *)dict {
     if (![dict isKindOfClass:[NSDictionary class]]) return nil;
     NDDeviceProfile *p = [NDDeviceProfile new];
-    p.name = dict[@"name"] ?: dict[@"Name"] ?: @"unnamed";
+    // Prefer NewDevice "name"; do not use AMG "Name" (device display name).
+    p.name = dict[@"name"] ?: @"unnamed";
     p.enabled = dict[@"enabled"] ? [dict[@"enabled"] boolValue] : YES;
     id created = dict[@"createdAt"];
     if ([created isKindOfClass:[NSDate class]]) {
@@ -166,25 +141,28 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     p.IDFA = dict[@"IDFA"] ?: @"";
     p.IDFV = dict[@"IDFV"] ?: @"";
     p.UUID = dict[@"UUID"] ?: @"";
-    p.Serial = dict[@"Serial"] ?: @"";
+    p.Serial = dict[@"Serial"] ?: dict[@"SerialNumber"] ?: @"";
     p.UDID = dict[@"UDID"] ?: @"";
-    p.WiFiMAC = dict[@"WiFiMAC"] ?: @"";
-    p.BTMAC = dict[@"BTMAC"] ?: @"";
+    p.WiFiMAC = dict[@"WiFiMAC"] ?: dict[@"WifiAddress"] ?: @"";
+    p.BTMAC = dict[@"BTMAC"] ?: dict[@"BlueAddress"] ?: @"";
     p.DeviceToken = dict[@"DeviceToken"] ?: @"";
 
     p.Model = dict[@"Model"] ?: @"";
     p.ProductType = dict[@"ProductType"] ?: @"";
     p.HardwareMachine = dict[@"HardwareMachine"] ?: @"";
     p.SystemVer = dict[@"SystemVer"] ?: @"";
-    p.Build = dict[@"Build"] ?: @"";
+    p.Build = dict[@"Build"] ?: dict[@"BuildVersion"] ?: @"";
 
     p.Carrier = dict[@"Carrier"] ?: @"";
     p.MCC = dict[@"MCC"] ?: @"";
     p.MNC = dict[@"MNC"] ?: @"";
     p.RadioAccess = dict[@"RadioAccess"] ?: @"";
 
-    p.Latitude = [dict[@"Latitude"] doubleValue];
-    p.Longitude = [dict[@"Longitude"] doubleValue];
+    // AMG often stores lat/lon as strings
+    id lat = dict[@"Latitude"];
+    id lon = dict[@"Longitude"];
+    p.Latitude = [lat respondsToSelector:@selector(doubleValue)] ? [lat doubleValue] : 0;
+    p.Longitude = [lon respondsToSelector:@selector(doubleValue)] ? [lon doubleValue] : 0;
     p.Altitude = dict[@"Altitude"] ? [dict[@"Altitude"] doubleValue] : 10;
     return p;
 }

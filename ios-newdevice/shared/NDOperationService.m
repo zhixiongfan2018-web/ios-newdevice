@@ -5,6 +5,7 @@
 #import "NDAirplane.h"
 #import "NDPaths.h"
 #import "NDDeviceProfile.h"
+#import "NDAMGImporter.h"
 
 @implementation NDOperationService
 
@@ -26,6 +27,7 @@
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
+            @"importAMGData", @"importAMGRecord",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -239,6 +241,44 @@
             }
             [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
             done(@"", ok ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"importAMGData"]) {
+            NSString *path = query[@"path"] ?: query[@"filePath"] ?: @"/var/mobile/AMG_tar";
+            NSError *err = nil;
+            ok = [NDAMGImporter importFromAMGTarDirectory:path error:&err];
+            body = ok ? (err.localizedDescription.length ? err.localizedDescription : @"ok") : (err.localizedDescription ?: @"import failed");
+            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
+            done(body, ok ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"importAMGRecord"]) {
+            NSString *path = query[@"path"] ?: query[@"filePath"] ?: @"";
+            NSString *recordName = query[@"recordName"] ?: @"";
+            if (!path.length && recordName.length) {
+                NSArray *candidates = @[
+                    [@"/var/mobile/AMG" stringByAppendingPathComponent:recordName],
+                    [@"/var/mobile/AMG_tar" stringByAppendingPathComponent:recordName],
+                ];
+                for (NSString *c in candidates) {
+                    if ([[NSFileManager defaultManager] fileExistsAtPath:c]) {
+                        path = c;
+                        break;
+                    }
+                }
+            }
+            if (!path.length) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"missing path or recordName", 500);
+                return;
+            }
+            NSError *err = nil;
+            ok = [NDAMGImporter importFromPath:path recordName:recordName.length ? recordName : nil error:&err];
+            body = ok ? (err.localizedDescription.length ? err.localizedDescription : (recordName.length ? recordName : path.lastPathComponent)) : (err.localizedDescription ?: @"import failed");
+            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
+            done(body, ok ? 200 : 500);
             return;
         }
 
