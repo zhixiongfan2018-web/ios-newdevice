@@ -159,8 +159,9 @@ NewDevice → **工具**：
 
 1. 在 AMG 里点 **导出 AMG 数据**，包会出现在 `/var/mobile/AMG_tar`（不要只拷 `/var/mobile/AMG`）。  
 2. NewDevice → **工具** → **导入 AMG 数据**（自动解 `.tar.gz`，并兼容 `Media/AMG/import`）。  
-3. 明文 `faker.plist` → 映射身份；若仍是运行时密文 → 随机身份 + 仍导入全息，写 `amg-import-note.txt`。  
-4. 需要明文参数也可用 AMG 脚本 `Get_Param`（运行时解密后写出），再导入该 plist。
+3. 明文 `faker.plist` → 映射身份。  
+4. 若是运行时密文：自动尝试 sidecar（`faker_plaintext.plist`）或本机 `getRecordParam` / `getCurrentRecordParam`（AMG 官方明文导出接口，不硬解 AES）；失败则禁用改机伪装并仍导入全息，写 `amg-import-note.txt`。  
+5. 工具页提供「拉取 AMG 明文参数」。注意：若 8080 已被 NewDevice 占用，需先用 AMG/Get_Param 写出 `faker_plaintext.plist` 再导入。
 
 脚本：`fun=importAMGMedia`（默认 `AMG_tar`）；`fun=exportAMGMedia`；`fun=slimRecord`。
 

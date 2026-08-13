@@ -3,6 +3,8 @@
 #import "NDConfig.h"
 #import "NDRuntimeState.h"
 #import "NDAppDataManager.h"
+#import "NDAMGParamClient.h"
+#import "NDDeviceProfile.h"
 #import <notify.h>
 
 @interface NDRecordStore ()
@@ -555,6 +557,11 @@
         recordName = [self sanitizeRecordName:recordName];
 
         NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+        // Prefer official plaintext sidecars (getRecordParam / Get_Param output)
+        for (NSString *side in [NDAMGParamClient sidecarPlaintextFileNames]) {
+            NSString *p = [full stringByAppendingPathComponent:side];
+            if ([fm fileExistsAtPath:p]) [candidates addObject:p];
+        }
         NSString *faker = [full stringByAppendingPathComponent:@"faker.plist"];
         if ([fm fileExistsAtPath:faker]) [candidates addObject:faker];
         NSString *profile = [full stringByAppendingPathComponent:@"profile.plist"];
@@ -564,6 +571,7 @@
             if (![[f pathExtension].lowercaseString isEqualToString:@"plist"]) continue;
             if ([metaPlists containsObject:f.lowercaseString]) continue;
             if ([f.lowercaseString isEqualToString:@"faker.plist"] || [f.lowercaseString isEqualToString:@"profile.plist"]) continue;
+            if ([[NDAMGParamClient sidecarPlaintextFileNames] containsObject:f]) continue;
             NSString *p = [full stringByAppendingPathComponent:f];
             if (![candidates containsObject:p]) [candidates addObject:p];
         }
@@ -578,14 +586,48 @@
 
         NDDeviceProfile *saved = nil;
         BOOL fakerEncrypted = NO;
+        NSString *fakerPathProbe = [full stringByAppendingPathComponent:@"faker.plist"];
+        if ([fm fileExistsAtPath:fakerPathProbe]) {
+            NSDictionary *fakerRawProbe = [NSDictionary dictionaryWithContentsOfFile:fakerPathProbe];
+            fakerEncrypted = [NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:fakerRawProbe];
+        }
+
+        // Runtime ciphertext: resolve plaintext via sidecar or AMG getRecordParam API (no AES RE)
+        NSString *paramSourceNote = nil;
+        BOOL resolvedPlaintext = NO;
+        if (fakerEncrypted) {
+            NSString *amgTitle = nil;
+            if ([desc[@"title"] isKindOfClass:[NSString class]]) amgTitle = desc[@"title"];
+            if (!amgTitle.length) amgTitle = entry;
+            NSDictionary *plain = [NDAMGParamClient resolvePlaintextParamForAMGRecordDir:full
+                                                                            recordTitle:amgTitle
+                                                                             sourceNote:&paramSourceNote];
+            if (plain) {
+                NSString *plainPath = [full stringByAppendingPathComponent:@"faker_plaintext.plist"];
+                [plain writeToFile:plainPath atomically:YES];
+                [candidates insertObject:plainPath atIndex:0];
+                resolvedPlaintext = YES;
+                fakerEncrypted = NO;
+            }
+        }
+
         for (NSString *plistPath in candidates) {
             NSDictionary *raw = [NSDictionary dictionaryWithContentsOfFile:plistPath];
             if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:raw]) {
-                fakerEncrypted = YES;
+                if (!resolvedPlaintext) fakerEncrypted = YES;
                 continue;
             }
             saved = [self importProfileAtPath:plistPath preferredName:recordName error:nil];
-            if (saved) break;
+            if (saved) {
+                saved.spoofDeviceIdentity = YES;
+                [self saveProfile:saved error:nil];
+                if (paramSourceNote.length) {
+                    NSString *note = [NSString stringWithFormat:@"Identity from %@ (AMG plaintext API/sidecar).", paramSourceNote];
+                    [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
+                          atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                }
+                break;
+            }
         }
 
         // Do NOT invent a record for empty container folders (this created bogus "import"/"export").
@@ -609,7 +651,7 @@
             if ([self saveProfile:fresh error:nil]) {
                 saved = fresh;
                 NSString *note = fakerEncrypted
-                    ? @"faker.plist is AMG at-rest ciphertext. App data + akc imported; device spoof DISABLED (passthrough). For full AMG-like identity use AMG_tar plaintext faker export."
+                    ? [NSString stringWithFormat:@"faker.plist is AMG at-rest ciphertext; no plaintext from getRecordParam/sidecar (%@). App data + akc imported; device spoof DISABLED. Put Get_Param output as faker_plaintext.plist and re-import.", paramSourceNote ?: @"-"]
                     : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
                 [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                       atomically:YES encoding:NSUTF8StringEncoding error:nil];

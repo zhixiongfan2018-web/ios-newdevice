@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-128
+Version: 1.0.0-130
 Architecture: iphoneos-arm64
-Description: Disable random spoof when AMG faker is ciphertext.
+Description: Import AMG plaintext via getRecordParam / faker_plaintext sidecar.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

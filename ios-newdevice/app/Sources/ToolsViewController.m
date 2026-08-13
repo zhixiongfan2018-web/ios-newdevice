@@ -5,6 +5,8 @@
 #import "NDRecordStore+ImportExport.h"
 #import "NDAppDataManager.h"
 #import "NDOperationService.h"
+#import "NDAMGParamClient.h"
+#import "NDDeviceProfile.h"
 #import "NDPaths.h"
 #import "ProbeViewController.h"
 #import <spawn.h>
@@ -51,7 +53,7 @@ extern char **environ;
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 3;
     if (section == 1) return 3;
-    if (section == 2) return 2;
+    if (section == 2) return 3;
     return 4;
 }
 
@@ -110,6 +112,10 @@ extern char **environ;
             cell.textLabel.text = @"导入 AMG 数据";
             cell.detailTextLabel.text = @"Media/AMG/import 或 AMG_tar 的 .tar";
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"拉取 AMG 明文参数";
+            cell.detailTextLabel.text = @"getRecordParam → faker_plaintext.plist（密文 faker 用）";
+            cell.imageView.image = [UIImage systemImageNamed:@"key.horizontal"];
         } else {
             cell.textLabel.text = @"瘦身（清除图片、视频）";
             cell.detailTextLabel.text = c.slimExportStripMedia
@@ -148,7 +154,7 @@ extern char **environ;
     if (gr.state != UIGestureRecognizerStateBegan) return;
     CGPoint p = [gr locationInView:self.tableView];
     NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:p];
-    if (!ip || ip.section != 2 || ip.row != 1) return;
+    if (!ip || ip.section != 2 || ip.row != 2) return;
     NDConfig *c = [NDConfig shared];
     c.slimExportStripMedia = !c.slimExportStripMedia;
     [c save];
@@ -233,6 +239,72 @@ extern char **environ;
     [self alert:@"国行联网提示" message:@"1. 设置 → 蜂窝网络 → 打开 Sileo/NewDevice 的无线局域网与蜂窝数据\n2. 若仍失败：设置 → 通用 → 传输或还原 iPhone → 还原 → 还原网络设置\n3. 本环境为 Dopamine，无需 Cydia 专项补丁"];
 }
 
+- (void)pullAMGPlaintextParam {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"拉取 AMG 明文参数"
+                                                               message:@"调用本机 8080 getRecordParam（需 AMG 前台提供解密；若 8080 已被 NewDevice 占用，请先用脚本/AMG 写出明文）。\n记录名与 AMG 一致，可含 + 与空格。"
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"recordName，如 +1916… 2026-08-05-…";
+        NSString *cur = [[NDRecordStore shared] currentRecordName];
+        if (cur.length && ![cur isEqualToString:@"原始机器"]) tf.text = cur;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"拉取" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *name = a.textFields.firstObject.text ?: @"";
+        name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在拉取" message:@"getRecordParam…" preferredStyle:UIAlertControllerStyleAlert];
+        [self presentViewController:wait animated:YES completion:^{
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *dir = [NDRecordStore resolvedAMGImportPath];
+                // Prefer matching AMG runtime folder under /var/mobile/AMG
+                NSString *amgRoot = @"/var/mobile/AMG";
+                NSFileManager *fm = [NSFileManager defaultManager];
+                NSString *targetDir = dir;
+                if (name.length && [fm fileExistsAtPath:amgRoot]) {
+                    for (NSString *e in [fm contentsOfDirectoryAtPath:amgRoot error:nil] ?: @[]) {
+                        if ([e isEqualToString:name] || [e containsString:name] || [name containsString:e]) {
+                            targetDir = [amgRoot stringByAppendingPathComponent:e];
+                            break;
+                        }
+                    }
+                    NSString *direct = [amgRoot stringByAppendingPathComponent:name];
+                    if ([fm fileExistsAtPath:direct]) targetDir = direct;
+                }
+                [fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *note = nil;
+                NSDictionary *plain = [NDAMGParamClient resolvePlaintextParamForAMGRecordDir:targetDir
+                                                                                recordTitle:name
+                                                                                 sourceNote:&note];
+                NSString *outPath = [targetDir stringByAppendingPathComponent:@"faker_plaintext.plist"];
+                NSString *msg = nil;
+                    if (plain.count) {
+                    [plain writeToFile:outPath atomically:YES];
+                    NDDeviceProfile *p = [NDDeviceProfile profileFromDictionary:plain];
+                    if (p) {
+                        NSString *cur = [[NDRecordStore shared] currentRecordName];
+                        if (cur.length && ![cur isEqualToString:@"原始机器"]) p.name = cur;
+                        else if (name.length) p.name = name;
+                        p.spoofDeviceIdentity = YES;
+                        p.enabled = YES;
+                        [[NDRecordStore shared] saveProfile:p error:nil];
+                    }
+                    msg = [NSString stringWithFormat:@"已写入明文：\n%@\n来源：%@\n键数：%lu\n\n请再执行「导入 AMG 数据」。",
+                           outPath, note ?: @"-", (unsigned long)plain.count];
+                } else {
+                    msg = [NSString stringWithFormat:@"未拿到明文。\n%@\n\n做法：AMG 前台选中该记录 → 脚本 Get_Param / getRecordParam 写出 plist → 重命名为该记录目录下 faker_plaintext.plist → 再导入。",
+                           note ?: @"-"];
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [wait dismissViewControllerAnimated:YES completion:^{
+                        [self alert:plain.count ? @"拉取完成" : @"拉取失败" message:msg];
+                    }];
+                }];
+            });
+        }];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 1 && indexPath.row == 2) return;
@@ -254,6 +326,8 @@ extern char **environ;
     if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             [self runImportKind:@"AMG" path:[NDRecordStore resolvedAMGImportPath]];
+        } else if (indexPath.row == 1) {
+            [self pullAMGPlaintextParam];
         } else {
             NSString *name = [[NDRecordStore shared] currentRecordName];
             if (!name.length || [name isEqualToString:@"原始机器"]) {
