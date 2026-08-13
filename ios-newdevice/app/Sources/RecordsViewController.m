@@ -76,14 +76,19 @@
                     [wait dismissViewControllerAnimated:YES completion:^{
                         NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
                         NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
-                        NSString *write = [NDAppDataManager shared].lastRestoreReport ?: report ?: @"";
-                        NSString *msg = (c == 200 || code == 200)
-                            ? [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@\n\n路径：%@",
-                               names.length ? names : @"",
-                               holo.length ? holo : @"（无）",
-                               write.length ? write : @"(无写入报告 — 请看 Media/NewDevice/last-restore.txt)",
-                               dir]
-                            : (body.length ? body : @"导入失败");
+                        NSString *write = [NDAppDataManager shared].lastRestoreReport;
+                        if (!write.length) write = report;
+                        if (!write.length) write = @"(无写入报告, 请看 Media/NewDevice/last-restore.txt)";
+                        NSString *msg = nil;
+                        if (c == 200 || code == 200) {
+                            msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@\n\n路径：%@",
+                                   names.length ? names : @"",
+                                   holo.length ? holo : @"(无)",
+                                   write,
+                                   dir];
+                        } else {
+                            msg = body.length ? body : @"导入失败";
+                        }
                         UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
                                                                                    message:msg
                                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -91,7 +96,7 @@
                         [self presentViewController:a animated:YES completion:nil];
                         [self reload];
                     }];
-                }];
+                });
             };
             if (code == 200 && name.length) {
                 [[NDOperationService shared] runAsync:@"restoreHolo" query:@{@"recordName": name} completion:^(NSString *rbody, NSInteger rcode) {
