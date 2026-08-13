@@ -667,6 +667,36 @@
         NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
         for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:appsRoot]) [toMerge addObject:b];
 
+        // When faker is ciphertext, seed IDFV from Venmo akc DeviceFingerprint so spoof
+        // matches the session Venmo bound in Keychain (better login restore odds).
+        if (fakerEncrypted) {
+            for (NSString *bid in @[@"net.kortina.labs.Venmo"]) {
+                NSString *akcPath = [[appsRoot stringByAppendingPathComponent:bid] stringByAppendingPathComponent:@"Documents/akc.plist"];
+                if (![fm fileExistsAtPath:akcPath]) {
+                    akcPath = [[appsRoot stringByAppendingPathComponent:bid] stringByAppendingPathComponent:@"akc.plist"];
+                }
+                NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:akcPath];
+                if (![akc isKindOfClass:[NSDictionary class]]) continue;
+                NSDictionary *fpItem = akc[@"VenmoKit_com.venmo.VenmoKit.DeviceFingerprint"];
+                NSData *fpData = [fpItem isKindOfClass:[NSDictionary class]] ? fpItem[@"v_Data"] : nil;
+                NSString *fp = nil;
+                if ([fpData isKindOfClass:[NSData class]] && fpData.length) {
+                    fp = [[NSString alloc] initWithData:fpData encoding:NSUTF8StringEncoding];
+                }
+                if (fp.length >= 32) {
+                    saved.IDFV = fp;
+                    [self saveProfile:saved error:nil];
+                    NSString *notePath = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"];
+                    NSString *extra = [NSString stringWithFormat:@"\nSeeded IDFV from Venmo akc DeviceFingerprint=%@.", fp];
+                    NSString *prev = [NSString stringWithContentsOfFile:notePath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+                    if (![prev containsString:@"Seeded IDFV"]) {
+                        [[prev stringByAppendingString:extra] writeToFile:notePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                    }
+                }
+                break;
+            }
+        }
+
         if (toMerge.count) {
             // Persist per-record selectApp so switch restores this env
             [toMerge.array writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];

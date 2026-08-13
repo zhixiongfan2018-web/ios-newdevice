@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-124
+Version: 1.0.0-126
 Architecture: iphoneos-arm64
-Description: In-app akc Keychain restore via tweak (Venmo access group).
+Description: Sync in-app akc restore before Venmo reads Keychain.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

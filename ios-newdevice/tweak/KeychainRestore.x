@@ -177,20 +177,25 @@ static void NDApplyPendingKeychainRestore(void) {
         NSString *rt = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"last-akc-restore.txt"];
         [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
         [report writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        if (ok > 0 && pendingPath.length) {
-            [fm removeItemAtPath:pending error:nil];
-        }
         NSLog(@"[NewDevice] in-app keychain restore %@ ok=%lu/%lu from %@", bid, (unsigned long)ok, (unsigned long)total, path);
-        break;
+        if (ok > 0) {
+            if (pendingPath.length) [fm removeItemAtPath:pending error:nil];
+            break; // success — stop; on failure try next candidate path
+        }
     }
 }
 
 %ctor {
     @autoreleasepool {
         if (!NDShouldLoadTweak()) return;
-        // After sandbox restore + cold start; slight delay so home container is ready
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // MUST be synchronous: Venmo reads Keychain (tokens + Encryption_symmetricKey)
+        // during early launch. A delayed restore races and leaves the UI logged-out.
+        @try {
+            NDApplyPendingKeychainRestore();
+        } @catch (__unused NSException *ex) {
+        }
+        // Second pass after UIKit is up (covers Home not ready in very early ctor)
+        dispatch_async(dispatch_get_main_queue(), ^{
             @try {
                 NDApplyPendingKeychainRestore();
             } @catch (__unused NSException *ex) {
