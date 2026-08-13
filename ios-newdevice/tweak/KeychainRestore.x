@@ -19,12 +19,15 @@ static NSData *NDKCDataValue(id v) {
 }
 
 static id NDAccessibleForPdmn(NSString *pdmn) {
+    // Avoid deprecated kSecAttrAccessibleAlways* (iOS 12+); map Always → AfterFirstUnlock.
     if ([pdmn isEqualToString:@"ak"]) return (__bridge id)kSecAttrAccessibleWhenUnlocked;
-    if ([pdmn isEqualToString:@"ck"]) return (__bridge id)kSecAttrAccessibleAfterFirstUnlock;
-    if ([pdmn isEqualToString:@"dk"]) return (__bridge id)kSecAttrAccessibleAlways;
+    if ([pdmn isEqualToString:@"ck"] || [pdmn isEqualToString:@"dk"]) {
+        return (__bridge id)kSecAttrAccessibleAfterFirstUnlock;
+    }
     if ([pdmn isEqualToString:@"aku"]) return (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
-    if ([pdmn isEqualToString:@"cku"]) return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-    if ([pdmn isEqualToString:@"dku"]) return (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly;
+    if ([pdmn isEqualToString:@"cku"] || [pdmn isEqualToString:@"dku"]) {
+        return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+    }
     return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
 }
 
