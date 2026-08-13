@@ -306,10 +306,12 @@
         // Keep scratch on failure for Filza debug; remove only when something imported
         if (total > 0) [fm removeItemAtPath:scratchRoot error:nil];
     } @catch (NSException *ex) {
+        NSArray *syms = ex.callStackSymbols;
+        NSString *stack = [syms isKindOfClass:[NSArray class]] ? [syms componentsJoinedByString:@"\n"] : @"";
         NSString *msg = [NSString stringWithFormat:@"导入异常：%@ — %@\n%@",
                          ex.name ?: @"NSException",
                          ex.reason ?: @"?",
-                         [[ex.callStackSymbols componentsJoinedByString:@"\n"] ?: @""]];
+                         stack ?: @""];
         if (msg.length > 1200) msg = [[msg substringToIndex:1200] stringByAppendingString:@"…"];
         [log addObject:msg];
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:99 userInfo:@{NSLocalizedDescriptionKey: msg}];
