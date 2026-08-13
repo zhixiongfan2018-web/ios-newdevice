@@ -183,25 +183,57 @@ extern char **environ;
 - (BOOL)mirrorTree:(NSString *)src to:(NSString *)dst error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:src]) return YES;
-    // Prefer rsync/ditto for large AMG trees (Venmo ~22MB)
+    unsigned long long srcBytes = [self byteSizeAtPath:src];
+    // On iOS 18 Dopamine, spawned cp/rsync/ditto often LACK container-manager
+    // entitlement even when WE have it — they return EPERM and may leave an
+    // empty destination. Prefer in-process NSFileManager first (inherits our ents).
+    NSError *copyErr = nil;
+    if ([self copyItem:src to:dst error:&copyErr]) {
+        unsigned long long dstBytes = [self byteSizeAtPath:dst];
+        if (srcBytes == 0 || dstBytes >= srcBytes / 2) return YES;
+        NSLog(@"[NewDevice] copyItem size mismatch %@ → %@ (%llu vs %llu)", src, dst, srcBytes, dstBytes);
+    }
+    // Fallback tools — only accept if payload actually landed
     for (NSArray *cmd in @[
-        @[@"/var/jb/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
-        @[@"/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
         @[@"/var/jb/usr/bin/ditto", src, dst],
         @[@"/usr/bin/ditto", src, dst],
+        @[@"/var/jb/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
+        @[@"/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
     ]) {
         NSString *bin = cmd[0];
         if (![fm isExecutableFileAtPath:bin]) continue;
-        [fm createDirectoryAtPath:dst withIntermediateDirectories:YES attributes:nil error:nil];
-        NSArray *args = [cmd subarrayWithRange:NSMakeRange(1, cmd.count - 1)];
-        // For rsync, ensure trailing slash semantics; for ditto replace dst
         if ([bin.lastPathComponent isEqualToString:@"ditto"]) {
             [fm removeItemAtPath:dst error:nil];
+        } else {
+            [fm createDirectoryAtPath:dst withIntermediateDirectories:YES attributes:nil error:nil];
         }
-        [self runCommand:bin arguments:args];
-        if ([fm fileExistsAtPath:dst]) return YES;
+        [self runCommand:bin arguments:[cmd subarrayWithRange:NSMakeRange(1, cmd.count - 1)]];
+        unsigned long long dstBytes = [self byteSizeAtPath:dst];
+        if (dstBytes >= srcBytes / 2 || (srcBytes == 0 && [fm fileExistsAtPath:dst])) return YES;
     }
-    return [self copyItem:src to:dst error:error];
+    if (error) *error = copyErr ?: [NSError errorWithDomain:@"NDAppDataManager" code:41 userInfo:@{
+        NSLocalizedDescriptionKey: [NSString stringWithFormat:@"无法写入 %@（iOS18 需 container-manager 权限）", dst]
+    }];
+    return NO;
+}
+
+- (BOOL)canAccessAppContainers:(NSString **)detailOut {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = @"/var/mobile/Containers/Data/Application";
+    NSError *err = nil;
+    NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:&err];
+    if (uuids.count > 0) {
+        if (detailOut) *detailOut = [NSString stringWithFormat:@"OK list %lu containers", (unsigned long)uuids.count];
+        return YES;
+    }
+    // Probe readability of the directory itself
+    BOOL isDir = NO;
+    BOOL exists = [fm fileExistsAtPath:root isDirectory:&isDir];
+    if (detailOut) {
+        *detailOut = [NSString stringWithFormat:@"FAIL Containers access exists=%d dir=%d err=%@ — iOS18/Dopamine 需要 com.apple.private.security.container-manager",
+                      exists, isDir, err.localizedDescription ?: @"empty listing"];
+    }
+    return NO;
 }
 
 - (void)writeRestoreReport:(NSString *)report {
@@ -390,6 +422,19 @@ extern char **environ;
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     NSMutableArray<NSString *> *missing = [NSMutableArray array];
     [lines addObject:[NSString stringWithFormat:@"restore record=%@ apps=%lu", recordName, (unsigned long)bundleIds.count]];
+    NSString *accessDetail = nil;
+    BOOL canAccess = [self canAccessAppContainers:&accessDetail];
+    [lines addObject:accessDetail ?: @"Containers access unknown"];
+    if (!canAccess) {
+        [lines addObject:@"HINT: 本进程无法列出 /var/mobile/Containers/Data/Application。在 iOS18 Dopamine 上必须用 container-manager 等权限签名 App/daemon。请升级本包后注销桌面再试。"];
+        [self writeRestoreReport:[lines componentsJoinedByString:@"\n"]];
+        if (error && !*error) {
+            *error = [NSError errorWithDomain:@"NDAppDataManager" code:42 userInfo:@{
+                NSLocalizedDescriptionKey: @"无法访问 App 沙盒目录（iOS18 权限）。请升级 NewDevice 后注销桌面。"
+            }];
+        }
+        return NO;
+    }
     NSUInteger ok = 0;
     for (NSString *bid in bundleIds) {
         if ([self restoreOneApp:bid fromRecord:recordName lines:lines missing:missing]) ok++;

@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-115
+Version: 1.0.0-117
 Architecture: iphoneos-arm64
-Description: Unbreak 一键新机; safe container lookup; restore only staged imports.
+Description: iOS18 Dopamine container-manager entitlements for holographic restore.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
