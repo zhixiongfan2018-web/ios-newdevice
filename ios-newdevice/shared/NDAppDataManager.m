@@ -418,11 +418,13 @@ extern char **environ;
         }
     }
     // Also include selectApp ids so we attempt launch-to-create for installed-but-empty
-    for (NSString *b in [[NSArray arrayWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"selectApp.plist"]] ?: @[]) {
-        if ([b isKindOfClass:[NSString class]] && b.length && ![bids containsObject:b]) {
-            // only if staged exists
-            if ([fm fileExistsAtPath:[NDPaths appsBackupDirForRecord:recordName bundleId:b]]) [bids addObject:b];
-        }
+    NSArray *selectApps = [NSArray arrayWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"selectApp.plist"]];
+    if (![selectApps isKindOfClass:[NSArray class]]) selectApps = @[];
+    for (id item in selectApps) {
+        if (![item isKindOfClass:[NSString class]]) continue;
+        NSString *b = (NSString *)item;
+        if (!b.length || [bids containsObject:b]) continue;
+        if ([fm fileExistsAtPath:[NDPaths appsBackupDirForRecord:recordName bundleId:b]]) [bids addObject:b];
     }
     return [self restoreApps:bids fromRecord:recordName error:error];
 }
