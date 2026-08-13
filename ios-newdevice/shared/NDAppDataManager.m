@@ -379,7 +379,8 @@ extern char **environ;
         return (__bridge id)kSecAttrAccessibleAfterFirstUnlock;
     }
     if ([pdmn isEqualToString:@"dk"] || [pdmn isEqualToString:@"dku"]) {
-        return (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly;
+        // Avoid deprecated kSecAttrAccessibleAlways*; AfterFirstUnlockThisDeviceOnly is the safe stand-in.
+        return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
     }
     if ([pdmn isEqualToString:@"akpu"]) {
         return (__bridge id)kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly;
