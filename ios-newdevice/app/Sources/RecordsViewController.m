@@ -20,6 +20,8 @@
     [super viewDidLoad];
     self.title = @"记录";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
     self.tableView.rowHeight = UITableViewAutomaticDimension;

@@ -19,6 +19,8 @@
     [super viewDidLoad];
     self.title = @"本机探测";
     self.view.backgroundColor = [NDTheme canvas];
+    self.tableView.backgroundColor = [NDTheme canvas];
+    self.tableView.separatorColor = [NDTheme hairline];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(reload)];
     [self reload];
