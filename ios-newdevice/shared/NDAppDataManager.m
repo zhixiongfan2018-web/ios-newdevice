@@ -217,6 +217,25 @@ extern char **environ;
     return NO;
 }
 
+- (void)relaxProtectionAtPath:(NSString *)root {
+    if (!root.length) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *top = @{
+        NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication,
+        NSFileOwnerAccountID: @501, // mobile
+        NSFileGroupOwnerAccountID: @501,
+    };
+    [fm setAttributes:top ofItemAtPath:root error:nil];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+    NSString *rel = nil;
+    NSUInteger n = 0;
+    while ((rel = [en nextObject])) {
+        NSString *full = [root stringByAppendingPathComponent:rel];
+        [fm setAttributes:@{NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:full error:nil];
+        if (++n > 20000) break;
+    }
+}
+
 - (BOOL)canAccessAppContainers:(NSString **)detailOut {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *root = @"/var/mobile/Containers/Data/Application";
@@ -390,8 +409,13 @@ extern char **environ;
         if (![fm fileExistsAtPath:src]) continue;
         NSString *dst = [container stringByAppendingPathComponent:sub];
         NSError *e = nil;
-        if ([self mirrorTree:src to:dst error:&e]) okSubs++;
-        else [lines addObject:[NSString stringWithFormat:@"  copy fail %@/%@: %@", bid, sub, e.localizedDescription ?: @"?"]];
+        if ([self mirrorTree:src to:dst error:&e]) {
+            okSubs++;
+            // iOS 18: imported files may keep Complete protection and be unreadable by Venmo until unlock races
+            [self relaxProtectionAtPath:dst];
+        } else {
+            [lines addObject:[NSString stringWithFormat:@"  copy fail %@/%@: %@", bid, sub, e.localizedDescription ?: @"?"]];
+        }
     }
     NSArray *kids = [fm contentsOfDirectoryAtPath:backupRoot error:nil] ?: @[];
     static NSSet *knownSubs;

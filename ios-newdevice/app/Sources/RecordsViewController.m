@@ -4,6 +4,7 @@
 #import "NDDeviceProfile.h"
 #import "NDAPIClient.h"
 #import "NDOperationService.h"
+#import "NDAppDataManager.h"
 #import "NDTheme.h"
 #import "NDPaths.h"
 #import "NDConfig.h"
@@ -68,19 +69,37 @@
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"解压并写入 App 沙盒…" preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:wait animated:YES completion:^{
         [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [wait dismissViewControllerAnimated:YES completion:^{
-                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
-                    NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
-                    NSString *msg = (code == 200)
-                        ? [NSString stringWithFormat:@"已导入：%@\n\n暂存沙盒：\n%@\n\n已自动切换并尝试写入目标 App。\n若 Venmo 仍为空：请确认已安装 Venmo，然后重新点选该记录。\n\n%@", names.length ? names : body, holo.length ? holo : @"（无）", dir]
-                        : (body.length ? body : ( @"导入失败"));
-                    UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果" message:msg preferredStyle:UIAlertControllerStyleAlert];
-                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                    [self presentViewController:a animated:YES completion:nil];
-                    [self reload];
+            // Second pass: explicit restoreHolo so report is authoritative
+            NSString *name = [NDRecordStore shared].lastImportedRecordNames.lastObject ?: @"";
+            void (^show)(NSString *, NSInteger) = ^(NSString *report, NSInteger c) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [wait dismissViewControllerAnimated:YES completion:^{
+                        NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
+                        NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
+                        NSString *write = [NDAppDataManager shared].lastRestoreReport ?: report ?: @"";
+                        NSString *msg = (c == 200 || code == 200)
+                            ? [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@\n\n路径：%@",
+                               names.length ? names : @"",
+                               holo.length ? holo : @"（无）",
+                               write.length ? write : @"(无写入报告 — 请看 Media/NewDevice/last-restore.txt)",
+                               dir]
+                            : (body.length ? body : @"导入失败");
+                        UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
+                                                                                   message:msg
+                                                                            preferredStyle:UIAlertControllerStyleAlert];
+                        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                        [self presentViewController:a animated:YES completion:nil];
+                        [self reload];
+                    }];
                 }];
-            });
+            };
+            if (code == 200 && name.length) {
+                [[NDOperationService shared] runAsync:@"restoreHolo" query:@{@"recordName": name} completion:^(NSString *rbody, NSInteger rcode) {
+                    show(rbody, rcode);
+                }];
+            } else {
+                show(body, code);
+            }
         }];
     }];
 }
