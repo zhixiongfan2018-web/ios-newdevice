@@ -46,6 +46,18 @@
     [sheet addAction:[UIAlertAction actionWithTitle:@"导出到 AMG_tar (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportAMGFolder];
     }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"强制写入当前记录 App 沙盒" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSString *name = [[NDRecordStore shared] currentRecordName] ?: @"";
+        [[NDOperationService shared] runAsync:@"restoreHolo" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIAlertController *al = [UIAlertController alertControllerWithTitle:(code == 200) ? @"写入结果" : @"写入失败"
+                                                                             message:body.length ? body : @"无报告"
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:al animated:YES completion:nil];
+            });
+        }];
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:sheet animated:YES completion:nil];
 }
@@ -187,13 +199,11 @@
     [[NDOperationService shared] runAsync:@"setRecord" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self reload];
-            if (code != 200) {
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败"
-                                                                           message:body.length ? body : @"无法切换到该记录"
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:a animated:YES completion:nil];
-            }
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"已切换并写入沙盒" : @"切换失败"
+                                                                       message:body.length ? body : @"无法切换到该记录"
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
         });
     }];
 }

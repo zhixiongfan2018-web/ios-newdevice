@@ -18,6 +18,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Restore app sandboxes from record folder.
 - (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
+/// Restore every staged app under Records/<name>/apps/ (source of truth after AMG import).
+- (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
+
+/// Human-readable report from the last restore (also written to Media/NewDevice/last-restore.txt).
+@property (nonatomic, copy, readonly, nullable) NSString *lastRestoreReport;
+
 /// Import AMG holographic trees (bundleId/Documents|Library + AppGroup) into a NewDevice record.
 - (void)importAMGHolographicFromDirectory:(NSString *)amgRecordDir intoRecord:(NSString *)recordName;
 

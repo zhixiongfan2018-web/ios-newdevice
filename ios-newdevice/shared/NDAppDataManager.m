@@ -2,11 +2,16 @@
 #import "NDPaths.h"
 #import "NDConfig.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <dlfcn.h>
 #import <spawn.h>
 #import <sys/wait.h>
 
 extern char **environ;
+
+@interface NDAppDataManager ()
+@property (nonatomic, copy, readwrite) NSString *lastRestoreReport;
+@end
 
 @implementation NDAppDataManager
 
@@ -15,8 +20,14 @@ extern char **environ;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         m = [NDAppDataManager new];
+        // MCM APIs needed for correct data-container paths on iOS 12+
+        dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
     });
     return m;
+}
+
++ (void)loadMCM {
+    dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
 }
 
 - (void)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
@@ -79,35 +90,126 @@ extern char **environ;
     }
 }
 
+- (NSURL *)NDMCMContainerURLForClassNames:(NSArray<NSString *> *)classNames
+                              identifier:(NSString *)identifier
+                       createIfNecessary:(BOOL)create {
+    if (!identifier.length) return nil;
+    [[self class] loadMCM];
+    for (NSString *clsName in classNames) {
+        Class cls = NSClassFromString(clsName);
+        if (!cls) continue;
+        id container = nil;
+        // +containerWithIdentifier:createIfNecessary:existed:error:
+        SEL selCreate = NSSelectorFromString(@"containerWithIdentifier:createIfNecessary:existed:error:");
+        if ([cls respondsToSelector:selCreate]) {
+            BOOL existed = NO;
+            NSError *err = nil;
+            // objc_msgSend for BOOL/error out-params
+            id (*msg)(Class, SEL, id, BOOL, BOOL *, NSError **) = (void *)objc_msgSend;
+            container = msg(cls, selCreate, identifier, create, &existed, &err);
+        }
+        if (!container) {
+            SEL sel = NSSelectorFromString(@"containerWithIdentifier:error:");
+            if ([cls respondsToSelector:sel]) {
+                NSError *err = nil;
+                id (*msg)(Class, SEL, id, NSError **) = (void *)objc_msgSend;
+                container = msg(cls, sel, identifier, &err);
+            }
+        }
+        if (!container) continue;
+        NSURL *url = nil;
+        if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
+            url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
+        }
+        if ([url isKindOfClass:[NSURL class]] && url.path.length) return url;
+    }
+    return nil;
+}
+
 - (NSString *)containerPathForBundleId:(NSString *)bundleId {
-    // Prefer lsappinfo / private API when available; fallback to Application scanning
-    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
-    if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleId];
-#pragma clang diagnostic pop
-        if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            NSURL *url = [proxy performSelector:NSSelectorFromString(@"dataContainerURL")];
-#pragma clang diagnostic pop
-            if ([url isKindOfClass:[NSURL class]]) return url.path;
+    if (!bundleId.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    // 1) MobileContainerManager — correct on iOS 12+ (LSApplicationProxy dataContainerURL is often wrong/nil)
+    NSURL *mcm = [self NDMCMContainerURLForClassNames:@[
+        @"MCMAppDataContainer",
+        @"MCMDataContainer",
+    ] identifier:bundleId createIfNecessary:YES];
+    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
+
+    // 2) Metadata scan (works when we can list containers as mobile/no-sandbox)
+    for (NSString *appsRoot in @[
+        @"/var/mobile/Containers/Data/Application",
+        @"/private/var/mobile/Containers/Data/Application",
+    ]) {
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        for (NSString *uuid in uuids) {
+            NSString *dir = [appsRoot stringByAppendingPathComponent:uuid];
+            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
+            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleId]) return dir;
         }
     }
 
-    // Fallback: search mobile containers (slow, best-effort)
-    NSString *appsRoot = @"/var/mobile/Containers/Data/Application";
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *uuids = [fm contentsOfDirectoryAtPath:appsRoot error:nil];
-    for (NSString *uuid in uuids) {
-        NSString *meta = [[appsRoot stringByAppendingPathComponent:uuid] stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-        if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleId]) {
-            return [appsRoot stringByAppendingPathComponent:uuid];
+    // 3) Last resort: LSApplicationProxy (unreliable since iOS 12, kept as fallback)
+    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+    if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+        id (*msg)(Class, SEL, id) = (void *)objc_msgSend;
+        id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bundleId);
+        if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
+            NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"dataContainerURL"));
+            if ([url isKindOfClass:[NSURL class]] && url.path.length && [fm fileExistsAtPath:url.path]) return url.path;
         }
     }
-    return nil;
+    return mcm.path.length ? mcm.path : nil; // return created path even if not yet visible
+}
+
+- (void)tryLaunchAppToCreateContainer:(NSString *)bundleId {
+    if (!bundleId.length) return;
+    Class WS = NSClassFromString(@"LSApplicationWorkspace");
+    if (!WS || ![WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) return;
+    id (*msg0)(Class, SEL) = (void *)objc_msgSend;
+    id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
+    if (!ws) return;
+    SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
+    if ([ws respondsToSelector:openSel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, bundleId);
+        [NSThread sleepForTimeInterval:1.2];
+        [self terminateApps:@[bundleId]];
+        [NSThread sleepForTimeInterval:0.4];
+    }
+}
+
+- (BOOL)mirrorTree:(NSString *)src to:(NSString *)dst error:(NSError **)error {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:src]) return YES;
+    // Prefer rsync/ditto for large AMG trees (Venmo ~22MB)
+    for (NSArray *cmd in @[
+        @[@"/var/jb/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
+        @[@"/usr/bin/rsync", @"-a", @"--delete", [src stringByAppendingString:@"/"], [dst stringByAppendingString:@"/"]],
+        @[@"/var/jb/usr/bin/ditto", src, dst],
+        @[@"/usr/bin/ditto", src, dst],
+    ]) {
+        NSString *bin = cmd[0];
+        if (![fm isExecutableFileAtPath:bin]) continue;
+        [fm createDirectoryAtPath:dst withIntermediateDirectories:YES attributes:nil error:nil];
+        NSArray *args = [cmd subarrayWithRange:NSMakeRange(1, cmd.count - 1)];
+        // For rsync, ensure trailing slash semantics; for ditto replace dst
+        if ([bin.lastPathComponent isEqualToString:@"ditto"]) {
+            [fm removeItemAtPath:dst error:nil];
+        }
+        [self runCommand:bin arguments:args];
+        if ([fm fileExistsAtPath:dst]) return YES;
+    }
+    return [self copyItem:src to:dst error:error];
+}
+
+- (void)writeRestoreReport:(NSString *)report {
+    self.lastRestoreReport = report;
+    [NDPaths ensureDirectories];
+    NSString *path = [[NDPaths mediaHomeDir] stringByAppendingPathComponent:@"last-restore.txt"];
+    [report writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [NDPaths makePathWorldReadable:path];
 }
 
 - (BOOL)copyItem:(NSString *)src to:(NSString *)dst error:(NSError **)error {
@@ -225,57 +327,104 @@ extern char **environ;
     return YES;
 }
 
-- (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError **)error {
+- (BOOL)restoreOneApp:(NSString *)bid
+           fromRecord:(NSString *)recordName
+                lines:(NSMutableArray<NSString *> *)lines
+              missing:(NSMutableArray<NSString *> *)missing {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray<NSString *> *missing = [NSMutableArray array];
-    NSMutableArray<NSString *> *restored = [NSMutableArray array];
-    for (NSString *bid in bundleIds) {
-        NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-        BOOL hasBackup = [fm fileExistsAtPath:backupRoot];
-        // Only act on apps that actually have staged holographic data.
-        // (Do NOT clear just because selectApp lists an id — that wiped live apps
-        // when FanDuel/etc. had no folder, and also hurt Venmo if staging lagged.)
-        if (!hasBackup) continue;
+    NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
+    if (![fm fileExistsAtPath:backupRoot]) return NO;
+    unsigned long long staged = [self byteSizeAtPath:backupRoot];
+    if (staged == 0) {
+        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (staged empty)", bid]];
+        return NO;
+    }
 
-        NSString *container = [self containerPathForBundleId:bid];
-        if (!container) {
-            [missing addObject:bid];
-            NSLog(@"[NewDevice] restore skip %@: app not installed / no data container", bid);
-            continue;
-        }
-        for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
-            NSString *src = [backupRoot stringByAppendingPathComponent:sub];
-            if (![fm fileExistsAtPath:src]) continue;
-            NSString *dst = [container stringByAppendingPathComponent:sub];
-            [self copyItem:src to:dst error:nil];
-        }
-        // Root-level files under bid backup (rare AMG layouts)
-        NSArray *kids = [fm contentsOfDirectoryAtPath:backupRoot error:nil] ?: @[];
-        static NSSet *knownSubs;
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            knownSubs = [NSSet setWithArray:@[@"Documents", @"Library", @"tmp", @"SystemData"]];
-        });
-        for (NSString *kid in kids) {
-            if ([kid hasPrefix:@"."]) continue;
-            if ([knownSubs containsObject:kid]) continue;
-            if ([kid.lowercaseString hasPrefix:@"keychain"]) continue;
-            NSString *src = [backupRoot stringByAppendingPathComponent:kid];
-            [self copyItem:src to:[container stringByAppendingPathComponent:kid] error:nil];
-        }
-        [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
-        unsigned long long n = [self byteSizeAtPath:backupRoot];
-        [restored addObject:[NSString stringWithFormat:@"%@ (%llu bytes)", bid, n]];
-        NSLog(@"[NewDevice] restored %@ -> %@ (%llu bytes)", bid, container, n);
+    NSString *container = [self containerPathForBundleId:bid];
+    if (!container.length) {
+        [self tryLaunchAppToCreateContainer:bid];
+        container = [self containerPathForBundleId:bid];
+    }
+    if (!container.length) {
+        [missing addObject:bid];
+        [lines addObject:[NSString stringWithFormat:@"FAIL %@ — 未找到数据容器（请确认已安装该 App）", bid]];
+        return NO;
+    }
+
+    NSUInteger okSubs = 0;
+    for (NSString *sub in @[@"Documents", @"Library", @"tmp", @"SystemData"]) {
+        NSString *src = [backupRoot stringByAppendingPathComponent:sub];
+        if (![fm fileExistsAtPath:src]) continue;
+        NSString *dst = [container stringByAppendingPathComponent:sub];
+        NSError *e = nil;
+        if ([self mirrorTree:src to:dst error:&e]) okSubs++;
+        else [lines addObject:[NSString stringWithFormat:@"  copy fail %@/%@: %@", bid, sub, e.localizedDescription ?: @"?"]];
+    }
+    NSArray *kids = [fm contentsOfDirectoryAtPath:backupRoot error:nil] ?: @[];
+    static NSSet *knownSubs;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        knownSubs = [NSSet setWithArray:@[@"Documents", @"Library", @"tmp", @"SystemData"]];
+    });
+    for (NSString *kid in kids) {
+        if ([kid hasPrefix:@"."]) continue;
+        if ([knownSubs containsObject:kid]) continue;
+        if ([kid.lowercaseString hasPrefix:@"keychain"]) continue;
+        [self mirrorTree:[backupRoot stringByAppendingPathComponent:kid]
+                      to:[container stringByAppendingPathComponent:kid]
+                   error:nil];
+    }
+    [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
+
+    unsigned long long liveDocs = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Documents"]];
+    unsigned long long liveLib = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Library"]];
+    BOOL verified = (liveDocs + liveLib) >= (staged / 4); // rough: at least some payload landed
+    [lines addObject:[NSString stringWithFormat:@"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB subs=%lu",
+                      verified ? @"OK" : @"WARN",
+                      bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs]];
+    return verified;
+}
+
+- (BOOL)restoreApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName error:(NSError **)error {
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    NSMutableArray<NSString *> *missing = [NSMutableArray array];
+    [lines addObject:[NSString stringWithFormat:@"restore record=%@ apps=%lu", recordName, (unsigned long)bundleIds.count]];
+    NSUInteger ok = 0;
+    for (NSString *bid in bundleIds) {
+        if ([self restoreOneApp:bid fromRecord:recordName lines:lines missing:missing]) ok++;
     }
     [self restoreAppGroupsForRecord:recordName];
+    [lines addObject:[NSString stringWithFormat:@"done ok=%lu missing=%lu", (unsigned long)ok, (unsigned long)missing.count]];
+    [self writeRestoreReport:[lines componentsJoinedByString:@"\n"]];
     if (missing.count && error && !*error) {
         *error = [NSError errorWithDomain:@"NDAppDataManager" code:40 userInfo:@{
-            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"以下 App 未安装，无法写入沙盒：%@\n已暂存到记录，请先安装后再点选该记录。", [missing componentsJoinedByString:@", "]]
+            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"以下 App 未安装/无容器：%@\n详情见 Media/NewDevice/last-restore.txt", [missing componentsJoinedByString:@", "]]
         }];
     }
-    (void)restored;
     return YES;
+}
+
+- (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName error:(NSError **)error {
+    if (!recordName.length || [recordName isEqualToString:@"原始机器"]) return YES;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *appsRoot = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"apps"];
+    NSArray *entries = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+    NSMutableArray<NSString *> *bids = [NSMutableArray array];
+    for (NSString *e in entries) {
+        if ([e hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:[appsRoot stringByAppendingPathComponent:e] isDirectory:&isDir] && isDir) {
+            [bids addObject:e];
+        }
+    }
+    // Also include selectApp ids so we attempt launch-to-create for installed-but-empty
+    for (NSString *b in [[NSArray arrayWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"selectApp.plist"]] ?: @[]) {
+        if ([b isKindOfClass:[NSString class]] && b.length && ![bids containsObject:b]) {
+            // only if staged exists
+            if ([fm fileExistsAtPath:[NDPaths appsBackupDirForRecord:recordName bundleId:b]]) [bids addObject:b];
+        }
+    }
+    return [self restoreApps:bids fromRecord:recordName error:error];
 }
 
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName {
@@ -478,17 +627,27 @@ extern char **environ;
 
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {
     if (!groupId.length) return nil;
-    NSString *root = @"/var/mobile/Containers/Shared/AppGroup";
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
-    for (NSString *uuid in uuids) {
-        NSString *meta = [[root stringByAppendingPathComponent:uuid] stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-        if ([plist[@"MCMMetadataIdentifier"] isEqualToString:groupId]) {
-            return [root stringByAppendingPathComponent:uuid];
+    NSURL *mcm = [self NDMCMContainerURLForClassNames:@[
+        @"MCMSharedAppGroupContainer",
+        @"MCMAppGroupContainer",
+        @"MCMSharedDataContainer",
+    ] identifier:groupId createIfNecessary:YES];
+    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
+
+    for (NSString *root in @[
+        @"/var/mobile/Containers/Shared/AppGroup",
+        @"/private/var/mobile/Containers/Shared/AppGroup",
+    ]) {
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
+        for (NSString *uuid in uuids) {
+            NSString *dir = [root stringByAppendingPathComponent:uuid];
+            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
+            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:groupId]) return dir;
         }
     }
-    return nil;
+    return mcm.path;
 }
 
 - (void)backupAppGroupsForBundleId:(NSString *)bid toRecord:(NSString *)recordName {

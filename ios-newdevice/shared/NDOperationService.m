@@ -29,7 +29,7 @@
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
             @"clearAppData", @"cleanApps", @"importAMGRecords",
             @"importIGrimace", @"importAWZ", @"importAMGMedia",
-            @"exportAMGMedia", @"slimRecord",
+            @"exportAMGMedia", @"slimRecord", @"restoreHolo",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -87,7 +87,11 @@
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
         } else {
             NSError *restoreErr = nil;
-            [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:&restoreErr];
+            // Prefer staged apps/ tree (Venmo etc.) — not only selectApp/targetApps lists
+            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
+            if (apps.count) {
+                [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
+            }
             [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
             if (restoreErr) {
                 NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
@@ -198,28 +202,39 @@
 
         if ([fun isEqualToString:@"setRecord"]) {
             NSString *name = query[@"recordName"] ?: @"";
+            [NDConfig shared].holographicBackup = YES;
+            [[NDConfig shared] save];
             [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
                 if (success) [self afterSwitchFrom:previousRecord to:name apps:apps];
-                NSString *msg = name;
-                if (success) {
-                    NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
-                    NSMutableArray *missing = [NSMutableArray array];
-                    for (NSString *b in bids) {
-                        NSString *backup = [NDPaths appsBackupDirForRecord:name bundleId:b];
-                        BOOL has = [[NSFileManager defaultManager] fileExistsAtPath:backup];
-                        if (has && ![[NDAppDataManager shared] containerPathForBundleId:b]) [missing addObject:b];
-                    }
-                    if (missing.count) {
-                        msg = [NSString stringWithFormat:@"%@\n未安装无法写入: %@", name, [missing componentsJoinedByString:@", "]];
-                    }
-                } else {
-                    msg = err.localizedDescription ?: name;
-                }
+                NSString *report = [NDAppDataManager shared].lastRestoreReport ?: @"";
+                NSString *msg = success
+                    ? [NSString stringWithFormat:@"%@\n\n%@", name, report]
+                    : (err.localizedDescription ?: name);
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(msg, success ? 200 : 500);
             }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"restoreHolo"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName] ?: @"";
+            if (!name.length || [name isEqualToString:@"原始机器"]) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"无当前记录", 500);
+                return;
+            }
+            [NDConfig shared].holographicBackup = YES;
+            [[NDConfig shared] save];
+            NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
+            [[NDAppDataManager shared] terminateApps:bids];
+            NSError *err = nil;
+            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
+            [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
+            NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(report, 200);
             return;
         }
 
@@ -372,19 +387,21 @@
             // Auto-apply last imported record so Venmo/etc. land in live sandboxes immediately
             NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
             if (n > 0 && applyName.length) {
-                dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                [NDConfig shared].holographicBackup = YES;
+                [[NDConfig shared] save];
                 __block NSString *applyMsg = @"";
                 [self prepareTargetsForDestination:applyName block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                     NSError *swErr = nil;
                     if ([[NDRecordStore shared] switchToRecord:applyName error:&swErr]) {
                         [self afterSwitchFrom:previousRecord to:applyName apps:apps];
-                        applyMsg = [NSString stringWithFormat:@"applied:%@", applyName];
+                        // Explicit second pass on staged apps/ (MCM container path)
+                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:nil];
+                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
+                                    [NDAppDataManager shared].lastRestoreReport ?: @""];
                     } else {
                         applyMsg = swErr.localizedDescription ?: @"apply failed";
                     }
-                    dispatch_semaphore_signal(sem);
                 }];
-                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(180 * NSEC_PER_SEC)));
                 body = [NSString stringWithFormat:@"%lu\n%@\n%@\n%@", (unsigned long)n,
                         [[NDRecordStore shared] lastImportHoloSummary] ?: @"",
                         applyMsg,
