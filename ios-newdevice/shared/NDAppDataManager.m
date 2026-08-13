@@ -108,43 +108,27 @@ extern char **environ;
 
 - (NSURL *)NDMCMContainerURLSafe:(NSString *)identifier classNames:(NSArray<NSString *> *)classNames {
     // Never use createIfNecessary — wrong objc_msgSend ABI / missing entitlement can crash
-    // the whole app/daemon and break 一键新机.
+    // the whole app/daemon and break 一键新机. Pass NULL for NSError** to keep ABI simple.
     if (!identifier.length) return nil;
     [[self class] loadMCM];
-    __block NSURL *found = nil;
     for (NSString *clsName in classNames) {
         Class cls = NSClassFromString(clsName);
         if (!cls) continue;
         @try {
             SEL sel = NSSelectorFromString(@"containerWithIdentifier:error:");
             if (![cls respondsToSelector:sel]) continue;
-            NSError *err = nil;
-            // Use NSInvocation to avoid ABI crashes with objc_msgSend + NSError**
-            NSMethodSignature *sig = [cls methodSignatureForSelector:sel];
-            if (!sig) continue;
-            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-            inv.target = cls;
-            inv.selector = sel;
-            NSString *ident = identifier;
-            NSError * __autoreleasing *errPtr = &err;
-            [inv setArgument:&ident atIndex:2];
-            [inv setArgument:&errPtr atIndex:3];
-            [inv invoke];
-            __unsafe_unretained id container = nil;
-            [inv getReturnValue:&container];
+            id (*msg)(Class, SEL, id, void *) = (void *)objc_msgSend;
+            id container = msg(cls, sel, identifier, NULL);
             if (!container) continue;
             if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
                 NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
-                if ([url isKindOfClass:[NSURL class]] && url.path.length) {
-                    found = url;
-                    break;
-                }
+                if ([url isKindOfClass:[NSURL class]] && url.path.length) return url;
             }
         } @catch (__unused NSException *ex) {
-            NSLog(@"[NewDevice] MCM lookup exception for %@: %@", identifier, ex);
+            NSLog(@"[NewDevice] MCM lookup exception for %@", identifier);
         }
     }
-    return found;
+    return nil;
 }
 
 - (NSString *)containerPathForBundleId:(NSString *)bundleId {

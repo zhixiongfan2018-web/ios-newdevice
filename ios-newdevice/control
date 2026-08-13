@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-113
+Version: 1.0.0-115
 Architecture: iphoneos-arm64
-Description: Use MCMAppDataContainer to restore Venmo sandbox; show restore report.
+Description: Unbreak 一键新机; safe container lookup; restore only staged imports.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
