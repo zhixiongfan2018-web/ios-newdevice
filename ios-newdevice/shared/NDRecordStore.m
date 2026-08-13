@@ -508,6 +508,131 @@
     return [self uniqueRecordName:out];
 }
 
+- (BOOL)importAMGResolvedRecordAtPath:(NSString *)recordPath
+                                 note:(NSString **)outNote
+                                error:(NSError **)error {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (!recordPath.length || ![fm fileExistsAtPath:recordPath isDirectory:&isDir] || !isDir) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:40 userInfo:@{NSLocalizedDescriptionKey: @"resolved record path missing"}];
+        if (outNote) *outNote = @"path missing";
+        return NO;
+    }
+    NSString *idDir = [recordPath stringByAppendingPathComponent:@"01_plaintext_identity"];
+    NSString *cfgDir = [recordPath stringByAppendingPathComponent:@"02_config_plists"];
+    NSString *holoDir = [recordPath stringByAppendingPathComponent:@"03_holographic_backups"];
+    NSString *plain = [idDir stringByAppendingPathComponent:@"faker_plaintext.plist"];
+    if (![fm fileExistsAtPath:plain]) {
+        plain = [idDir stringByAppendingPathComponent:@"faker_plaintext.json"];
+    }
+    if (![fm fileExistsAtPath:plain] && ![fm fileExistsAtPath:holoDir]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:41 userInfo:@{NSLocalizedDescriptionKey: @"no faker_plaintext / holo"}];
+        if (outNote) *outNote = @"no plaintext/holo";
+        return NO;
+    }
+
+    if (!self.importingNames) self.importingNames = [NSMutableArray array];
+    if (!self.importingHoloLines) self.importingHoloLines = [NSMutableArray array];
+
+    NSString *folder = recordPath.lastPathComponent ?: @"amg-record";
+    NSString *recordName = folder;
+    NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"description.plist"]];
+    if (![desc isKindOfClass:[NSDictionary class]]) {
+        desc = [NSDictionary dictionaryWithContentsOfFile:[recordPath stringByAppendingPathComponent:@"description.plist"]];
+    }
+    if ([desc isKindOfClass:[NSDictionary class]] && [desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
+        recordName = desc[@"title"];
+    }
+    recordName = [self sanitizeRecordName:recordName];
+
+    NDDeviceProfile *saved = nil;
+    NSError *impErr = nil;
+    if ([fm fileExistsAtPath:plain]) {
+        NSString *importPath = plain;
+        if ([plain.pathExtension.lowercaseString isEqualToString:@"json"]) {
+            NSDictionary *raw = [NDAMGParamClient dictionaryAtPath:plain];
+            if (raw) {
+                importPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                              [NSString stringWithFormat:@"nd-resolved-%@.plist", recordName]];
+                [raw writeToFile:importPath atomically:YES];
+            }
+        }
+        saved = [self importProfileAtPath:importPath preferredName:recordName error:&impErr];
+    }
+    if (!saved) {
+        NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
+        fresh.enabled = YES;
+        fresh.spoofDeviceIdentity = NO;
+        if ([self saveProfile:fresh error:&impErr]) saved = fresh;
+    }
+    if (!saved) {
+        if (error) *error = impErr ?: [NSError errorWithDomain:@"NDRecordStore" code:42 userInfo:@{NSLocalizedDescriptionKey: @"save profile failed"}];
+        if (outNote) *outNote = [NSString stringWithFormat:@"save fail: %@", impErr.localizedDescription ?: @"?"];
+        return NO;
+    }
+    saved.spoofDeviceIdentity = YES;
+    [self saveProfile:saved error:nil];
+
+    // Config side files
+    if ([fm fileExistsAtPath:cfgDir]) {
+        for (NSString *cfgName in @[@"selectApp.plist", @"description.plist", @"ifaddrs.plist"]) {
+            NSString *src = [cfgDir stringByAppendingPathComponent:cfgName];
+            if (![fm fileExistsAtPath:src]) continue;
+            NSString *dst = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:cfgName];
+            [fm removeItemAtPath:dst error:nil];
+            [fm copyItemAtPath:src toPath:dst error:nil];
+        }
+    }
+
+    // Holo root
+    NSString *holoSrc = recordPath;
+    if ([fm fileExistsAtPath:holoDir]) {
+        NSArray *holoKids = [fm contentsOfDirectoryAtPath:holoDir error:nil] ?: @[];
+        if (holoKids.count == 1) {
+            NSString *only = [holoDir stringByAppendingPathComponent:holoKids.firstObject];
+            BOOL d = NO;
+            if ([fm fileExistsAtPath:only isDirectory:&d] && d) holoSrc = only;
+            else holoSrc = holoDir;
+        } else {
+            holoSrc = holoDir;
+        }
+    }
+    [[NDAppDataManager shared] importAMGHolographicFromDirectory:holoSrc intoRecord:saved.name];
+
+    NSMutableOrderedSet *apps = [NSMutableOrderedSet orderedSet];
+    for (NSString *b in [[self class] discoverAppBundleIdsInDirectory:holoSrc]) [apps addObject:b];
+    id sel = [NSArray arrayWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"selectApp.plist"]];
+    if (!sel) sel = [NSDictionary dictionaryWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"selectApp.plist"]];
+    for (NSString *b in [[self class] parseAppBundleIdsFromValue:sel]) [apps addObject:b];
+    if (apps.count) {
+        [apps.array writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+        // Merge targets without notify/save storms: write config disk merge lightly
+        NDConfig *cfg = [NDConfig shared];
+        NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+        for (NSString *b in apps.array) {
+            if ([[self class] NDLooksLikeBundleId:b]) [set addObject:b];
+        }
+        cfg.targetApps = set.array;
+        // Write config plist only — skip RuntimeState/notify during import
+        NSMutableDictionary *disk = [[NSDictionary dictionaryWithContentsOfFile:[NDPaths configPlistPath]] mutableCopy] ?: [NSMutableDictionary dictionary];
+        disk[@"targetApps"] = cfg.targetApps ?: @[];
+        [disk writeToFile:[NDPaths configPlistPath] atomically:YES];
+    }
+
+    [saved writeAMGFakerToDirectory:[NDPaths recordDir:saved.name] error:nil];
+    NSString *note = [NSString stringWithFormat:@"Identity from faker_plaintext (AMG_resolved direct). holo=%@", holoSrc.lastPathComponent];
+    [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
+          atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
+    NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
+    NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+    [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → apps=%lu (%@)",
+                                        saved.name, (unsigned long)staged.count, [staged componentsJoinedByString:@","]]];
+    if (outNote) *outNote = [NSString stringWithFormat:@"OK %@", saved.name];
+    return YES;
+}
+
 - (NSUInteger)importAMGRecordsFromDirectory:(NSString *)dir error:(NSError **)error {
     if (!dir.length) dir = @"/var/mobile/AMG_tar";
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -711,11 +836,27 @@
             }
         }
 
+        if (self.importingHoloLines) {
+            [self.importingHoloLines addObject:[NSString stringWithFormat:@"try %@ resolved=%@ candidates=%lu hasHolo=%@ apps=%lu",
+                                               entry, resolvedLayout ? @"YES" : @"NO",
+                                               (unsigned long)candidates.count,
+                                               hasHolo ? @"YES" : @"NO",
+                                               (unsigned long)discoveredApps.count]];
+        }
         for (NSString *plistPath in candidates) {
             NSDictionary *raw = [NDAMGParamClient dictionaryAtPath:plistPath];
             if (!raw) raw = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+            if (!raw) {
+                if (self.importingHoloLines) {
+                    [self.importingHoloLines addObject:[NSString stringWithFormat:@"  skip unreadable %@", plistPath.lastPathComponent]];
+                }
+                continue;
+            }
             if ([NDDeviceProfile dictionaryLooksLikeEncryptedAMGFaker:raw]) {
                 if (!resolvedPlaintext) fakerEncrypted = YES;
+                if (self.importingHoloLines) {
+                    [self.importingHoloLines addObject:[NSString stringWithFormat:@"  skip ciphertext %@", plistPath.lastPathComponent]];
+                }
                 continue;
             }
             // JSON sidecars: write a temp plist for importProfileAtPath
@@ -725,7 +866,8 @@
                               [NSString stringWithFormat:@"nd-plain-%@.plist", recordName]];
                 [raw writeToFile:importPath atomically:YES];
             }
-            saved = [self importProfileAtPath:importPath preferredName:recordName error:nil];
+            NSError *impErr = nil;
+            saved = [self importProfileAtPath:importPath preferredName:recordName error:&impErr];
             if (saved) {
                 saved.spoofDeviceIdentity = YES;
                 [self saveProfile:saved error:nil];
@@ -738,12 +880,26 @@
                 }
                 break;
             }
+            if (self.importingHoloLines) {
+                [self.importingHoloLines addObject:[NSString stringWithFormat:@"  importProfile fail %@ — %@",
+                                                   plistPath.lastPathComponent, impErr.localizedDescription ?: @"?"]];
+            }
         }
 
         // Do NOT invent a record for empty container folders (this created bogus "import"/"export").
         if (!saved) {
-            if (!hasHolo && !fakerEncrypted) continue;
-            if (!hasHolo) continue;
+            if (!hasHolo && !fakerEncrypted) {
+                if (self.importingHoloLines) {
+                    [self.importingHoloLines addObject:[NSString stringWithFormat:@"skip %@: no identity + no holo", entry]];
+                }
+                continue;
+            }
+            if (!hasHolo) {
+                if (self.importingHoloLines) {
+                    [self.importingHoloLines addObject:[NSString stringWithFormat:@"skip %@: ciphertext/no-holo", entry]];
+                }
+                continue;
+            }
             NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
             fresh.enabled = YES;
             // Ciphertext faker: do NOT spoof random IDFA/UDID — that breaks Venmo session

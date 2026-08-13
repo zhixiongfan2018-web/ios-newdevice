@@ -306,23 +306,61 @@
                                 k, kd ? @"YES" : @"NO", has01 ? @"YES" : @"NO", hasPlain ? @"YES" : @"NO"]];
             }
             NSUInteger n = 0;
-            @try {
-                n = [self NDImportUnpackedTree:importRoot importKeychain:importKeychain error:nil];
-            } @catch (NSException *ex) {
-                [log addObject:[NSString stringWithFormat:@"archiveImport exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"]];
+            // Prefer direct resolved-record import (avoids scanner edge cases with '+' folder names)
+            for (NSString *k in rootKids) {
+                NSString *kp = [importRoot stringByAppendingPathComponent:k];
+                BOOL has01 = [fm fileExistsAtPath:[kp stringByAppendingPathComponent:@"01_plaintext_identity"]];
+                BOOL hasPlain = [fm fileExistsAtPath:[[kp stringByAppendingPathComponent:@"01_plaintext_identity"] stringByAppendingPathComponent:@"faker_plaintext.plist"]];
+                if (!has01) continue;
+                (void)hasPlain;
+                // Copy to a '+' -free path before import (some FS APIs mishandle '+')
+                NSString *safeName = [[[k stringByReplacingOccurrencesOfString:@"+" withString:@""]
+                                       stringByReplacingOccurrencesOfString:@" " withString:@"_"]
+                                      stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+                if (!safeName.length) safeName = @"amg-resolved-record";
+                NSString *safePath = [[importRoot stringByDeletingLastPathComponent] stringByAppendingPathComponent:safeName];
+                if (![safePath isEqualToString:kp]) {
+                    [fm removeItemAtPath:safePath error:nil];
+                    NSError *cpErr = nil;
+                    if (![fm copyItemAtPath:kp toPath:safePath error:&cpErr]) {
+                        [log addObject:[NSString stringWithFormat:@"safeCopy fail %@ — %@; using original", safeName, cpErr.localizedDescription ?: @"?"]];
+                        safePath = kp;
+                    } else {
+                        [log addObject:[@"safeCopy OK → " stringByAppendingString:safeName]];
+                    }
+                }
+                NSString *note = nil;
+                NSError *oneErr = nil;
+                BOOL ok = NO;
+                @try {
+                    ok = [self importAMGResolvedRecordAtPath:safePath note:&note error:&oneErr];
+                } @catch (NSException *ex) {
+                    note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                    ok = NO;
+                }
+                [log addObject:[NSString stringWithFormat:@"directResolved=%@ ok=%@ note=%@",
+                                safePath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
+                if (ok) n++;
+            }
+            if (n == 0) {
+                @try {
+                    n = [self NDImportUnpackedTree:importRoot importKeychain:importKeychain error:nil];
+                } @catch (NSException *ex) {
+                    [log addObject:[NSString stringWithFormat:@"archiveImport exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"]];
+                }
             }
             total += n;
             [log addObject:[NSString stringWithFormat:@"archiveImport=%lu", (unsigned long)n]];
-            NSString *holo = self.lastImportHoloSummary;
-            // lastImportHoloSummary is only set at endImportSession; capture live notes via result file instead
             if (!n) {
-                [log addObject:@"HINT: extract OK but 0 records. Check kid 01=/plain= above. If 01=YES plain=YES, identity import failed — see exception lines."];
+                [log addObject:@"HINT: extract OK but directResolved failed. See notes above."];
             }
-            (void)holo;
         }
 
-        // Keep scratch on failure for Filza debug; remove only when something imported
+        // Keep scratch for Filza debug when import fails; remove when success
         if (total > 0) [fm removeItemAtPath:scratchRoot error:nil];
+        else {
+            [log addObject:[@"scratchKept=" stringByAppendingString:scratchRoot ?: @""]];
+        }
     } @catch (NSException *ex) {
         NSArray *syms = ex.callStackSymbols;
         NSString *stack = [syms isKindOfClass:[NSArray class]] ? [syms componentsJoinedByString:@"\n"] : @"";
@@ -338,6 +376,10 @@
     [self endImportSession];
     [log addObject:[NSString stringWithFormat:@"total=%lu names=%@", (unsigned long)total,
                     [self.lastImportedRecordNames componentsJoinedByString:@", "] ?: @"(none)"]];
+    if (self.lastImportHoloSummary.length) {
+        [log addObject:@"--- import notes ---"];
+        [log addObject:self.lastImportHoloSummary];
+    }
     [[self class] NDWriteImportLog:[log componentsJoinedByString:@"\n"]];
 
     if (total == 0 && error && !*error) {

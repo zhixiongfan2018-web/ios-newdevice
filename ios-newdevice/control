@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-139
+Version: 1.0.0-140
 Architecture: iphoneos-arm64
-Description: Fix archiveImport=0 after AMG_resolved extract; defer save notify.
+Description: Direct AMG_resolved record import; strip + from extract paths.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
