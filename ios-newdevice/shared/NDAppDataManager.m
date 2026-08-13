@@ -431,14 +431,36 @@ extern char **environ;
                       to:[container stringByAppendingPathComponent:kid]
                    error:nil];
     }
+    BOOL hasKC = [fm fileExistsAtPath:[backupRoot stringByAppendingPathComponent:@"keychain-full.plist"]]
+        || [fm fileExistsAtPath:[backupRoot stringByAppendingPathComponent:@"keychain-hints.plist"]];
     [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
+
+    // Marker so Filza / report can prove live write (not just staging)
+    NSString *marker = [[container stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"nd-restore-ok.txt"];
+    NSString *markText = [NSString stringWithFormat:@"record=%@\nbundle=%@\ntime=%@\nstagedKB=%llu\n",
+                          recordName, bid, [NSDate date], staged / 1024];
+    [fm createDirectoryAtPath:[marker stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+    [markText writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [self relaxProtectionAtPath:marker];
 
     unsigned long long liveDocs = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Documents"]];
     unsigned long long liveLib = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Library"]];
-    BOOL verified = (liveDocs + liveLib) >= (staged / 4); // rough: at least some payload landed
-    [lines addObject:[NSString stringWithFormat:@"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB subs=%lu",
+    NSString *sqlite = [container stringByAppendingPathComponent:@"Documents/Model.sqlite"];
+    NSString *prefs = [container stringByAppendingPathComponent:@"Library/Preferences"];
+    prefs = [prefs stringByAppendingPathComponent:[bid stringByAppendingString:@".plist"]];
+    unsigned long long sqliteSz = [self byteSizeAtPath:sqlite];
+    unsigned long long prefsSz = [self byteSizeAtPath:prefs];
+    BOOL markerOk = [fm fileExistsAtPath:marker];
+    BOOL verified = markerOk && ((liveDocs + liveLib) >= (staged / 4) || sqliteSz > 0 || prefsSz > 1024);
+    [lines addObject:[NSString stringWithFormat:
+                      @"%@ %@ → %@\n  staged=%lluKB live Docs+Lib=%lluKB Model.sqlite=%llu prefs=%llu marker=%@ keychainDump=%@\n  说明：%@ ",
                       verified ? @"OK" : @"WARN",
-                      bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs]];
+                      bid, container, staged / 1024, (liveDocs + liveLib) / 1024,
+                      sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO",
+                      hasKC ? @"含 Keychain 转储，可尝试恢复登录态"
+                            : @"此包无 Keychain。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
+    // Ensure app relaunches from restored files
+    [self terminateApps:@[bid]];
     return verified;
 }
 

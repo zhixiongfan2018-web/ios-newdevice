@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-118
+Version: 1.0.0-120
 Architecture: iphoneos-arm64
-Description: Show live sandbox write report after AMG import; relax file protection.
+Description: Explain Venmo empty without Keychain; verify live sandbox marker.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

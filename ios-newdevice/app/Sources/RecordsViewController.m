@@ -81,10 +81,21 @@
                         if (!write.length) write = @"(无写入报告, 请看 Media/NewDevice/last-restore.txt)";
                         NSString *msg = nil;
                         if (c == 200 || code == 200) {
-                            msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@\n\n路径：%@",
+                            BOOL noKC = [write containsString:@"keychainDump=NO"];
+                            BOOL wroteOK = [write containsString:@"OK net.kortina.labs.Venmo"] || [write containsString:@"marker=yes"];
+                            NSString *hint = @"";
+                            if (wroteOK && noKC) {
+                                hint = @"\n\n重要：沙盒已写入，但此 AMG 包没有 Keychain。\nVenmo 会显示未登录/空白，这是导出包限制，不是导入没写进去。\n可用爱思查看沙盒 Documents/nd-restore-ok.txt 验证。";
+                            } else if ([write containsString:@"FAIL Containers"]) {
+                                hint = @"\n\n无法访问 Containers：请确认已装最新版并注销桌面。";
+                            } else if ([write containsString:@"未找到数据容器"]) {
+                                hint = @"\n\n请先安装并打开一次 Venmo，再点「强制写入」。";
+                            }
+                            msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@%@\n\n路径：%@",
                                    names.length ? names : @"",
                                    holo.length ? holo : @"(无)",
                                    write,
+                                   hint,
                                    dir];
                         } else {
                             msg = body.length ? body : @"导入失败";
