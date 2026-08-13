@@ -307,13 +307,13 @@ extern char **environ;
     __weak typeof(self) weakSelf = self;
     [a addAction:[UIAlertAction actionWithTitle:@"拉取" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         (void)action;
-        __strong typeof(weakSelf) self = weakSelf;
-        if (!self) return;
+        __strong typeof(weakSelf) vc = weakSelf;
+        if (!vc) return;
         NSString *name = a.textFields.firstObject.text ?: @"";
         name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在拉取" message:@"getRecordParam" preferredStyle:UIAlertControllerStyleAlert];
-        [self presentViewController:wait animated:YES completion:^{
-            [self NDRunPullAMGPlaintextNamed:name wait:wait];
+        [vc presentViewController:wait animated:YES completion:^{
+            [vc NDRunPullAMGPlaintextNamed:name wait:wait];
         }];
     }]];
     [self presentViewController:a animated:YES completion:nil];
