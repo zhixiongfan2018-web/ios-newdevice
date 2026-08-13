@@ -6,6 +6,30 @@
 #import "NDAMGParamClient.h"
 #import "NDDeviceProfile.h"
 #import <notify.h>
+#import <spawn.h>
+#import <sys/wait.h>
+
+extern char **environ;
+
+static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) {
+    if (!launchPath.length) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm isExecutableFileAtPath:launchPath]) return NO;
+    NSUInteger count = args.count;
+    char **argv = calloc(count + 2, sizeof(char *));
+    if (!argv) return NO;
+    argv[0] = (char *)launchPath.fileSystemRepresentation;
+    for (NSUInteger i = 0; i < count; i++) {
+        argv[i + 1] = (char *)[args[i] fileSystemRepresentation];
+    }
+    pid_t pid = 0;
+    int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
+    free(argv);
+    if (rc != 0 || pid <= 0) return NO;
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
 
 @interface NDRecordStore ()
 @property (nonatomic, copy, readwrite) NSArray<NSString *> *lastImportedRecordNames;
@@ -508,6 +532,147 @@
     return [self uniqueRecordName:out];
 }
 
++ (NSString *)preferredAMGLiveRecordNameFrom:(NSString *)raw {
+    if (!raw.length) return raw;
+    NSString *name = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // Resolved folders use underscores: +1916…_2026-… → +1916… 2026-… (AMG live name)
+    if ([name hasPrefix:@"+"]) {
+        NSRange r = [name rangeOfString:@"_20"];
+        if (r.location != NSNotFound) {
+            name = [[name substringToIndex:r.location] stringByAppendingFormat:@" %@", [name substringFromIndex:r.location + 1]];
+        }
+    }
+    return name;
+}
+
++ (unsigned long long)countRegularFilesAtPath:(NSString *)path {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return 0;
+    if (!isDir) return 1;
+    unsigned long long n = 0;
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:path];
+    for (__unused NSString *rel in en) {
+        NSDictionary *attrs = en.fileAttributes;
+        if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) n++;
+    }
+    return n;
+}
+
++ (BOOL)copyTreeRobustFrom:(NSString *)src to:(NSString *)dst error:(NSError **)error {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:src]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:60 userInfo:@{NSLocalizedDescriptionKey: @"copy src missing"}];
+        return NO;
+    }
+    [fm removeItemAtPath:dst error:nil];
+    NSString *parent = [dst stringByDeletingLastPathComponent];
+    [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
+    NSError *cpErr = nil;
+    if ([fm copyItemAtPath:src toPath:dst error:&cpErr]) {
+        unsigned long long a = [self countRegularFilesAtPath:src];
+        unsigned long long b = [self countRegularFilesAtPath:dst];
+        if (a == 0 || b >= (a * 9) / 10) return YES;
+    }
+    // Fallback: cp -a (handles large AMG trees better on Dopamine)
+    [fm removeItemAtPath:dst error:nil];
+    for (NSString *bin in @[@"/var/jb/usr/bin/cp", @"/usr/bin/cp", @"/bin/cp"]) {
+        if (!NDRecordStoreSpawn(bin, @[@"-a", src, dst])) continue;
+        if (![fm fileExistsAtPath:dst]) continue;
+        unsigned long long a = [self countRegularFilesAtPath:src];
+        unsigned long long b = [self countRegularFilesAtPath:dst];
+        if (a == 0 || b >= (a * 9) / 10) return YES;
+    }
+    if (error) {
+        *error = cpErr ?: [NSError errorWithDomain:@"NDRecordStore" code:61
+                                         userInfo:@{NSLocalizedDescriptionKey: @"copy tree incomplete"}];
+    }
+    return NO;
+}
+
+/// Build AMG-recognized live tree: /var/mobile/AMG/<liveName>/{faker,apps,AppGroup,...}
+- (BOOL)materializeClassicLiveAMGAtName:(NSString *)liveName
+                              fakerSrc:(NSString *)fakerSrc
+                                cfgDir:(NSString *)cfgDir
+                               holoSrc:(NSString *)holoSrc
+                                  note:(NSString **)outNote
+                                 error:(NSError **)error {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    liveName = [[self class] preferredAMGLiveRecordNameFrom:liveName];
+    if (!liveName.length || [liveName hasPrefix:@"."]) {
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:62 userInfo:@{NSLocalizedDescriptionKey: @"bad live name"}];
+        return NO;
+    }
+    NSString *liveRoot = @"/var/mobile/AMG";
+    [fm createDirectoryAtPath:liveRoot withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
+    NSString *livePath = [liveRoot stringByAppendingPathComponent:liveName];
+    NSString *stage = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                       [NSString stringWithFormat:@"nd-live-stage-%@", [[NSUUID UUID] UUIDString]]];
+    [fm removeItemAtPath:stage error:nil];
+    [fm createDirectoryAtPath:stage withIntermediateDirectories:YES attributes:nil error:nil];
+
+    // faker.plist — AMG needs at-rest ciphertext when available
+    if (fakerSrc.length && [fm fileExistsAtPath:fakerSrc]) {
+        [fm copyItemAtPath:fakerSrc toPath:[stage stringByAppendingPathComponent:@"faker.plist"] error:nil];
+    }
+    // Config side files
+    if (cfgDir.length && [fm fileExistsAtPath:cfgDir]) {
+        for (NSString *name in @[@"description.plist", @"selectApp.plist", @"selectapp.plist", @"ifaddrs.plist"]) {
+            NSString *s = [cfgDir stringByAppendingPathComponent:name];
+            if (![fm fileExistsAtPath:s]) continue;
+            NSString *dstName = [name.lowercaseString isEqualToString:@"selectapp.plist"] ? @"selectApp.plist" : name;
+            [fm copyItemAtPath:s toPath:[stage stringByAppendingPathComponent:dstName] error:nil];
+        }
+        NSString *pb = [cfgDir stringByAppendingPathComponent:@"Pasteboard"];
+        if ([fm fileExistsAtPath:pb]) {
+            [[self class] copyTreeRobustFrom:pb to:[stage stringByAppendingPathComponent:@"Pasteboard"] error:nil];
+        }
+    }
+    // Holographic trees at classic root
+    if (holoSrc.length && [fm fileExistsAtPath:holoSrc]) {
+        NSArray *kids = [fm contentsOfDirectoryAtPath:holoSrc error:nil] ?: @[];
+        for (NSString *k in kids) {
+            if ([k hasPrefix:@"."]) continue;
+            NSString *s = [holoSrc stringByAppendingPathComponent:k];
+            BOOL d = NO;
+            [fm fileExistsAtPath:s isDirectory:&d];
+            NSString *dst = [stage stringByAppendingPathComponent:k];
+            if (d) {
+                [[self class] copyTreeRobustFrom:s to:dst error:nil];
+            } else if ([k.pathExtension.lowercaseString isEqualToString:@"plist"]
+                       && ![k.lowercaseString isEqualToString:@"faker.plist"]) {
+                [fm copyItemAtPath:s toPath:dst error:nil];
+            }
+        }
+    }
+
+    NSString *venmo = [stage stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+    BOOL hasAkc = [fm fileExistsAtPath:[[venmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]]
+        || [fm fileExistsAtPath:[venmo stringByAppendingPathComponent:@"akc.plist"]];
+    unsigned long long files = [[self class] countRegularFilesAtPath:stage];
+    if (!hasAkc || files < 5) {
+        [fm removeItemAtPath:stage error:nil];
+        NSString *msg = [NSString stringWithFormat:@"materialize classic incomplete (files=%llu akc=%@) holo=%@",
+                         files, hasAkc ? @"YES" : @"NO", holoSrc ?: @"-"];
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:63 userInfo:@{NSLocalizedDescriptionKey: msg}];
+        if (outNote) *outNote = msg;
+        return NO;
+    }
+
+    NSError *mvErr = nil;
+    if (![[self class] copyTreeRobustFrom:stage to:livePath error:&mvErr]) {
+        [fm removeItemAtPath:stage error:nil];
+        if (error) *error = mvErr;
+        if (outNote) *outNote = [NSString stringWithFormat:@"live install fail: %@", mvErr.localizedDescription ?: @"?"];
+        return NO;
+    }
+    [fm removeItemAtPath:stage error:nil];
+    // chmod tree world-readable for AMG
+    [NDPaths makePathWorldReadable:livePath];
+    if (outNote) *outNote = [NSString stringWithFormat:@"liveOK %@ files=%llu akc=YES", livePath, files];
+    return YES;
+}
+
 /// Force-stage holographic apps (incl. Venmo deep-search) into a NewDevice record.
 - (void)stageAMGHolographicIntoRecord:(NSString *)recordName fromDir:(NSString *)srcDir {
     if (!recordName.length || !srcDir.length) return;
@@ -580,30 +745,83 @@
         return NO;
     }
 
-    // Preserve AMG folder name exactly (incl. leading '+' and spaces) — AMG keys on this path.
+    // Prefer AMG live name with spaces (from record_name / description / folder)
     NSString *liveName = recordPath.lastPathComponent ?: @"amg-record";
+    NSString *recNameFile = [recordPath stringByAppendingPathComponent:@"record_name.txt"];
+    NSString *fromFile = [NSString stringWithContentsOfFile:recNameFile encoding:NSUTF8StringEncoding error:nil];
+    fromFile = [fromFile stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (fromFile.length) liveName = fromFile;
+    NSDictionary *descEarly = [NSDictionary dictionaryWithContentsOfFile:[recordPath stringByAppendingPathComponent:@"description.plist"]];
+    if ([descEarly[@"title"] isKindOfClass:[NSString class]] && [descEarly[@"title"] length]) {
+        liveName = descEarly[@"title"];
+    }
+    liveName = [[self class] preferredAMGLiveRecordNameFrom:liveName];
     if ([liveName hasPrefix:@"."] || !liveName.length) {
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:51 userInfo:@{NSLocalizedDescriptionKey: @"bad classic record name"}];
         if (outNote) *outNote = @"bad name";
         return NO;
     }
 
+    // Refuse empty shells before creating any NewDevice record
+    NSString *srcVenmo = [recordPath stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+    BOOL srcAkc = [fm fileExistsAtPath:[[srcVenmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]];
+    unsigned long long srcFiles = [[self class] countRegularFilesAtPath:recordPath];
+    if (!srcAkc || srcFiles < 5) {
+        // Deep search once (apps nested oddly)
+        NSDirectoryEnumerator *en = [fm enumeratorAtPath:recordPath];
+        for (NSString *rel in en) {
+            if (![rel.lastPathComponent isEqualToString:@"net.kortina.labs.Venmo"]) continue;
+            NSString *found = [recordPath stringByAppendingPathComponent:rel];
+            if ([fm fileExistsAtPath:[[found stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]]) {
+                srcAkc = YES;
+                srcVenmo = found;
+                break;
+            }
+        }
+    }
+    if (!srcAkc) {
+        NSString *msg = [NSString stringWithFormat:
+                         @"经典包里没有 Venmo/akc（files=%llu）。\n"
+                         @"请用桌面原包 +1916… 2026-….tar.gz，不要用只有同名文件夹的空壳。\npath=%@",
+                         srcFiles, recordPath];
+        [msg writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:54 userInfo:@{NSLocalizedDescriptionKey: msg}];
+        if (outNote) *outNote = @"FAIL no Venmo/akc in classic src";
+        return NO;
+    }
+
     NSString *liveRoot = @"/var/mobile/AMG";
-    [fm createDirectoryAtPath:liveRoot withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
     NSString *livePath = [liveRoot stringByAppendingPathComponent:liveName];
-    // Skip self-copy when already importing from live AMG tree
-    BOOL alreadyLive = [recordPath isEqualToString:livePath] || [recordPath hasPrefix:[liveRoot stringByAppendingString:@"/"]];
+    BOOL alreadyLive = [recordPath isEqualToString:livePath];
     if (!alreadyLive) {
-        [fm removeItemAtPath:livePath error:nil];
         NSError *cpErr = nil;
-        if (![fm copyItemAtPath:recordPath toPath:livePath error:&cpErr]) {
+        // Full-tree install (cp -a + file-count verify) — NSFileManager alone often makes empty shells
+        if (![[self class] copyTreeRobustFrom:recordPath to:livePath error:&cpErr]) {
             if (error) *error = cpErr ?: [NSError errorWithDomain:@"NDRecordStore" code:52 userInfo:@{NSLocalizedDescriptionKey: @"copy to /var/mobile/AMG failed"}];
             if (outNote) *outNote = [NSString stringWithFormat:@"liveInstall fail: %@", cpErr.localizedDescription ?: @"?"];
             return NO;
         }
+        // Verify live Venmo
+        NSString *liveVenmo = [livePath stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+        if (![fm fileExistsAtPath:[[liveVenmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]]) {
+            // If src Venmo was nested, materialize from holo parent
+            NSString *matNote = nil;
+            NSError *matErr = nil;
+            BOOL ok = [self materializeClassicLiveAMGAtName:liveName
+                                                  fakerSrc:[recordPath stringByAppendingPathComponent:@"faker.plist"]
+                                                    cfgDir:recordPath
+                                                   holoSrc:[srcVenmo stringByDeletingLastPathComponent]
+                                                      note:&matNote
+                                                     error:&matErr];
+            if (!ok) {
+                if (error) *error = matErr ?: [NSError errorWithDomain:@"NDRecordStore" code:55 userInfo:@{NSLocalizedDescriptionKey: @"live AMG missing Venmo/akc after copy"}];
+                if (outNote) *outNote = matNote ?: @"live missing akc";
+                return NO;
+            }
+        }
     }
-    // Import source: prefer live path (what AMG sees)
     NSString *src = alreadyLive ? recordPath : livePath;
+    [NDPaths makePathWorldReadable:livePath];
 
     if (!self.importingNames) self.importingNames = [NSMutableArray array];
     if (!self.importingHoloLines) self.importingHoloLines = [NSMutableArray array];
@@ -622,7 +840,6 @@
         if (!fakerEncrypted) {
             saved = [self importProfileAtPath:fakerPath preferredName:recordName error:&impErr];
         } else {
-            // Official plaintext API / sidecar
             NSString *paramNote = nil;
             NSDictionary *plain = [NDAMGParamClient resolvePlaintextParamForAMGRecordDir:src
                                                                             recordTitle:liveName
@@ -636,10 +853,10 @@
         }
     }
     if (!saved) {
+        // Still create a stub ONLY after live AMG verified — spoof off if ciphertext
         NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
         fresh.enabled = YES;
-        // Ciphertext classic: don't invent spoof IDs that break Venmo session
-        fresh.spoofDeviceIdentity = !fakerEncrypted ? YES : NO;
+        fresh.spoofDeviceIdentity = NO;
         if ([self saveProfile:fresh error:&impErr]) saved = fresh;
     }
     if (!saved) {
@@ -647,12 +864,14 @@
         if (outNote) *outNote = [NSString stringWithFormat:@"save fail: %@", impErr.localizedDescription ?: @"?"];
         return NO;
     }
-    if (!fakerEncrypted) {
-        saved.spoofDeviceIdentity = YES;
-        [self saveProfile:saved error:nil];
+    if (!fakerEncrypted && saved.spoofDeviceIdentity == NO) {
+        // plaintext identity imported above sets spoof via importProfile; keep YES when we have real IDs
+        if (saved.IDFA.length >= 8 || saved.UDID.length >= 8) {
+            saved.spoofDeviceIdentity = YES;
+            [self saveProfile:saved error:nil];
+        }
     }
 
-    // Side metadata
     for (NSString *side in @[@"ifaddrs.plist", @"description.plist", @"selectApp.plist", @"selectapp.plist"]) {
         NSString *s = [src stringByAppendingPathComponent:side];
         if (![fm fileExistsAtPath:s]) continue;
@@ -675,8 +894,24 @@
         [self mergeTargetApps:apps.array];
     }
 
+    // Seed IDFV from Venmo akc when faker was ciphertext
     NSString *venmoStaged = [NDPaths appsBackupDirForRecord:saved.name bundleId:@"net.kortina.labs.Venmo"];
     NSString *venmoDocs = [venmoStaged stringByAppendingPathComponent:@"Documents"];
+    NSString *akcPath = [venmoDocs stringByAppendingPathComponent:@"akc.plist"];
+    if (fakerEncrypted && [fm fileExistsAtPath:akcPath]) {
+        NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:akcPath];
+        NSDictionary *fpItem = akc[@"VenmoKit_com.venmo.VenmoKit.DeviceFingerprint"];
+        NSData *fpData = [fpItem isKindOfClass:[NSDictionary class]] ? fpItem[@"v_Data"] : nil;
+        if ([fpData isKindOfClass:[NSData class]] && fpData.length >= 32) {
+            NSString *fp = [[NSString alloc] initWithData:fpData encoding:NSUTF8StringEncoding];
+            if (fp.length >= 32) {
+                saved.IDFV = fp;
+                saved.spoofDeviceIdentity = YES;
+                [self saveProfile:saved error:nil];
+            }
+        }
+    }
+
     NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
     NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
     unsigned long long venmoKB = 0;
@@ -686,19 +921,38 @@
         if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular]) venmoKB += [attrs fileSize];
     }
     venmoKB /= 1024;
-    BOOL akc = [fm fileExistsAtPath:[venmoDocs stringByAppendingPathComponent:@"akc.plist"]]
+    BOOL akc = [fm fileExistsAtPath:akcPath]
         || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"akc.plist"]];
+    BOOL liveAkc = [fm fileExistsAtPath:[[[livePath stringByAppendingPathComponent:@"net.kortina.labs.Venmo"]
+                                          stringByAppendingPathComponent:@"Documents"]
+                                         stringByAppendingPathComponent:@"akc.plist"]];
+    unsigned long long liveFiles = [[self class] countRegularFilesAtPath:livePath];
+
+    // Hard fail: do not leave "same-name empty record" as success
+    if (!akc || venmoKB < 10 || !liveAkc) {
+        NSString *msg = [NSString stringWithFormat:
+                         @"FAIL 空壳记录已避免/回滚条件：staged venmoKB=%llu akc=%@ liveAkc=%@ liveFiles=%llu\n"
+                         @"live=%@\nsrc=%@\n",
+                         venmoKB, akc ? @"YES" : @"NO", liveAkc ? @"YES" : @"NO", liveFiles,
+                         livePath, recordPath];
+        [msg writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        // Remove empty NewDevice record
+        [fm removeItemAtPath:[NDPaths recordDir:saved.name] error:nil];
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:56 userInfo:@{NSLocalizedDescriptionKey: msg}];
+        if (outNote) *outNote = @"FAIL empty shell (no staged Venmo)";
+        return NO;
+    }
 
     NSString *note = [NSString stringWithFormat:
-                      @"Classic AMG write-back.\n"
-                      @"liveAMG=%@\n"
+                      @"Classic AMG write-back OK.\n"
+                      @"liveAMG=%@\nliveFiles=%llu liveAkc=YES\n"
                       @"recordsRoot=%@\nrecord=%@\n"
-                      @"stagedApps=%@\nvenmoKB=%llu akc=%@\n"
-                      @"fakerEncrypted=%@ spoof=%@\n"
-                      @"NOTE: AMG only recognizes /var/mobile/AMG/<记录名>/ — not AMG_resolved analysis layout.\n",
-                      livePath, [NDPaths recordsRoot], saved.name,
+                      @"stagedApps=%@\nvenmoKB=%llu akc=YES\n"
+                      @"fakerEncrypted=%@ spoof=%@\n",
+                      livePath, liveFiles,
+                      [NDPaths recordsRoot], saved.name,
                       [staged componentsJoinedByString:@","],
-                      venmoKB, akc ? @"YES" : @"NO",
+                      venmoKB,
                       fakerEncrypted ? @"YES" : @"NO",
                       saved.spoofDeviceIdentity ? @"YES" : @"NO"];
     [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
@@ -706,11 +960,11 @@
     [note writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
-    [self.importingHoloLines addObject:[NSString stringWithFormat:@"classic %@ → live=%@ apps=%lu venmoKB=%llu akc=%@",
-                                        saved.name, liveName, (unsigned long)staged.count, venmoKB, akc ? @"YES" : @"NO"]];
+    [self.importingHoloLines addObject:[NSString stringWithFormat:@"classic %@ → live=%@ apps=%lu venmoKB=%llu akc=YES",
+                                        saved.name, liveName, (unsigned long)staged.count, venmoKB]];
     if (outNote) {
-        *outNote = [NSString stringWithFormat:@"OK classic→/var/mobile/AMG/%@ venmoKB=%llu akc=%@",
-                    liveName, venmoKB, akc ? @"YES" : @"NO"];
+        *outNote = [NSString stringWithFormat:@"OK classic→/var/mobile/AMG/%@ venmoKB=%llu akc=YES liveFiles=%llu",
+                    liveName, venmoKB, liveFiles];
     }
     return YES;
 }
@@ -742,15 +996,20 @@
     if (!self.importingHoloLines) self.importingHoloLines = [NSMutableArray array];
 
     NSString *folder = recordPath.lastPathComponent ?: @"amg-record";
-    NSString *recordName = folder;
+    NSString *liveName = folder;
+    NSString *recNameFile = [idDir stringByAppendingPathComponent:@"record_name.txt"];
+    NSString *fromFile = [NSString stringWithContentsOfFile:recNameFile encoding:NSUTF8StringEncoding error:nil];
+    fromFile = [fromFile stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (fromFile.length) liveName = fromFile;
     NSDictionary *desc = [NSDictionary dictionaryWithContentsOfFile:[cfgDir stringByAppendingPathComponent:@"description.plist"]];
     if (![desc isKindOfClass:[NSDictionary class]]) {
         desc = [NSDictionary dictionaryWithContentsOfFile:[recordPath stringByAppendingPathComponent:@"description.plist"]];
     }
     if ([desc isKindOfClass:[NSDictionary class]] && [desc[@"title"] isKindOfClass:[NSString class]] && [desc[@"title"] length]) {
-        recordName = desc[@"title"];
+        liveName = desc[@"title"];
     }
-    recordName = [self sanitizeRecordName:recordName];
+    liveName = [[self class] preferredAMGLiveRecordNameFrom:liveName];
+    NSString *recordName = [self sanitizeRecordName:liveName];
 
     NDDeviceProfile *saved = nil;
     NSError *impErr = nil;
@@ -895,6 +1154,18 @@
 
     [saved writeAMGFakerToDirectory:[NDPaths recordDir:saved.name] error:nil];
 
+    // Rebuild AMG-recognized classic tree from resolved parts (ciphertext faker + 02_ + 03_)
+    NSString *cipherFaker = [idDir stringByAppendingPathComponent:@"faker.plist.ciphertext"];
+    if (![fm fileExistsAtPath:cipherFaker]) cipherFaker = [idDir stringByAppendingPathComponent:@"faker.plist"];
+    NSString *liveNote = nil;
+    NSError *liveErr = nil;
+    BOOL liveOK = [self materializeClassicLiveAMGAtName:liveName
+                                              fakerSrc:cipherFaker
+                                                cfgDir:cfgDir
+                                               holoSrc:holoSrc
+                                                  note:&liveNote
+                                                 error:&liveErr];
+
     NSString *appsRoot = [[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"apps"];
     NSArray *staged = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
     unsigned long long venmoKB = 0;
@@ -908,22 +1179,37 @@
         || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"akc.plist"]]
         || [fm fileExistsAtPath:[venmoStaged stringByAppendingPathComponent:@"keychain-full.plist"]];
 
+    if ((!akc || venmoKB < 10) && !liveOK) {
+        NSString *msg = [NSString stringWithFormat:
+                         @"FAIL resolved 只建了空壳：venmoKB=%llu akc=%@ live=%@\n%@\n",
+                         venmoKB, akc ? @"YES" : @"NO", liveOK ? @"YES" : @"NO",
+                         liveNote ?: (liveErr.localizedDescription ?: @"")];
+        [msg writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [fm removeItemAtPath:[NDPaths recordDir:saved.name] error:nil];
+        if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:43 userInfo:@{NSLocalizedDescriptionKey: msg}];
+        if (outNote) *outNote = @"FAIL empty resolved shell";
+        return NO;
+    }
+
     NSString *note = [NSString stringWithFormat:
-                      @"Identity from faker_plaintext (AMG_resolved direct).\n"
+                      @"AMG_resolved → NewDevice + classic live rebuild.\n"
+                      @"liveAMG=/var/mobile/AMG/%@\nlive=%@ (%@)\n"
                       @"recordsRoot=%@\nrecord=%@\nholoSrc=%@\nstagedApps=%@\nvenmoKB=%llu akc=%@\n",
+                      liveName, liveOK ? @"YES" : @"NO", liveNote ?: @"-",
                       [NDPaths recordsRoot], saved.name, holoSrc,
                       [staged componentsJoinedByString:@","],
                       venmoKB, akc ? @"YES" : @"NO"];
     [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
           atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    // Also drop a copy where Aisi can see it
     [note writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
-    [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → apps=%lu venmoKB=%llu akc=%@",
-                                        saved.name, (unsigned long)staged.count, venmoKB, akc ? @"YES" : @"NO"]];
+    [self.importingHoloLines addObject:[NSString stringWithFormat:@"%@ → apps=%lu venmoKB=%llu akc=%@ live=%@",
+                                        saved.name, (unsigned long)staged.count, venmoKB,
+                                        akc ? @"YES" : @"NO", liveOK ? @"YES" : @"NO"]];
     if (outNote) {
-        *outNote = [NSString stringWithFormat:@"OK %@ venmoKB=%llu akc=%@", saved.name, venmoKB, akc ? @"YES" : @"NO"];
+        *outNote = [NSString stringWithFormat:@"OK %@ venmoKB=%llu akc=%@ live=%@",
+                    saved.name, venmoKB, akc ? @"YES" : @"NO", liveOK ? @"YES" : @"NO"];
     }
     return YES;
 }

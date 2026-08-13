@@ -179,9 +179,9 @@
         if (![n isEqualToString:@"原始机器"]) imported++;
     }
     if (imported == 0) {
-        return @"还没有导入记录。请用桌面经典包 +1916… 2026-….tar.gz（不是 AMG_resolved 分析包）放到 Media/AMG/import 后点「导入」。\n会写入 /var/mobile/AMG/<记录名>/（AMG 只认这个路径）。\n看 nd-import-status.txt：需 venmoKB>0 akc=YES。";
+        return @"还没有导入记录。把桌面 +1916… 2026-….tar.gz 放到 Media/AMG/import 后导入。\n成功条件：nd-import-status.txt 含 Classic…OK / liveAkc=YES / venmoKB>0。\n若只有同名空壳=失败（146 已拒绝空壳）。";
     }
-    return @"点选记录写入沙盒后，完全杀掉 Venmo 再打开。经典包会落在 /var/mobile/AMG/<记录名>/。";
+    return @"列表应显示 apps:N akc。点选写入沙盒后杀掉 Venmo 再开。live 路径：/var/mobile/AMG/<记录名>/";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

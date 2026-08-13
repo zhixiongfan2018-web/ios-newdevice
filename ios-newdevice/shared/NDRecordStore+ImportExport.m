@@ -35,29 +35,27 @@
 }
 
 /// Classic runtime / desktop export layout AMG itself recognizes under /var/mobile/AMG/<name>/.
+/// Must have real holographic content — description-only folders are NOT classic (they create empty shells).
 + (BOOL)NDPathLooksLikeClassicAMGRecordDir:(NSString *)full {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:full isDirectory:&isDir] || !isDir) return NO;
-    // Resolved analysis packs use 01_/02_/03_ — not classic even if nested
     BOOL has01 = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"01_plaintext_identity"]];
     BOOL has03 = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"03_holographic_backups"]];
+    if (has01 || has03) return NO; // resolved analysis layout
     BOOL hasFaker = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"faker.plist"]];
-    BOOL hasSelect = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectApp.plist"]]
-        || [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"selectapp.plist"]];
-    BOOL hasDesc = [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"description.plist"]];
-    if (hasFaker) return YES;
-    // Desktop classic often has selectApp + bid folders at root without needing faker readable
-    if ((hasSelect || hasDesc) && !has01) return YES;
-    // Bid folder at root (e.g. net.kortina.labs.Venmo) ⇒ classic holographic tree
-    if (!has01 && !has03) {
-        NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
-        for (NSString *k in kids) {
-            if ([k rangeOfString:@"."].location == NSNotFound) continue;
-            if ([k.pathExtension.lowercaseString isEqualToString:@"plist"]) continue;
-            BOOL d = NO;
-            if ([fm fileExistsAtPath:[full stringByAppendingPathComponent:k] isDirectory:&d] && d) return YES;
-        }
+    NSString *venmo = [full stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
+    BOOL hasVenmoAkc = [fm fileExistsAtPath:[[venmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]];
+    if (hasVenmoAkc) return YES;
+    if (!hasFaker) return NO;
+    // faker + at least one bid folder with Documents/
+    NSArray *kids = [fm contentsOfDirectoryAtPath:full error:nil] ?: @[];
+    for (NSString *k in kids) {
+        if ([k rangeOfString:@"."].location == NSNotFound) continue;
+        if ([k.pathExtension.lowercaseString isEqualToString:@"plist"]) continue;
+        NSString *docs = [[full stringByAppendingPathComponent:k] stringByAppendingPathComponent:@"Documents"];
+        BOOL d = NO;
+        if ([fm fileExistsAtPath:docs isDirectory:&d] && d) return YES;
     }
     return NO;
 }

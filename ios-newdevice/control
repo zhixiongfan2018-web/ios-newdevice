@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-145
+Version: 1.0.0-146
 Architecture: iphoneos-arm64
-Description: Classic AMG tar write-back to /var/mobile/AMG/<record>/; resolved is analysis-only.
+Description: Reject empty same-name shells; verify Venmo/akc; rebuild classic live AMG from resolved.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
