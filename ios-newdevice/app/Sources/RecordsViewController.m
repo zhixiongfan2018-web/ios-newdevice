@@ -69,55 +69,28 @@
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"解压并写入 App 沙盒…" preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:wait animated:YES completion:^{
         [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
-            // Second pass: explicit restoreHolo so report is authoritative
-            NSString *name = [NDRecordStore shared].lastImportedRecordNames.lastObject ?: @"";
-            void (^show)(NSString *, NSInteger) = ^(NSString *report, NSInteger c) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [wait dismissViewControllerAnimated:YES completion:^{
-                        NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
-                        NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
-                        NSString *write = [NDAppDataManager shared].lastRestoreReport;
-                        if (!write.length) write = report;
-                        if (!write.length) write = @"(无写入报告, 请看 Media/NewDevice/last-restore.txt)";
-                        NSString *msg = nil;
-                        if (c == 200 || code == 200) {
-                            BOOL noKC = [write containsString:@"keychainDump=NO"];
-                            BOOL wroteOK = [write containsString:@"OK net.kortina.labs.Venmo"] || [write containsString:@"marker=yes"];
-                            NSString *hint = @"";
-                            if (wroteOK && noKC) {
-                                hint = @"\n\n重要：沙盒已写入，但未检测到 Keychain（keychain-full / AMG 的 akc.plist）。\nVenmo 会显示未登录/空白。\n可用爱思查看沙盒 Documents/nd-restore-ok.txt 验证文件写入。";
-                            } else if (wroteOK && [write containsString:@"keychainDump=yes"]) {
-                                hint = @"\n\n已检测到 akc/Keychain。请完全杀掉 Venmo 再打开一次（插件会在 App 进程内写钥匙串）。\n打开后用爱思看 Documents/nd-akc-ok.txt：ok 应 >0。\n若 faker 是密文，身份被随机化，仍可能登不上——请用 AMG「导出 AMG 数据」的明文包。";
-                            } else if ([write containsString:@"FAIL Containers"]) {
-                                hint = @"\n\n无法访问 Containers：请确认已装最新版并注销桌面。";
-                            } else if ([write containsString:@"未找到数据容器"]) {
-                                hint = @"\n\n请先安装并打开一次 Venmo，再点「强制写入」。";
-                            }
-                            msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n写入沙盒结果：\n%@%@\n\n路径：%@",
-                                   names.length ? names : @"",
-                                   holo.length ? holo : @"(无)",
-                                   write,
-                                   hint,
-                                   dir];
-                        } else {
-                            msg = body.length ? body : @"导入失败";
-                        }
-                        UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
-                                                                                   message:msg
-                                                                            preferredStyle:UIAlertControllerStyleAlert];
-                        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                        [self presentViewController:a animated:YES completion:nil];
-                        [self reload];
-                    }];
-                });
-            };
-            if (code == 200 && name.length) {
-                [[NDOperationService shared] runAsync:@"restoreHolo" query:@{@"recordName": name} completion:^(NSString *rbody, NSInteger rcode) {
-                    show(rbody, rcode);
+            // Import only stages data — restore separately to avoid jetsam/闪退.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
+                    NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
+                    NSString *msg = nil;
+                    if (code == 200 && names.length) {
+                        msg = [NSString stringWithFormat:@"已导入：%@\n\n暂存：\n%@\n\n路径：%@\n\n下一步：点选该记录写入沙盒（或右上角「强制写入」），再杀掉 Venmo 重开。\n日志：Media/AMG/import/nd-last-import.txt",
+                               names,
+                               holo.length ? holo : @"(无 apps 摘要)",
+                               dir];
+                    } else {
+                        msg = body.length ? body : @"导入失败（目录可能是空的，或文件名不是 .tar.gz）\n见 Media/AMG/import/nd-last-import.txt";
+                    }
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
+                                                                               message:msg
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:a animated:YES completion:nil];
+                    [self reload];
                 }];
-            } else {
-                show(body, code);
-            }
+            });
         }];
     }];
 }

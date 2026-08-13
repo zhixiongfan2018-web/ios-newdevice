@@ -423,34 +423,27 @@
             NSString *dir = query[@"dir"] ?: [NDRecordStore resolvedAMGImportPath];
             NSError *err = nil;
             BOOL kc = query[@"keychain"] ? [query[@"keychain"] boolValue] : [NDConfig shared].importKeychainWithData;
-            NSUInteger n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
-            // Auto-apply last imported record so Venmo/etc. land in live sandboxes immediately
-            NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
-            if (n > 0 && applyName.length) {
-                __block NSString *applyMsg = @"";
-                @try {
-                    [self prepareTargetsForDestination:applyName block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
-                        NSError *swErr = nil;
-                        if ([[NDRecordStore shared] switchToRecord:applyName error:&swErr]) {
-                            [self afterSwitchFrom:previousRecord to:applyName apps:apps];
-                            applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
-                                        [NDAppDataManager shared].lastRestoreReport ?: @""];
-                        } else {
-                            applyMsg = swErr.localizedDescription ?: @"apply failed";
-                        }
-                    }];
-                } @catch (NSException *ex) {
-                    applyMsg = [NSString stringWithFormat:@"apply exception: %@", ex.reason ?: @"?"];
-                }
-                body = [NSString stringWithFormat:@"%lu\n%@\n%@\n%@", (unsigned long)n,
-                        [[NDRecordStore shared] lastImportHoloSummary] ?: @"",
-                        applyMsg,
-                        err.localizedDescription ?: @""];
-            } else {
-                body = [NSString stringWithFormat:@"%lu", (unsigned long)n];
+            NSUInteger n = 0;
+            @try {
+                n = [[NDRecordStore shared] importAMGRecordsFromDirectory:dir importKeychain:kc error:&err];
+            } @catch (NSException *ex) {
+                err = [NSError errorWithDomain:@"NDRecordStore" code:99
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"导入异常：%@", ex.reason ?: @"?"]}];
             }
-            [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
-            done(body, (n > 0 || !err) ? 200 : 500);
+            // Stage only — do NOT auto-apply sandbox restore here (jetsam/闪退).
+            // User taps the record (or 强制写入) afterward.
+            NSString *names = [[[NDRecordStore shared] lastImportedRecordNames] componentsJoinedByString:@", "] ?: @"";
+            NSString *holo = [[NDRecordStore shared] lastImportHoloSummary] ?: @"";
+            if (n > 0) {
+                body = [NSString stringWithFormat:@"%lu\n%@\n staged:%@\n(未自动写入沙盒，请点选该记录或「强制写入」)\n%@",
+                        (unsigned long)n, holo, names, err.localizedDescription ?: @""];
+            } else {
+                body = err.localizedDescription.length
+                    ? err.localizedDescription
+                    : [NSString stringWithFormat:@"0\n未导入。扫描目录：%@", dir];
+            }
+            [[NDRecordStore shared] writeResultCode:(n > 0) ? 1 : 0];
+            done(body, (n > 0) ? 200 : 500);
             return;
         }
 

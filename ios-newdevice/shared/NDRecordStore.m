@@ -36,8 +36,9 @@
             @"import", @"export",
             @"debs", @"stable", @"apt", @"downloads",
             @"config", @"settings", @"records",
-            @"amg", @"amg_tar", @"igrimace", @"importdata",
+            @"amg", @"amg_tar", @"amg_extract", @"igrimace", @"importdata",
             @"nd-export-stage", @"nd-extract",
+            @"01_plaintext_identity", @"02_config_plists", @"03_holographic_backups",
             @"使用说明.txt",
         ]];
     });
