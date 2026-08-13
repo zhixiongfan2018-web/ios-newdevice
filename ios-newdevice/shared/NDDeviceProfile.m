@@ -2,6 +2,7 @@
 #import "NDDeviceCatalog.h"
 #import "NDDeviceCatalog+Metrics.h"
 #import "NDConfig.h"
+#import <stdlib.h>
 
 static NSString *NDRandomHex(NSUInteger length) {
     static const char *hex = "0123456789abcdef";
@@ -14,6 +15,19 @@ static NSString *NDRandomHex(NSUInteger length) {
 
 static NSString *NDRandomUUID(void) {
     return [[NSUUID UUID] UUIDString];
+}
+
+/// AMG faker stores DiskSpace/Memory as decimal strings — NSString has no unsignedLongLongValue on some iOS builds.
+static unsigned long long NDUnsignedLongLongFrom(id v) {
+    if (!v || v == [NSNull null]) return 0;
+    if ([v isKindOfClass:[NSNumber class]]) return [(NSNumber *)v unsignedLongLongValue];
+    if ([v isKindOfClass:[NSString class]]) {
+        NSString *s = [(NSString *)v stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!s.length) return 0;
+        return strtoull(s.UTF8String, NULL, 10);
+    }
+    if ([v respondsToSelector:@selector(longLongValue)]) return (unsigned long long)[v longLongValue];
+    return 0;
 }
 
 /// Apple-assigned OUI prefixes commonly seen on iPhone Wi‑Fi / BT interfaces.
@@ -546,19 +560,6 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         return [self normalizedImportDictionary:merged];
     }
     return d;
-}
-
-/// AMG faker stores DiskSpace/Memory as decimal strings — NSString has no unsignedLongLongValue on some iOS builds.
-static unsigned long long NDUnsignedLongLongFrom(id v) {
-    if (!v || v == [NSNull null]) return 0;
-    if ([v isKindOfClass:[NSNumber class]]) return [(NSNumber *)v unsignedLongLongValue];
-    if ([v isKindOfClass:[NSString class]]) {
-        NSString *s = [(NSString *)v stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (!s.length) return 0;
-        return strtoull(s.UTF8String, NULL, 10);
-    }
-    if ([v respondsToSelector:@selector(longLongValue)]) return (unsigned long long)[v longLongValue];
-    return 0;
 }
 
 + (instancetype)profileFromDictionary:(NSDictionary *)dict {
