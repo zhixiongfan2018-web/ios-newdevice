@@ -1,8 +1,8 @@
 Package: com.local.newdevice
 Name: NewDevice
-Version: 1.0.0-140
+Version: 1.0.0-141
 Architecture: iphoneos-arm64
-Description: Direct AMG_resolved record import; strip + from extract paths.
+Description: Fix NSString unsignedLongLongValue crash on AMG DiskSpace/Memory.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
