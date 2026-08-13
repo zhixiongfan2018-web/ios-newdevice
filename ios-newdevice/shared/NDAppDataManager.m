@@ -90,94 +90,110 @@ extern char **environ;
     }
 }
 
-- (NSURL *)NDMCMContainerURLForClassNames:(NSArray<NSString *> *)classNames
-                              identifier:(NSString *)identifier
-                       createIfNecessary:(BOOL)create {
+- (NSString *)NDScanContainerUnderRoots:(NSArray<NSString *> *)roots identifier:(NSString *)identifier {
+    if (!identifier.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *appsRoot in roots) {
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        for (NSString *uuid in uuids) {
+            if (uuid.length < 30) continue; // UUID dirs
+            NSString *dir = [appsRoot stringByAppendingPathComponent:uuid];
+            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
+            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:identifier]) return dir;
+        }
+    }
+    return nil;
+}
+
+- (NSURL *)NDMCMContainerURLSafe:(NSString *)identifier classNames:(NSArray<NSString *> *)classNames {
+    // Never use createIfNecessary — wrong objc_msgSend ABI / missing entitlement can crash
+    // the whole app/daemon and break 一键新机.
     if (!identifier.length) return nil;
     [[self class] loadMCM];
+    __block NSURL *found = nil;
     for (NSString *clsName in classNames) {
         Class cls = NSClassFromString(clsName);
         if (!cls) continue;
-        id container = nil;
-        // +containerWithIdentifier:createIfNecessary:existed:error:
-        SEL selCreate = NSSelectorFromString(@"containerWithIdentifier:createIfNecessary:existed:error:");
-        if ([cls respondsToSelector:selCreate]) {
-            BOOL existed = NO;
-            NSError *err = nil;
-            // objc_msgSend for BOOL/error out-params
-            id (*msg)(Class, SEL, id, BOOL, BOOL *, NSError **) = (void *)objc_msgSend;
-            container = msg(cls, selCreate, identifier, create, &existed, &err);
-        }
-        if (!container) {
+        @try {
             SEL sel = NSSelectorFromString(@"containerWithIdentifier:error:");
-            if ([cls respondsToSelector:sel]) {
-                NSError *err = nil;
-                id (*msg)(Class, SEL, id, NSError **) = (void *)objc_msgSend;
-                container = msg(cls, sel, identifier, &err);
+            if (![cls respondsToSelector:sel]) continue;
+            NSError *err = nil;
+            // Use NSInvocation to avoid ABI crashes with objc_msgSend + NSError**
+            NSMethodSignature *sig = [cls methodSignatureForSelector:sel];
+            if (!sig) continue;
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            inv.target = cls;
+            inv.selector = sel;
+            NSString *ident = identifier;
+            NSError * __autoreleasing *errPtr = &err;
+            [inv setArgument:&ident atIndex:2];
+            [inv setArgument:&errPtr atIndex:3];
+            [inv invoke];
+            __unsafe_unretained id container = nil;
+            [inv getReturnValue:&container];
+            if (!container) continue;
+            if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
+                NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
+                if ([url isKindOfClass:[NSURL class]] && url.path.length) {
+                    found = url;
+                    break;
+                }
             }
+        } @catch (__unused NSException *ex) {
+            NSLog(@"[NewDevice] MCM lookup exception for %@: %@", identifier, ex);
         }
-        if (!container) continue;
-        NSURL *url = nil;
-        if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
-            url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
-        }
-        if ([url isKindOfClass:[NSURL class]] && url.path.length) return url;
     }
-    return nil;
+    return found;
 }
 
 - (NSString *)containerPathForBundleId:(NSString *)bundleId {
     if (!bundleId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // 1) MobileContainerManager — correct on iOS 12+ (LSApplicationProxy dataContainerURL is often wrong/nil)
-    NSURL *mcm = [self NDMCMContainerURLForClassNames:@[
-        @"MCMAppDataContainer",
-        @"MCMDataContainer",
-    ] identifier:bundleId createIfNecessary:YES];
-    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
-
-    // 2) Metadata scan (works when we can list containers as mobile/no-sandbox)
-    for (NSString *appsRoot in @[
+    // 1) Metadata scan FIRST — safe, no private API ABI risk (fixes 一键新机 crash)
+    NSString *scanned = [self NDScanContainerUnderRoots:@[
         @"/var/mobile/Containers/Data/Application",
         @"/private/var/mobile/Containers/Data/Application",
-    ]) {
-        NSArray *uuids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
-        for (NSString *uuid in uuids) {
-            NSString *dir = [appsRoot stringByAppendingPathComponent:uuid];
-            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleId]) return dir;
-        }
-    }
+    ] identifier:bundleId];
+    if (scanned.length) return scanned;
 
-    // 3) Last resort: LSApplicationProxy (unreliable since iOS 12, kept as fallback)
-    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
-    if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
-        id (*msg)(Class, SEL, id) = (void *)objc_msgSend;
-        id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bundleId);
-        if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
-            NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"dataContainerURL"));
-            if ([url isKindOfClass:[NSURL class]] && url.path.length && [fm fileExistsAtPath:url.path]) return url.path;
+    // 2) Safe MCM lookup (no createIfNecessary)
+    NSURL *mcm = [self NDMCMContainerURLSafe:bundleId classNames:@[@"MCMAppDataContainer", @"MCMDataContainer"]];
+    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
+
+    // 3) LSApplicationProxy last resort
+    @try {
+        Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+        if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+            id (*msg)(Class, SEL, id) = (void *)objc_msgSend;
+            id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bundleId);
+            if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
+                NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"dataContainerURL"));
+                if ([url isKindOfClass:[NSURL class]] && url.path.length && [fm fileExistsAtPath:url.path]) return url.path;
+            }
         }
-    }
-    return mcm.path.length ? mcm.path : nil; // return created path even if not yet visible
+    } @catch (__unused NSException *ex) {}
+    return nil;
 }
 
 - (void)tryLaunchAppToCreateContainer:(NSString *)bundleId {
+    // Only used by explicit restoreHolo — never during 一键新机
     if (!bundleId.length) return;
-    Class WS = NSClassFromString(@"LSApplicationWorkspace");
-    if (!WS || ![WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) return;
-    id (*msg0)(Class, SEL) = (void *)objc_msgSend;
-    id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
-    if (!ws) return;
-    SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
-    if ([ws respondsToSelector:openSel]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, bundleId);
-        [NSThread sleepForTimeInterval:1.2];
-        [self terminateApps:@[bundleId]];
-        [NSThread sleepForTimeInterval:0.4];
-    }
+    @try {
+        Class WS = NSClassFromString(@"LSApplicationWorkspace");
+        if (!WS || ![WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) return;
+        id (*msg0)(Class, SEL) = (void *)objc_msgSend;
+        id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
+        if (!ws) return;
+        SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
+        if ([ws respondsToSelector:openSel]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, bundleId);
+            [NSThread sleepForTimeInterval:0.8];
+            [self terminateApps:@[bundleId]];
+            [NSThread sleepForTimeInterval:0.3];
+        }
+    } @catch (__unused NSException *ex) {}
 }
 
 - (BOOL)mirrorTree:(NSString *)src to:(NSString *)dst error:(NSError **)error {
@@ -340,14 +356,15 @@ extern char **environ;
         return NO;
     }
 
-    NSString *container = [self containerPathForBundleId:bid];
-    if (!container.length) {
-        [self tryLaunchAppToCreateContainer:bid];
+    NSString *container = nil;
+    @try {
         container = [self containerPathForBundleId:bid];
+    } @catch (__unused NSException *ex) {
+        container = nil;
     }
     if (!container.length) {
         [missing addObject:bid];
-        [lines addObject:[NSString stringWithFormat:@"FAIL %@ — 未找到数据容器（请确认已安装该 App）", bid]];
+        [lines addObject:[NSString stringWithFormat:@"FAIL %@ — 未找到数据容器（请确认已安装并打开过该 App）", bid]];
         return NO;
     }
 
@@ -630,26 +647,19 @@ extern char **environ;
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {
     if (!groupId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSURL *mcm = [self NDMCMContainerURLForClassNames:@[
+    NSString *scanned = [self NDScanContainerUnderRoots:@[
+        @"/var/mobile/Containers/Shared/AppGroup",
+        @"/private/var/mobile/Containers/Shared/AppGroup",
+    ] identifier:groupId];
+    if (scanned.length) return scanned;
+
+    NSURL *mcm = [self NDMCMContainerURLSafe:groupId classNames:@[
         @"MCMSharedAppGroupContainer",
         @"MCMAppGroupContainer",
         @"MCMSharedDataContainer",
-    ] identifier:groupId createIfNecessary:YES];
+    ]];
     if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
-
-    for (NSString *root in @[
-        @"/var/mobile/Containers/Shared/AppGroup",
-        @"/private/var/mobile/Containers/Shared/AppGroup",
-    ]) {
-        NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
-        for (NSString *uuid in uuids) {
-            NSString *dir = [root stringByAppendingPathComponent:uuid];
-            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:groupId]) return dir;
-        }
-    }
-    return mcm.path;
+    return nil;
 }
 
 - (void)backupAppGroupsForBundleId:(NSString *)bid toRecord:(NSString *)recordName {

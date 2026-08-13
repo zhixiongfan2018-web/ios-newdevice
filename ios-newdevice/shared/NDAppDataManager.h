@@ -46,6 +46,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (nullable NSString *)containerPathForBundleId:(NSString *)bundleId;
 
+/// Best-effort: open app once so iOS creates its data container (restoreHolo only).
+- (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
+
 @end
 
 NS_ASSUME_NONNULL_END

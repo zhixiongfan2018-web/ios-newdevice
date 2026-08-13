@@ -65,56 +65,83 @@
     block(apps, prev);
 }
 
+- (BOOL)recordHasStagedApps:(NSString *)name {
+    if (!name.length || [name isEqualToString:@"原始机器"]) return NO;
+    NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+    NSArray *entries = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+    for (NSString *e in entries) {
+        if ([e hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:[appsRoot stringByAppendingPathComponent:e] isDirectory:&isDir] && isDir) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
     NDConfig *cfg = [NDConfig shared];
-    // Prefer apps belonging to the destination record (imported selectApp / apps/)
-    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:apps ?: @[]];
-    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
-    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [set addObject:b];
-    apps = set.array;
-    if (apps.count) {
-        cfg.targetApps = apps;
-        [cfg save];
-    }
-    if (cfg.holographicBackup && apps.count) {
-        // CRITICAL: never backup when re-selecting the same record — that overwrites
-        // freshly imported holographic trees (e.g. Venmo 22MB) with empty live sandboxes.
-        BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
-        if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"]) {
-            [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+    @try {
+        // Destination record apps only — do NOT permanently union every historical import
+        // into global targetApps (that bloated lists and broke 一键新机 with huge backups).
+        NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
+        // Working set for this switch: configured targets + both records' apps
+        NSMutableOrderedSet *work = [NSMutableOrderedSet orderedSetWithArray:apps ?: @[]];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [work addObject:b];
+        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [work addObject:b];
+        apps = work.array;
+        if (set.count) {
+            cfg.targetApps = set.array;
+            [cfg save];
         }
-        if ([current isEqualToString:@"原始机器"]) {
-            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
-        } else {
-            NSError *restoreErr = nil;
-            // Prefer staged apps/ tree (Venmo etc.) — not only selectApp/targetApps lists
-            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
-            if (apps.count) {
-                [[NDAppDataManager shared] restoreApps:apps fromRecord:current error:nil];
-            }
-            [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
-            if (restoreErr) {
-                NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
-            }
-        }
-    } else if (apps.count) {
-        [[NDAppDataManager shared] clearDataForApps:apps error:nil];
-    }
 
-    // AMG-style pasteboard holographic: always snapshot outgoing record when enabled
-    if (cfg.clearPasteboardOnSwitch) {
-        NDAppDataManager *adm = [NDAppDataManager shared];
-        if (previous.length && ![previous isEqualToString:@"原始机器"]) {
-            [adm backupPasteboardToRecord:previous];
+        BOOL hasStaged = [self recordHasStagedApps:current];
+        if (cfg.holographicBackup && apps.count) {
+            BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
+            // Only snapshot outgoing record when it already has / will keep holographic data.
+            // Skip giant backup when leaving a record during 一键新机 if destination is a fresh empty record.
+            if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && hasStaged) {
+                [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+            } else if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && [self recordHasStagedApps:previous]) {
+                // Leaving an imported record for a new empty one — backup previous only
+                [[NDAppDataManager shared] backupApps:[[NDRecordStore shared] appBundleIdsForRecord:previous]
+                                            toRecord:previous
+                                               error:nil];
+            }
+
+            if ([current isEqualToString:@"原始机器"]) {
+                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            } else if (hasStaged) {
+                NSError *restoreErr = nil;
+                [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
+                [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
+                if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
+            } else {
+                // 一键新机 / empty record: wipe target apps for a clean slate (do not hang on restore)
+                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            }
+        } else if (apps.count) {
+            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
         }
-        if ([current isEqualToString:@"原始机器"]) {
-            [adm clearGeneralPasteboard];
-        } else {
-            [adm restorePasteboardFromRecord:current];
+
+        if (cfg.clearPasteboardOnSwitch) {
+            NDAppDataManager *adm = [NDAppDataManager shared];
+            if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+                [adm backupPasteboardToRecord:previous];
+            }
+            if ([current isEqualToString:@"原始机器"]) {
+                [adm clearGeneralPasteboard];
+            } else {
+                [adm restorePasteboardFromRecord:current];
+            }
         }
-    }
-    if (cfg.smartAirplane) {
-        [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+        if (cfg.smartAirplane) {
+            [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+        }
+    } @catch (NSException *ex) {
+        NSLog(@"[NewDevice] afterSwitch exception: %@", ex);
+        // Never leave result stuck at 2 — identity switch already happened
     }
 }
 
@@ -138,9 +165,10 @@
                     done(@"", 500);
                     return;
                 }
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                // Mark success BEFORE holographic work so UI never sticks if app wipe is slow/fails
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
             }];
             return;
         }
@@ -202,17 +230,19 @@
 
         if ([fun isEqualToString:@"setRecord"]) {
             NSString *name = query[@"recordName"] ?: @"";
-            [NDConfig shared].holographicBackup = YES;
-            [[NDConfig shared] save];
             [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
-                if (success) [self afterSwitchFrom:previousRecord to:name apps:apps];
+                if (success) {
+                    [[NDRecordStore shared] writeResultCode:1];
+                    [self afterSwitchFrom:previousRecord to:name apps:apps];
+                } else {
+                    [[NDRecordStore shared] writeResultCode:0];
+                }
                 NSString *report = [NDAppDataManager shared].lastRestoreReport ?: @"";
                 NSString *msg = success
                     ? [NSString stringWithFormat:@"%@\n\n%@", name, report]
                     : (err.localizedDescription ?: name);
-                [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
                 done(msg, success ? 200 : 500);
             }];
             return;
@@ -225,14 +255,24 @@
                 done(@"无当前记录", 500);
                 return;
             }
-            [NDConfig shared].holographicBackup = YES;
-            [[NDConfig shared] save];
             NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
             [[NDAppDataManager shared] terminateApps:bids];
+            // Explicit force path: try open apps once if container missing
+            NSMutableArray *lines = [NSMutableArray array];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+            for (NSString *bid in ([fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[])) {
+                if ([bid hasPrefix:@"."]) continue;
+                if (![[NDAppDataManager shared] containerPathForBundleId:bid]) {
+                    [[NDAppDataManager shared] tryLaunchAppToCreateContainer:bid];
+                    [lines addObject:[NSString stringWithFormat:@"launch-try %@", bid]];
+                }
+            }
             NSError *err = nil;
             [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
             NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
+            if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
             [[NDRecordStore shared] writeResultCode:1];
             done(report, 200);
             return;
@@ -387,21 +427,21 @@
             // Auto-apply last imported record so Venmo/etc. land in live sandboxes immediately
             NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
             if (n > 0 && applyName.length) {
-                [NDConfig shared].holographicBackup = YES;
-                [[NDConfig shared] save];
                 __block NSString *applyMsg = @"";
-                [self prepareTargetsForDestination:applyName block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
-                    NSError *swErr = nil;
-                    if ([[NDRecordStore shared] switchToRecord:applyName error:&swErr]) {
-                        [self afterSwitchFrom:previousRecord to:applyName apps:apps];
-                        // Explicit second pass on staged apps/ (MCM container path)
-                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:nil];
-                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
-                                    [NDAppDataManager shared].lastRestoreReport ?: @""];
-                    } else {
-                        applyMsg = swErr.localizedDescription ?: @"apply failed";
-                    }
-                }];
+                @try {
+                    [self prepareTargetsForDestination:applyName block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                        NSError *swErr = nil;
+                        if ([[NDRecordStore shared] switchToRecord:applyName error:&swErr]) {
+                            [self afterSwitchFrom:previousRecord to:applyName apps:apps];
+                            applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
+                                        [NDAppDataManager shared].lastRestoreReport ?: @""];
+                        } else {
+                            applyMsg = swErr.localizedDescription ?: @"apply failed";
+                        }
+                    }];
+                } @catch (NSException *ex) {
+                    applyMsg = [NSString stringWithFormat:@"apply exception: %@", ex.reason ?: @"?"];
+                }
                 body = [NSString stringWithFormat:@"%lu\n%@\n%@\n%@", (unsigned long)n,
                         [[NDRecordStore shared] lastImportHoloSummary] ?: @"",
                         applyMsg,
