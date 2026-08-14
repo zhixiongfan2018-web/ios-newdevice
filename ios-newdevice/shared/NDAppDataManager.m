@@ -115,25 +115,41 @@ extern char **environ;
 }
 
 - (NSURL *)NDMCMContainerURLSafe:(NSString *)identifier classNames:(NSArray<NSString *> *)classNames {
-    // Never use createIfNecessary — wrong objc_msgSend ABI / missing entitlement can crash
-    // the whole app/daemon and break 一键新机. Pass NULL for NSError** to keep ABI simple.
+    // iOS 18: calling +[MCMContainer containerWithIdentifier:error:] can resolve to
+    // createIfNecessary path and abort("You cannot init this class directly").
+    // Always use subclass + createIfNecessary:NO.
     if (!identifier.length) return nil;
     [[self class] loadMCM];
     for (NSString *clsName in classNames) {
         Class cls = NSClassFromString(clsName);
         if (!cls) continue;
         @try {
+            SEL sel4 = NSSelectorFromString(@"containerWithIdentifier:createIfNecessary:existed:error:");
+            if ([cls respondsToSelector:sel4]) {
+                BOOL existed = NO;
+                NSError *err = nil;
+                id (*msg4)(Class, SEL, id, BOOL, BOOL *, NSError *__autoreleasing *) = (void *)objc_msgSend;
+                id container = msg4(cls, sel4, identifier, NO, &existed, &err);
+                if (!container) continue;
+                if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
+                    NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
+                    if ([url isKindOfClass:[NSURL class]] && url.path.length) return url;
+                }
+                continue;
+            }
+            // Older signature — still never create
             SEL sel = NSSelectorFromString(@"containerWithIdentifier:error:");
             if (![cls respondsToSelector:sel]) continue;
-            id (*msg)(Class, SEL, id, void *) = (void *)objc_msgSend;
-            id container = msg(cls, sel, identifier, NULL);
+            NSError *err2 = nil;
+            id (*msg)(Class, SEL, id, NSError *__autoreleasing *) = (void *)objc_msgSend;
+            id container = msg(cls, sel, identifier, &err2);
             if (!container) continue;
             if ([container respondsToSelector:NSSelectorFromString(@"url")]) {
                 NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(container, NSSelectorFromString(@"url"));
                 if ([url isKindOfClass:[NSURL class]] && url.path.length) return url;
             }
         } @catch (__unused NSException *ex) {
-            NSLog(@"[NewDevice] MCM lookup exception for %@", identifier);
+            NSLog(@"[NewDevice] MCM lookup exception for %@ class %@", identifier, clsName);
         }
     }
     return nil;
