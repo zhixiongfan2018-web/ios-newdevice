@@ -98,32 +98,33 @@
         }
 
         BOOL hasStaged = [self recordHasStagedApps:current];
+        BOOL prevStaged = [self recordHasStagedApps:previous];
         if (cfg.holographicBackup && apps.count) {
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
-            // Only snapshot outgoing record when it already has / will keep holographic data.
-            // Skip giant backup when leaving a record during 一键新机 if destination is a fresh empty record.
-            if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && hasStaged) {
+            BOOL leavingReal = !sameRecord && previous.length && ![previous isEqualToString:@"原始机器"];
+
+            // Snapshot outgoing live data only when we still need a holographic copy.
+            // If previous already has staged apps (AMG import), skip re-backup — it was
+            // blocking 一键新机 for tens of seconds and often jetsam'd before clear ran,
+            // so the previous environment stayed in Venmo/Safari sandboxes.
+            if (leavingReal && hasStaged) {
+                // Switching into an imported/staged record: save current live first.
                 [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
-            } else if (!sameRecord && previous.length && ![previous isEqualToString:@"原始机器"] && [self recordHasStagedApps:previous]) {
-                // Leaving an imported record for a new empty one — backup previous only
+            } else if (leavingReal && !prevStaged) {
+                // Leaving a hand-built env with no stage yet — snapshot before wipe.
                 [[NDAppDataManager shared] backupApps:[[NDRecordStore shared] appBundleIdsForRecord:previous]
                                             toRecord:previous
                                                error:nil];
             }
 
-            if ([current isEqualToString:@"原始机器"]) {
-                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
-            } else if (hasStaged) {
-                // Always wipe live app+keychain first so destination identity can't leak
-                // the previous record's Venmo session into a "new" environment.
-                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            // Always wipe live sandboxes (+ Venmo keychain) so the new identity cannot
+            // inherit the previous environment's login/files.
+            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
                 [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
-            } else {
-                // 一键新机 / empty record: wipe target apps for a clean slate (do not hang on restore)
-                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
             }
         } else if (apps.count) {
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
@@ -169,10 +170,11 @@
                     done(@"", 500);
                     return;
                 }
-                // Mark success BEFORE holographic work so UI never sticks if app wipe is slow/fails
+                // Wipe previous live env BEFORE ack — otherwise UI/AMG scripts think
+                // 一键新机 finished while Venmo still shows the old environment.
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
             }];
             return;
         }

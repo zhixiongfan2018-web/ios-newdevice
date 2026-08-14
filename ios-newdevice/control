@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Per-record isolation: clear Venmo keychain on switch/new; Venmo not injected.
+Description: 177: 一键新机先清沙盒再成功；已导入环境跳过重备份，避免旧环境残留。
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
