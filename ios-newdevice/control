@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Venmo crash fix: no UIDevice hooks; akc once; MG-only spoof.
+Description: Stop Venmo inject (crash); SpringBoard spoof only. Login keychain already on device.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
