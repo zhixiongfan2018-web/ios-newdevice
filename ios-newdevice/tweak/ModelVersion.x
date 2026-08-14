@@ -203,7 +203,7 @@ static int hooked_uname(struct utsname *buf) {
     return ret;
 }
 %ctor {
-    NDRunAfterUIKitReady(^{
+    NDRunRiskyCHooksAfterUIKitReady(^{
         %init(NDModelVersion);
         MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
         MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);

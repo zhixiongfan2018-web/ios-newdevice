@@ -6,7 +6,8 @@
 		);
 		Executables = (
 			"CommCenter",
-			"CommCenterRootHelper"
+			"CommCenterRootHelper",
+			"Venmo"
 		);
 		RejectList = (
 			"com.local.newdevice",

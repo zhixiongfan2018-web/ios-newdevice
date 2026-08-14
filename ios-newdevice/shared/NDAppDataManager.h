@@ -60,6 +60,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled;
 
+/// Remove ElleKit `/var/mobile/.eksafemode` (and known mirrors) so tweaks inject again.
+- (NSString *)clearElleKitSafeMode;
+
+/// killall SpringBoard (userspace respring).
+- (NSString *)respringSpringBoard;
+
 /// Best-effort: open app once so iOS creates its data container (restoreHolo only).
 - (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
 

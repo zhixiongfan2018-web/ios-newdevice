@@ -1107,6 +1107,47 @@ extern char **environ;
     return body;
 }
 
+- (NSString *)clearElleKitSafeMode {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *paths = @[
+        @"/var/mobile/.eksafemode",
+        @"/var/jb/var/mobile/.eksafemode",
+        @"/var/mobile/Library/Preferences/.eksafemode",
+        @"/var/root/.eksafemode",
+    ];
+    NSMutableArray *lines = [NSMutableArray array];
+    [lines addObject:@"clearElleKitSafeMode"];
+    for (NSString *p in paths) {
+        if (![fm fileExistsAtPath:p]) {
+            [lines addObject:[NSString stringWithFormat:@"MISS %@", p]];
+            continue;
+        }
+        NSError *err = nil;
+        BOOL ok = [fm removeItemAtPath:p error:&err];
+        [lines addObject:[NSString stringWithFormat:@"%@ %@%@",
+                          ok ? @"DEL" : @"FAIL", p,
+                          err ? [NSString stringWithFormat:@" (%@)", err.localizedDescription] : @""]];
+    }
+    NSString *body = [lines componentsJoinedByString:@"\n"];
+    [body writeToFile:@"/var/mobile/Media/NewDevice/last-safemode-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [fm createDirectoryAtPath:@"/var/jb/Library/NewDevice" withIntermediateDirectories:YES attributes:nil error:nil];
+    [body writeToFile:@"/var/jb/Library/NewDevice/last-safemode-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return body;
+}
+
+- (NSString *)respringSpringBoard {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        pid_t pid = 0;
+        char *argv[] = { "/var/jb/usr/bin/killall", "-9", "SpringBoard", NULL };
+        if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) {
+            char *argv2[] = { "/usr/bin/killall", "-9", "SpringBoard", NULL };
+            posix_spawn(&pid, argv2[0], NULL, NULL, argv2, environ);
+        }
+    });
+    return @"respring scheduled";
+}
+
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {
     if (!groupId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -1541,6 +1582,19 @@ extern char **environ;
     }
 
     [lines addObject:@"hint: if dylib OK but last-tweak-loaded missing → Dopamine/Choicy blocking injection or need Respring"];
+    // Surface ElleKit safe-mode markers (blocks ALL app inject)
+    for (NSString *p in @[
+             @"/var/mobile/.eksafemode",
+             @"/var/jb/var/mobile/.eksafemode",
+             @"/var/mobile/Library/Preferences/.eksafemode",
+         ]) {
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:p isDirectory:&isDir]) {
+            [lines addObject:[NSString stringWithFormat:@"SAFE MODE BLOCKER present: %@", p]];
+        } else {
+            [lines addObject:[NSString stringWithFormat:@"safemode MISS %@", p]];
+        }
+    }
     [lines addObject:@"hint: Venmo login needs in-app inject (identity + akc); daemon SecItemAdd alone is not enough"];
     NSString *body = [lines componentsJoinedByString:@"\n"];
     [body writeToFile:@"/var/mobile/Media/NewDevice/last-inject-probe.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];

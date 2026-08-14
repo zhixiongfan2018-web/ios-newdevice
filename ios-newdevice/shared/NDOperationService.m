@@ -30,6 +30,7 @@
             @"clearAppData", @"cleanApps", @"importAMGRecords",
             @"importIGrimace", @"importAWZ", @"importAMGMedia",
             @"exportAMGMedia", @"slimRecord", @"restoreHolo",
+            @"respring", @"sbreload",
         ]];
     });
     return fun.length && [set containsObject:fun];
@@ -328,6 +329,20 @@
 
         if ([fun isEqualToString:@"enableTweak"] || [fun isEqualToString:@"enableTweakInject"]) {
             body = [[NDAppDataManager shared] setTweakInjectionEnabled:YES] ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"clearSafeMode"] || [fun isEqualToString:@"disableSafeMode"] || [fun isEqualToString:@"clearEksafemode"]) {
+            body = [[NDAppDataManager shared] clearElleKitSafeMode] ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"respring"] || [fun isEqualToString:@"sbreload"]) {
+            body = [[NDAppDataManager shared] respringSpringBoard] ?: @"respring";
             [[NDRecordStore shared] writeResultCode:1];
             done(body, 200);
             return;
