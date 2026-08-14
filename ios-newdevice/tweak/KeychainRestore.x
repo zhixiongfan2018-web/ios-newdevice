@@ -177,6 +177,9 @@ static void NDApplyPendingKeychainRestore(void) {
         NSString *rt = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"last-akc-restore.txt"];
         [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
         [report writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSString *media = @"/var/mobile/Media/NewDevice/last-akc-restore.txt";
+        [fm createDirectoryAtPath:[media stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+        [report writeToFile:media atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSLog(@"[NewDevice] in-app keychain restore %@ ok=%lu/%lu from %@", bid, (unsigned long)ok, (unsigned long)total, path);
         if (ok > 0) {
             if (pendingPath.length) [fm removeItemAtPath:pending error:nil];

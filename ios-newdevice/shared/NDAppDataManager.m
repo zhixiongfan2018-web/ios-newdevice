@@ -531,20 +531,19 @@ extern char **environ;
     BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
     NSString *kcStats = [self restoreKeychainHintsForApps:@[bid] fromRecord:recordName];
 
-    // Ensure live Documents has akc.plist for in-app tweak restore (access-group safe)
+    // Ensure live Documents has akc.plist for in-app tweak restore (access-group safe).
+    // Always overwrite — stale/empty akc left from a prior failed pass blocks login.
     NSString *liveDocsPath = [container stringByAppendingPathComponent:@"Documents"];
     if (hasKC) {
         NSString *liveAkc = [liveDocsPath stringByAppendingPathComponent:@"akc.plist"];
-        if (![fm fileExistsAtPath:liveAkc]) {
-            for (NSString *rel in @[@"akc.plist", @"Documents/akc.plist"]) {
-                NSString *src = [backupRoot stringByAppendingPathComponent:rel];
-                if (![fm fileExistsAtPath:src]) continue;
-                [fm createDirectoryAtPath:liveDocsPath withIntermediateDirectories:YES attributes:nil error:nil];
-                [fm removeItemAtPath:liveAkc error:nil];
-                if ([fm copyItemAtPath:src toPath:liveAkc error:nil]) {
-                    [self relaxProtectionAtPath:liveAkc];
-                    break;
-                }
+        for (NSString *rel in @[@"Documents/akc.plist", @"akc.plist"]) {
+            NSString *src = [backupRoot stringByAppendingPathComponent:rel];
+            if (![fm fileExistsAtPath:src]) continue;
+            [fm createDirectoryAtPath:liveDocsPath withIntermediateDirectories:YES attributes:nil error:nil];
+            [fm removeItemAtPath:liveAkc error:nil];
+            if ([fm copyItemAtPath:src toPath:liveAkc error:nil]) {
+                [self relaxProtectionAtPath:liveAkc];
+                break;
             }
         }
         // Pending pointer for tweak (world-readable under /var/jb/Library/NewDevice)
@@ -589,8 +588,8 @@ extern char **environ;
                       bid, container, staged / 1024, (liveDocs + liveLib) / 1024, (unsigned long)okSubs,
                       sqliteSz, prefsSz, markerOk ? @"yes" : @"no", hasKC ? @"yes" : @"NO", liveAkcOk ? @"yes" : @"NO",
                       kcStats.length ? kcStats : @"none",
-                      hasKC ? @"已暂存 akc；NewDevice 进程尝试写入 + 打开 App 时插件在进程内再写（看 Documents/nd-akc-ok.txt）"
-                            : @"此包无 Keychain/akc。沙盒文件可写入，但 Venmo 会显示未登录（看起来像空的）"]];
+                      hasKC ? @"已暂存 akc；daemon SecItem 常写不进 App 组，须打开 App 让插件进程内再写（看 Documents/nd-akc-ok.txt）"
+                            : [NSString stringWithFormat:@"此包无 Keychain/akc（%@）", bid]]];
     // Ensure app relaunches from restored files
     [self terminateApps:@[bid]];
     return verified;
@@ -706,7 +705,14 @@ extern char **environ;
     for (NSString *bid in bundleIds) {
         if ([self restoreOneApp:bid fromRecord:recordName lines:lines missing:missing]) ok++;
     }
+    // Write base report first so AppGroup append can extend it
+    [self writeRestoreReport:[lines componentsJoinedByString:@"\n"]];
     [self restoreAppGroupsForRecord:recordName];
+    // Re-read combined report into lines for identity notes below
+    if (self.lastRestoreReport.length) {
+        [lines removeAllObjects];
+        [lines addObjectsFromArray:[self.lastRestoreReport componentsSeparatedByString:@"\n"]];
+    }
     NSString *importNote = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"amg-import-note.txt"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:importNote]) {
         NSString *note = [NSString stringWithContentsOfFile:importNote encoding:NSUTF8StringEncoding error:nil] ?: @"";
@@ -1170,6 +1176,7 @@ extern char **environ;
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName {
     if (!recordName.length) return YES;
     NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray *agLines = [NSMutableArray array];
     NSString *agRoot = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"AppGroup"];
     if (![fm fileExistsAtPath:agRoot]) {
         // Fall back to classic live AMG AppGroup
@@ -1187,8 +1194,16 @@ extern char **environ;
             if ([fm fileExistsAtPath:liveAG]) agRoot = liveAG;
         }
     }
-    if (![fm fileExistsAtPath:agRoot]) return YES;
+    if (![fm fileExistsAtPath:agRoot]) {
+        [agLines addObject:@"AppGroup: (no staged/live AppGroup tree)"];
+        if (self.lastRestoreReport.length) {
+            self.lastRestoreReport = [self.lastRestoreReport stringByAppendingFormat:@"\n%@", [agLines componentsJoinedByString:@"\n"]];
+            [self writeRestoreReport:self.lastRestoreReport];
+        }
+        return YES;
+    }
 
+    NSUInteger agOK = 0, agSkip = 0;
     NSArray *appBids = [fm contentsOfDirectoryAtPath:agRoot error:nil] ?: @[];
     for (NSString *bid in appBids) {
         NSString *bidRoot = [agRoot stringByAppendingPathComponent:bid];
@@ -1220,10 +1235,18 @@ extern char **environ;
                     groupId = meta[@"MCMMetadataIdentifier"];
                 }
             }
-            if (!groupId.length) continue;
+            if (!groupId.length) {
+                agSkip++;
+                [agLines addObject:[NSString stringWithFormat:@"AppGroup SKIP %@/%@ (no groupId)", bid, uuid]];
+                continue;
+            }
 
             NSString *live = [self sharedAppGroupPathForGroupId:groupId];
-            if (!live.length) continue;
+            if (!live.length) {
+                agSkip++;
+                [agLines addObject:[NSString stringWithFormat:@"AppGroup FAIL %@ — live container not found", groupId]];
+                continue;
+            }
             for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
                 NSString *src = [leaf stringByAppendingPathComponent:sub];
                 if (![fm fileExistsAtPath:src]) continue;
@@ -1241,9 +1264,76 @@ extern char **environ;
                 if (kidDir) continue; // only lift root files; nested trees handled above
                 [self copyItem:src to:[live stringByAppendingPathComponent:kid] error:nil];
             }
+            [self relaxProtectionAtPath:live];
+            agOK++;
+            [agLines addObject:[NSString stringWithFormat:@"AppGroup OK %@ → %@", groupId, live]];
         }
     }
+    [agLines addObject:[NSString stringWithFormat:@"AppGroup done ok=%lu skip=%lu", (unsigned long)agOK, (unsigned long)agSkip]];
+    if (self.lastRestoreReport.length) {
+        self.lastRestoreReport = [self.lastRestoreReport stringByAppendingFormat:@"\n%@", [agLines componentsJoinedByString:@"\n"]];
+        [self writeRestoreReport:self.lastRestoreReport];
+    }
     return YES;
+}
+
+/// Live sandbox probe for Filza-less debugging (Documents markers + sizes).
+- (NSString *)probeLiveContainerForBundleId:(NSString *)bundleId {
+    NSMutableArray *lines = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *container = [self containerPathForBundleId:bundleId];
+    [lines addObject:[NSString stringWithFormat:@"bundle=%@", bundleId ?: @""]];
+    [lines addObject:[NSString stringWithFormat:@"container=%@", container.length ? container : @"(not found)"]];
+    if (!container.length) return [lines componentsJoinedByString:@"\n"];
+
+    NSString *docs = [container stringByAppendingPathComponent:@"Documents"];
+    NSString *lib = [container stringByAppendingPathComponent:@"Library"];
+    [lines addObject:[NSString stringWithFormat:@"DocsKB=%llu LibKB=%llu",
+                      [self byteSizeAtPath:docs] / 1024, [self byteSizeAtPath:lib] / 1024]];
+    for (NSString *name in @[@"nd-restore-ok.txt", @"nd-akc-ok.txt", @"akc.plist", @"Model.sqlite"]) {
+        NSString *p = [docs stringByAppendingPathComponent:name];
+        BOOL ex = [fm fileExistsAtPath:p];
+        [lines addObject:[NSString stringWithFormat:@"Documents/%@ exists=%@ size=%llu",
+                          name, ex ? @"YES" : @"NO", [self byteSizeAtPath:p]]];
+        if (ex && [name hasSuffix:@".txt"]) {
+            NSString *t = [NSString stringWithContentsOfFile:p encoding:NSUTF8StringEncoding error:nil] ?: @"";
+            if (t.length > 800) t = [[t substringToIndex:800] stringByAppendingString:@"…"];
+            [lines addObject:[NSString stringWithFormat:@"--- %@ ---\n%@", name, t]];
+        }
+    }
+    // Top Documents entries by size
+    NSArray *kids = [fm contentsOfDirectoryAtPath:docs error:nil] ?: @[];
+    NSMutableArray *sized = [NSMutableArray array];
+    for (NSString *k in kids) {
+        if ([k hasPrefix:@"."]) continue;
+        unsigned long long sz = [self byteSizeAtPath:[docs stringByAppendingPathComponent:k]];
+        [sized addObject:@{@"n": k, @"s": @(sz)}];
+    }
+    [sized sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [b[@"s"] compare:a[@"s"]];
+    }];
+    [lines addObject:@"Documents top:"];
+    for (NSUInteger i = 0; i < MIN((NSUInteger)12, sized.count); i++) {
+        NSDictionary *e = sized[i];
+        [lines addObject:[NSString stringWithFormat:@"  %6lluKB  %@", [e[@"s"] unsignedLongLongValue] / 1024, e[@"n"]]];
+    }
+    NSString *prefs = [[lib stringByAppendingPathComponent:@"Preferences"]
+                       stringByAppendingPathComponent:[bundleId stringByAppendingString:@".plist"]];
+    [lines addObject:[NSString stringWithFormat:@"prefs exists=%@ size=%llu",
+                      [fm fileExistsAtPath:prefs] ? @"YES" : @"NO", [self byteSizeAtPath:prefs]]];
+
+    NSString *rtAkc = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"last-akc-restore.txt"];
+    NSString *rt = [NSString stringWithContentsOfFile:rtAkc encoding:NSUTF8StringEncoding error:nil];
+    if (rt.length) [lines addObject:[NSString stringWithFormat:@"--- runtime last-akc-restore ---\n%@", rt]];
+    else [lines addObject:@"runtime last-akc-restore: (missing) — tweak may not have run in Venmo"];
+
+    NSString *groupLive = [self sharedAppGroupPathForGroupId:@"group.net.kortina.labs.Venmo"];
+    [lines addObject:[NSString stringWithFormat:@"AppGroup group.net.kortina.labs.Venmo=%@",
+                      groupLive.length ? groupLive : @"(not found)"]];
+    if (groupLive.length) {
+        [lines addObject:[NSString stringWithFormat:@"  AppGroupKB=%llu", [self byteSizeAtPath:groupLive] / 1024]];
+    }
+    return [lines componentsJoinedByString:@"\n"];
 }
 
 - (id)generalPasteboard {

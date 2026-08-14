@@ -255,9 +255,17 @@
                 done(@"无当前记录", 500);
                 return;
             }
-            NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:name];
+            // Ensure Venmo is a target so identity spoof + tweak paths stay armed
+            NDConfig *cfg = [NDConfig shared];
+            NSMutableOrderedSet *apps = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
+            [apps addObject:@"net.kortina.labs.Venmo"];
+            for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:name]) [apps addObject:b];
+            if (apps.count != (cfg.targetApps.count ?: 0)) {
+                cfg.targetApps = apps.array;
+                [cfg save];
+            }
+            NSArray *bids = apps.array;
             [[NDAppDataManager shared] terminateApps:bids];
-            // Explicit force path: try open apps once if container missing
             NSMutableArray *lines = [NSMutableArray array];
             NSFileManager *fm = [NSFileManager defaultManager];
             NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
@@ -271,10 +279,34 @@
             NSError *err = nil;
             [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
+            // Open Venmo once so KeychainRestore.x runs inside Venmo (daemon SecItem is not enough)
+            [[NDAppDataManager shared] tryLaunchAppToCreateContainer:@"net.kortina.labs.Venmo"];
+            [NSThread sleepForTimeInterval:2.5];
+            [[NDAppDataManager shared] terminateApps:@[@"net.kortina.labs.Venmo"]];
+            NSString *probe = [[NDAppDataManager shared] probeLiveContainerForBundleId:@"net.kortina.labs.Venmo"];
             NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
             if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
+            report = [NSString stringWithFormat:@"%@\n--- probe after in-app akc pass ---\n%@", report, probe ?: @""];
+            [report writeToFile:@"/var/mobile/Media/NewDevice/last-restore.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
             [[NDRecordStore shared] writeResultCode:1];
             done(report, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"probeApp"] || [fun isEqualToString:@"probeVenmo"]) {
+            NSString *bid = query[@"bundleId"] ?: @"net.kortina.labs.Venmo";
+            body = [[NDAppDataManager shared] probeLiveContainerForBundleId:bid] ?: @"";
+            // Mirror for Filza / getLastImportLog adjacency
+            [body writeToFile:@"/var/mobile/Media/NewDevice/last-probe.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [[NDRecordStore shared] writeResultCode:body.length ? 1 : 0];
+            done(body, body.length ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"getTargetApps"]) {
+            body = [[[NDConfig shared].targetApps ?: @[]] componentsJoinedByString:@"\n"];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body ?: @"", 200);
             return;
         }
 
@@ -283,6 +315,7 @@
                 @"/var/mobile/Media/AMG/import/nd-last-import.txt",
                 @"/var/mobile/Media/AMG/import/nd-import-status.txt",
                 @"/var/mobile/Media/NewDevice/last-restore.txt",
+                @"/var/mobile/Media/NewDevice/last-probe.txt",
                 @"/var/mobile/Media/NewDevice/import/nd-last-import.txt",
                 @"/var/mobile/AMG_tar/nd-last-import.txt",
             ];
