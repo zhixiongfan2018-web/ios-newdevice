@@ -5,10 +5,9 @@
 %ctor {
     @autoreleasepool {
         if (!NDShouldLoadTweak()) return;
-        // Venmo: skip profile load / identity state — KeychainRestore is enough
-        if (NDIsKeychainOnlyHost()) return;
+        // Venmo must load profile too — identity spoof + keychain restore together.
         NSString *bundleId = [NSBundle mainBundle].bundleIdentifier;
-        if (!bundleId.length) return;
+        if (!bundleId.length && !NDIsVenmoHost()) return;
         [[NDTweakState shared] reload];
     }
 }

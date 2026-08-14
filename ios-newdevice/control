@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Rollback Venmo inject (168-stable); SpringBoard spoof only. Avoid empty AppGroup wipe.
+Description: Venmo inject for login: deferred identity + in-app akc; skip risky C hooks.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

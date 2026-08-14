@@ -45,9 +45,8 @@ static inline BOOL NDShouldLoadTweak(void) {
     return YES;
 }
 
-/// Venmo (and similar): only run in-app KeychainRestore — identity/UIKit hooks
-/// previously crashed the process on iOS 18 + ElleKit even when deferred.
-static inline BOOL NDIsKeychainOnlyHost(void) {
+/// Venmo needs identity + in-app Keychain to land logged-in after import.
+static inline BOOL NDIsVenmoHost(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) return YES;
     NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
@@ -55,14 +54,27 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
     return NO;
 }
 
+/// Legacy alias — prefer NDIsVenmoHost.
+static inline BOOL NDIsKeychainOnlyHost(void) {
+    return NDIsVenmoHost();
+}
+
 /// ObjC / UIKit hooks must NOT install before UIApplication init — ElleKit + iOS 18
 /// crashes inside _UIApplicationInfoParser when UIDevice/NSBundle are swizzled early.
 /// %ctors run before main(); dispatch_async(main) runs after UIApplicationMain's init.
+/// Venmo is included: deferred identity spoof is required for session accept.
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
-    // Skip DeviceIdentity / JailbreakHide / DNS / … inside Venmo
-    if (NDIsKeychainOnlyHost()) return;
+    dispatch_async(dispatch_get_main_queue(), block);
+}
+
+/// C/MSHookFunction hooks that previously SIGILL'd Venmo on iOS 18 + ElleKit
+/// (getifaddrs / statfs / DNS / IOKit). Skip those inside Venmo; keep ObjC identity.
+static inline void NDRunRiskyCHooksAfterUIKitReady(void (^block)(void)) {
+    if (!block) return;
+    if (!NDShouldLoadTweak()) return;
+    if (NDIsVenmoHost()) return;
     dispatch_async(dispatch_get_main_queue(), block);
 }
 

@@ -91,7 +91,7 @@ static CFDictionaryRef hooked_CTServerConnectionCopyMobileEquipmentInfo(void *co
 %end // NDIMEIBaseband
 
 %ctor {
-    NDRunAfterUIKitReady(^{
+    NDRunRiskyCHooksAfterUIKitReady(^{
         %init(NDIMEIBaseband);
         void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
         if (!iokit) iokit = dlopen("/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", RTLD_NOW);

@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#import <dlfcn.h>
 #import "NDTweakState.h"
 #import "NDPaths.h"
 #import "NDSafeLoad.h"
@@ -31,33 +32,98 @@ static id NDAccessibleForPdmn(NSString *pdmn) {
     return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
 }
 
-/// Prefer the host app's real keychain-access-group (Venmo App Store uses 6DEPQ9SPDK.*).
-static NSString *NDHostKeychainAccessGroup(void) {
-    NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-    if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
-        return @"6DEPQ9SPDK.net.kortina.labs.Venmo";
-    }
-    // Fallback: <first path component of application-identifier> is unavailable here;
-    // leave agrp from dump when unknown.
-    return nil;
+/// Prefer the host process's real keychain-access-groups (App Store vs sideload team IDs differ).
+static NSArray<NSString *> *NDHostKeychainAccessGroups(void) {
+    static NSArray<NSString *> *cached;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray<NSString *> *out = [NSMutableArray array];
+        @try {
+            // SecTaskCopyValueForEntitlement — soft-link via dlsym (not always in public headers)
+            void *sec = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW);
+            if (!sec) sec = dlopen("/var/jb/usr/lib/libsecurity.dylib", RTLD_NOW);
+            typedef void *(*SecTaskCreateFromSelf_t)(CFAllocatorRef);
+            typedef CFTypeRef (*SecTaskCopyValueForEntitlement_t)(void *, CFStringRef, CFErrorRef *);
+            SecTaskCreateFromSelf_t create = sec ? (SecTaskCreateFromSelf_t)dlsym(sec, "SecTaskCreateFromSelf") : NULL;
+            SecTaskCopyValueForEntitlement_t copyEnt = sec ? (SecTaskCopyValueForEntitlement_t)dlsym(sec, "SecTaskCopyValueForEntitlement") : NULL;
+            if (create && copyEnt) {
+                void *task = create(NULL);
+                if (task) {
+                    CFTypeRef groups = copyEnt(task, CFSTR("keychain-access-groups"), NULL);
+                    if (groups && CFGetTypeID(groups) == CFArrayGetTypeID()) {
+                        for (id g in (__bridge NSArray *)groups) {
+                            if ([g isKindOfClass:[NSString class]] && [g length]) [out addObject:g];
+                        }
+                    }
+                    if (groups) CFRelease(groups);
+                    CFTypeRef appId = copyEnt(task, CFSTR("application-identifier"), NULL);
+                    if (appId && CFGetTypeID(appId) == CFStringGetTypeID()) {
+                        NSString *aid = (__bridge NSString *)appId;
+                        if (aid.length && ![out containsObject:aid]) [out addObject:aid];
+                    }
+                    if (appId) CFRelease(appId);
+                    CFRelease(task);
+                }
+            }
+        } @catch (__unused NSException *ex) {
+        }
+        // Known Venmo team IDs as last-resort candidates (App Store + common sideload)
+        NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+        if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
+            for (NSString *g in @[
+                     @"6DEPQ9SPDK.net.kortina.labs.Venmo",
+                     @"55377VK7X2.net.kortina.labs.Venmo",
+                 ]) {
+                if (![out containsObject:g]) [out addObject:g];
+            }
+        }
+        cached = [out copy];
+    });
+    return cached;
 }
 
-static OSStatus NDKCAddOrUpdate(NSMutableDictionary *add, NSDictionary *del, NSData *data) {
-    NSString *hostAgrp = NDHostKeychainAccessGroup();
-    if (hostAgrp.length) {
-        add[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
-    }
+static NSString *NDHostKeychainAccessGroup(void) {
+    return NDHostKeychainAccessGroups().firstObject;
+}
+__attribute__((unused)) static void NDTouchHostAgrp(void) { (void)NDHostKeychainAccessGroup(); }
+
+static OSStatus NDKCTryAdd(NSMutableDictionary *add, NSDictionary *del, NSData *data, NSString *agrpOrNil) {
+    if (agrpOrNil.length) add[(__bridge id)kSecAttrAccessGroup] = agrpOrNil;
+    else [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
     OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-    if (st == errSecMissingEntitlement && add[(__bridge id)kSecAttrAccessGroup]) {
-        [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
-        st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-    }
     if (st == errSecDuplicateItem) {
         NSMutableDictionary *q = [del mutableCopy] ?: [@{ (__bridge id)kSecClass: add[(__bridge id)kSecClass] } mutableCopy];
-        if (hostAgrp.length) q[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
+        if (agrpOrNil.length) q[(__bridge id)kSecAttrAccessGroup] = agrpOrNil;
+        else [q removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
         st = SecItemUpdate((__bridge CFDictionaryRef)q, (__bridge CFDictionaryRef)@{ (__bridge id)kSecValueData: data });
     }
     return st;
+}
+
+static OSStatus NDKCAddOrUpdate(NSMutableDictionary *add, NSDictionary *del, NSData *data) {
+    // Prefer dump agrp (if any), then each host entitlement group, then no agrp.
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    id dumpAgrp = del[(__bridge id)kSecAttrAccessGroup];
+    if ([dumpAgrp isKindOfClass:[NSString class]] && [dumpAgrp length]) [candidates addObject:dumpAgrp];
+    for (NSString *g in NDHostKeychainAccessGroups()) {
+        if (g.length && ![candidates containsObject:g]) [candidates addObject:g];
+    }
+    [candidates addObject:@""]; // sentinel = no agrp
+
+    OSStatus last = errSecParam;
+    for (NSString *g in candidates) {
+        NSString *use = g.length ? g : nil;
+        OSStatus st = NDKCTryAdd(add, del, data, use);
+        if (st == errSecSuccess) return st;
+        last = st;
+        if (st != errSecMissingEntitlement && st != errSecAuthFailed) {
+            // keep trying other groups on entitlement mismatch; otherwise stop early on weird errors
+            if (st != -34018 /* errSecMissingEntitlement legacy */) {
+                // still try next group — Venmo sideload often rejects App Store team id
+            }
+        }
+    }
+    return last;
 }
 
 static NSUInteger NDRestoreAkcDictionary(NSDictionary *akc, NSMutableArray *failNotes) {
@@ -76,22 +142,27 @@ static NSUInteger NDRestoreAkcDictionary(NSDictionary *akc, NSMutableArray *fail
         if ([raw[@"acct"] isKindOfClass:[NSString class]] && [raw[@"acct"] length]) del[(__bridge id)kSecAttrAccount] = raw[@"acct"];
         if ([raw[@"svce"] isKindOfClass:[NSString class]] && [raw[@"svce"] length]) del[(__bridge id)kSecAttrService] = raw[@"svce"];
         if ([raw[@"srvr"] isKindOfClass:[NSString class]] && [raw[@"srvr"] length]) del[(__bridge id)kSecAttrServer] = raw[@"srvr"];
-        NSString *hostAgrp = NDHostKeychainAccessGroup();
-        if (hostAgrp.length) {
-            del[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
-        } else if ([raw[@"agrp"] isKindOfClass:[NSString class]] && [raw[@"agrp"] length]) {
+        if ([raw[@"agrp"] isKindOfClass:[NSString class]] && [raw[@"agrp"] length]) {
             del[(__bridge id)kSecAttrAccessGroup] = raw[@"agrp"];
         }
         if (!del[(__bridge id)kSecAttrAccount] && !del[(__bridge id)kSecAttrService] && !del[(__bridge id)kSecAttrServer]) continue;
 
-        SecItemDelete((__bridge CFDictionaryRef)del);
-        // Also delete under dump agrp if it differed (stale daemon writes)
-        if (hostAgrp.length && [raw[@"agrp"] isKindOfClass:[NSString class]] &&
-            [raw[@"agrp"] length] && ![raw[@"agrp"] isEqualToString:hostAgrp]) {
-            NSMutableDictionary *delOld = [del mutableCopy];
-            delOld[(__bridge id)kSecAttrAccessGroup] = raw[@"agrp"];
-            SecItemDelete((__bridge CFDictionaryRef)delOld);
+        // Delete under dump agrp + every host group + no agrp (clear stale writes)
+        NSMutableArray<NSString *> *delGroups = [NSMutableArray array];
+        if ([raw[@"agrp"] isKindOfClass:[NSString class]] && [raw[@"agrp"] length]) {
+            [delGroups addObject:raw[@"agrp"]];
         }
+        for (NSString *g in NDHostKeychainAccessGroups()) {
+            if (g.length && ![delGroups containsObject:g]) [delGroups addObject:g];
+        }
+        for (NSString *g in delGroups) {
+            NSMutableDictionary *d = [del mutableCopy];
+            d[(__bridge id)kSecAttrAccessGroup] = g;
+            SecItemDelete((__bridge CFDictionaryRef)d);
+        }
+        NSMutableDictionary *delBare = [del mutableCopy];
+        [delBare removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
+        SecItemDelete((__bridge CFDictionaryRef)delBare);
 
         NSMutableDictionary *add = [del mutableCopy];
         add[(__bridge id)kSecValueData] = vData;

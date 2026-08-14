@@ -61,7 +61,7 @@ static int hooked_statfs64(const char *path, struct statfs *buf) {
 }
 
 %ctor {
-    NDRunAfterUIKitReady(^{
+    NDRunRiskyCHooksAfterUIKitReady(^{
         %init(NDDiskCapacity);
         void *s = dlsym(RTLD_DEFAULT, "statfs");
         if (s) MSHookFunction(s, (void *)hooked_statfs, (void **)&orig_statfs);

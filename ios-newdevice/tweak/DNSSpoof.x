@@ -122,7 +122,7 @@ static int hooked_res_getservers(void *statp, void *set, int cnt) {
 }
 
 %ctor {
-    NDRunAfterUIKitReady(^{
+    NDRunRiskyCHooksAfterUIKitReady(^{
         void *sc = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyValue");
         if (sc) MSHookFunction(sc, (void *)hooked_SCDynamicStoreCopyValue, (void **)&orig_SCDynamicStoreCopyValue);
         void *scm = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyMultiple");

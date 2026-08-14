@@ -65,7 +65,7 @@ static BOOL NDBasicHideActive(void) {
 %end // NDJailbreakHide
 
 %ctor {
-    NDRunAfterUIKitReady(^{
+    NDRunRiskyCHooksAfterUIKitReady(^{
         %init(NDJailbreakHide);
     });
 }
