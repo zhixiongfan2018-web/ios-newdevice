@@ -54,6 +54,32 @@ static inline BOOL NDIsVenmoHost(void) {
     return NO;
 }
 
+/// Pending one-shot ops for Venmo (world-readable under jb + Media).
+/// Outside processes cannot delete Venmo Keychain; only Venmo-in-process SecItemDelete can.
+static inline BOOL NDVenmoPendingClearKeychain(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *p in @[
+             @"/var/jb/Library/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
+             @"/var/mobile/Media/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
+         ]) {
+        if ([fm fileExistsAtPath:p]) return YES;
+    }
+    return NO;
+}
+
+static inline BOOL NDVenmoPendingAkcRestore(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *p in @[
+             @"/var/jb/Library/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+         ]) {
+        if ([fm fileExistsAtPath:p]) return YES;
+    }
+    NSString *homeAkc = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/akc.plist"];
+    if ([fm fileExistsAtPath:homeAkc]) return YES;
+    return NO;
+}
+
 /// Legacy alias — prefer NDIsVenmoHost.
 static inline BOOL NDIsKeychainOnlyHost(void) {
     return NDIsVenmoHost();

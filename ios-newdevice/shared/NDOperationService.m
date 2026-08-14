@@ -30,6 +30,7 @@
             @"clearAppData", @"cleanApps", @"importAMGRecords",
             @"importIGrimace", @"importAWZ", @"importAMGMedia",
             @"exportAMGMedia", @"slimRecord", @"restoreHolo",
+            @"clearVenmoKeychain", @"purgeVenmo", @"clearAppKeychain",
             @"respring", @"sbreload",
         ]];
     });
@@ -117,17 +118,23 @@
                                                error:nil];
             }
 
-            // Always wipe live sandboxes (+ Venmo keychain) so the new identity cannot
-            // inherit the previous environment's login/files.
+            // Always wipe live sandboxes so the new identity cannot inherit files.
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
             if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
                 [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
+            } else if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+                // Empty 一键新机 / 原始机器: must clear Venmo Keychain in-app or the
+                // old account survives uninstall+redownload.
+                [[NDAppDataManager shared] purgeVenmoSessionInApp];
             }
         } else if (apps.count) {
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+                [[NDAppDataManager shared] purgeVenmoSessionInApp];
+            }
         }
 
         if (cfg.clearPasteboardOnSwitch) {
@@ -317,10 +324,10 @@
             return;
         }
 
-        if ([fun isEqualToString:@"clearAppKeychain"] || [fun isEqualToString:@"clearVenmoKeychain"]) {
+        if ([fun isEqualToString:@"clearAppKeychain"] || [fun isEqualToString:@"clearVenmoKeychain"] || [fun isEqualToString:@"purgeVenmo"]) {
             NSString *bid = query[@"bundleId"] ?: @"net.kortina.labs.Venmo";
-            if ([bid isEqualToString:@"net.kortina.labs.Venmo"] || [fun isEqualToString:@"clearVenmoKeychain"]) {
-                body = [[NDAppDataManager shared] clearVenmoKeychainAllKnownGroups] ?: @"";
+            if ([bid isEqualToString:@"net.kortina.labs.Venmo"] || [fun isEqualToString:@"clearVenmoKeychain"] || [fun isEqualToString:@"purgeVenmo"]) {
+                body = [[NDAppDataManager shared] purgeVenmoSessionInApp] ?: @"";
             } else {
                 body = [[NDAppDataManager shared] clearKeychainAccessGroupForBundleId:bid] ?: @"";
             }

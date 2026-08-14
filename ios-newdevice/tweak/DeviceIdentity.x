@@ -209,11 +209,15 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
 %ctor {
     // Venmo: ONLY MobileGestalt spoof (no UIDevice/ASIdentifier Logos hooks — those
     // SIGBUS'd inside mParticle/objc_storeStrong on iOS 18). Delay past first UI frame.
+    // Skip entirely for keychain-clear one-shot or idle launches (no pending akc).
     if (NDIsVenmoHost()) {
+        if (NDVenmoPendingClearKeychain()) return;
+        if (!NDVenmoPendingAkcRestore()) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 if (!NDShouldLoadTweak()) return;
+                if (NDVenmoPendingClearKeychain()) return;
                 [[NDTweakState shared] reload];
                 void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
                 if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);

@@ -221,6 +221,74 @@ static BOOL NDLooksLikeAkcDict(NSDictionary *d) {
     return first[@"v_Data"] != nil || first[@"svce"] != nil || first[@"acct"] != nil;
 }
 
+static NSUInteger NDClearOwnKeychain(void) {
+    // Running inside Venmo: SecItemDelete with only class deletes everything this
+    // process is entitled to see (survives uninstall — App/daemon cannot reach it).
+    NSUInteger waves = 0;
+    NSArray *classes = @[
+        (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecClassInternetPassword,
+        (__bridge id)kSecClassCertificate,
+        (__bridge id)kSecClassKey,
+        (__bridge id)kSecClassIdentity,
+    ];
+    for (id secClass in classes) {
+        NSDictionary *del = @{
+            (__bridge id)kSecClass: secClass,
+            (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+        };
+        OSStatus st = SecItemDelete((__bridge CFDictionaryRef)del);
+        if (st == errSecSuccess) waves++;
+        // Known Venmo access groups (App Store + sideload)
+        for (NSString *agrp in @[
+                 @"55377VK7X2.net.kortina.labs.Venmo",
+                 @"6DEPQ9SPDK.net.kortina.labs.Venmo",
+             ]) {
+            NSDictionary *delG = @{
+                (__bridge id)kSecClass: secClass,
+                (__bridge id)kSecAttrAccessGroup: agrp,
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            };
+            if (SecItemDelete((__bridge CFDictionaryRef)delG) == errSecSuccess) waves++;
+        }
+    }
+    return waves;
+}
+
+static void NDApplyPendingKeychainClear(void) {
+    if (!NDVenmoPendingClearKeychain()) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSUInteger waves = NDClearOwnKeychain();
+    NSString *report = [NSString stringWithFormat:
+                        @"bid=net.kortina.labs.Venmo\nmode=in-app-clear\nwaves=%lu\ntime=%@\n",
+                        (unsigned long)waves, [NSDate date]];
+    for (NSString *dir in @[
+             @"/var/jb/Library/NewDevice",
+             @"/var/mobile/Media/NewDevice",
+         ]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        [report writeToFile:[dir stringByAppendingPathComponent:@"last-venmo-kc-clear.txt"]
+                 atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+    NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+    [fm createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
+    [report writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-kc-cleared.txt"]
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    // Remove pending flags so next launch is idle
+    for (NSString *p in @[
+             @"/var/jb/Library/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
+             @"/var/mobile/Media/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
+             @"/var/jb/Library/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+         ]) {
+        [fm removeItemAtPath:p error:nil];
+    }
+    for (NSString *name in @[@"akc.plist", @"nd-akc-ok.txt"]) {
+        [fm removeItemAtPath:[homeDocs stringByAppendingPathComponent:name] error:nil];
+    }
+    NSLog(@"[NewDevice] in-app Venmo keychain clear waves=%lu", (unsigned long)waves);
+}
+
 static void NDApplyPendingKeychainRestore(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if (!bid.length) return;
@@ -303,37 +371,42 @@ static void NDApplyPendingKeychainRestore(void) {
                 if (!bid.length && ![proc isEqualToString:@"Venmo"]) return;
                 if (!bid.length) bid = @"net.kortina.labs.Venmo";
 
+                // Idle Venmo launches: do nothing (avoid crash surface).
+                BOOL wantClear = NDIsVenmoHost() && NDVenmoPendingClearKeychain();
+                BOOL wantRestore = NDVenmoPendingAkcRestore();
+                if (NDIsVenmoHost() && !wantClear && !wantRestore) return;
+
                 NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
                 NSFileManager *fm = [NSFileManager defaultManager];
                 [fm createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
+
+                sRan = YES;
+                NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\nclear=%@\nrestore=%@\n",
+                                    bid, proc, [NSDate date],
+                                    wantClear ? @"1" : @"0", wantRestore ? @"1" : @"0"];
+                [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
+                         atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                NSString *rt = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
+                [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+                [loaded writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+                if (wantClear) {
+                    NDApplyPendingKeychainClear();
+                    return; // never restore in the same pass
+                }
 
                 // If a prior successful restore exists, don't re-hit SecItem (races / SIGBUS).
                 NSString *marker = [homeDocs stringByAppendingPathComponent:@"nd-akc-ok.txt"];
                 NSString *prev = [NSString stringWithContentsOfFile:marker encoding:NSUTF8StringEncoding error:nil];
                 BOOL alreadyOK = (prev.length && [prev rangeOfString:@"ok="].location != NSNotFound &&
                                   ![prev containsString:@"ok=0"]);
-                // Treat ok=N where N>0
                 if (alreadyOK) {
                     NSRange r = [prev rangeOfString:@"ok="];
                     if (r.location != NSNotFound) {
                         NSInteger n = [[prev substringFromIndex:r.location + 3] integerValue];
-                        if (n > 0) {
-                            sRan = YES;
-                            NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\nakc=skip-existing\n", bid, proc, [NSDate date]];
-                            [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
-                                     atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                            return;
-                        }
+                        if (n > 0) return;
                     }
                 }
-
-                sRan = YES;
-                NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\n", bid, proc, [NSDate date]];
-                [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
-                         atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                NSString *rt = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
-                [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-                [loaded writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
                 NDApplyPendingKeychainRestore();
             } @catch (__unused NSException *ex) {

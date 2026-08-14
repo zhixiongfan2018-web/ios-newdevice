@@ -58,7 +58,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)clearKeychainAccessGroupForBundleId:(NSString *)bundleId;
 
 /// Venmo may have items under App Store team, sideload team, or no agrp — wipe known groups.
+/// On iOS 18 this also opens Venmo once so in-app SecItemDelete can remove session tokens
+/// that survive uninstall (daemon/App cannot see Venmo's keychain partition).
 - (NSString *)clearVenmoKeychainAllKnownGroups;
+
+/// Stage pending-clear-kc, launch Venmo briefly, wait for in-app clear marker, wipe sandbox again.
+- (NSString *)purgeVenmoSessionInApp;
 
 /// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled;

@@ -464,11 +464,17 @@ extern char **environ;
         NSString *cacheRoot = [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bid];
         if ([fm fileExistsAtPath:cacheRoot]) [fm removeItemAtPath:cacheRoot error:nil];
 
-        // Keychain is process-global — without this, every NewDevice "environment"
-        // keeps the same Venmo login after the first successful akc restore.
+        // Outside clear is best-effort only (iOS 18: Venmo partition invisible here).
+        // Real Venmo session wipe is purgeVenmoSessionInApp / pending-clear-kc in-app.
         [self clearKeychainAccessGroupForBundleId:bid];
         if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
-            [self clearVenmoKeychainAllKnownGroups];
+            NSFileManager *kfm = [NSFileManager defaultManager];
+            for (NSString *p in @[
+                     [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
+                     @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+                 ]) {
+                [kfm removeItemAtPath:p error:nil];
+            }
         }
     }
     return YES;
@@ -1083,58 +1089,101 @@ extern char **environ;
     return line;
 }
 
-- (NSString *)clearVenmoKeychainAllKnownGroups {
-    // Prefer daemon one-shot: App process lacks Venmo keychain-access-groups.
-    NSString *helper = @"/var/jb/usr/local/bin/newdeviced";
-    NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-    BOOL inDaemon = !bid.length || [bid containsString:@"newdevice.daemon"] ||
-                    [[NSProcessInfo processInfo].processName isEqualToString:@"newdeviced"];
-    if (!inDaemon && [[NSFileManager defaultManager] isExecutableFileAtPath:helper]) {
-        pid_t pid = 0;
-        char *argv[] = { (char *)helper.fileSystemRepresentation, "clear-venmo-kc", NULL };
-        int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
-        if (rc == 0 && pid > 0) {
-            int status = 0;
-            waitpid(pid, &status, 0);
-            NSString *body = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
-                                                       encoding:NSUTF8StringEncoding error:nil];
-            if (body.length) return [@"via-daemon\n" stringByAppendingString:body];
-            return [NSString stringWithFormat:@"via-daemon exit=%d (no log)", status];
-        }
-        return [NSString stringWithFormat:@"daemon-spawn-failed rc=%d; falling back in-process", rc];
-    }
-
+- (NSString *)purgeVenmoSessionInApp {
     NSString *vbid = @"net.kortina.labs.Venmo";
     NSMutableArray *lines = [NSMutableArray array];
-    NSMutableOrderedSet *groups = [NSMutableOrderedSet orderedSet];
-    NSString *primary = [self defaultKeychainAccessGroupForBundleId:vbid];
-    if (primary.length) [groups addObject:primary];
-    [groups addObject:@"6DEPQ9SPDK.net.kortina.labs.Venmo"];
-    [groups addObject:@"55377VK7X2.net.kortina.labs.Venmo"];
-    for (NSString *g in groups) {
-        [lines addObject:[self NDClearKeychainAccessGroup:g bundleId:vbid]];
-    }
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *live = [self containerPathForBundleId:vbid];
-    if (live.length) {
-        NSString *docs = [live stringByAppendingPathComponent:@"Documents"];
-        for (NSString *name in @[@"akc.plist", @"nd-akc-ok.txt", @"nd-tweak-loaded.txt", @"nd-restore-ok.txt"]) {
-            NSString *p = [docs stringByAppendingPathComponent:name];
-            if ([fm fileExistsAtPath:p]) {
-                [fm removeItemAtPath:p error:nil];
-                [lines addObject:[@"removed " stringByAppendingString:name]];
-            }
+
+    [self terminateApps:@[vbid]];
+    [self clearDataForApps:@[vbid] error:nil];
+    [lines addObject:@"sandbox=wiped"];
+
+    // Drop any pending restore so we don't re-add the old session.
+    for (NSString *p in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
+             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+         ]) {
+        if ([fm fileExistsAtPath:p]) {
+            [fm removeItemAtPath:p error:nil];
+            [lines addObject:[@"removed " stringByAppendingString:p.lastPathComponent]];
         }
     }
-    NSString *pending = [[[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"]
-                         stringByAppendingPathComponent:@"net.kortina.labs.Venmo.txt"];
-    if ([fm fileExistsAtPath:pending]) {
-        [fm removeItemAtPath:pending error:nil];
-        [lines addObject:@"removed pending-akc"];
+
+    // Best-effort outside clear (usually deletes 0 on iOS 18 — Venmo partition).
+    NSString *outside = [self NDClearKeychainAccessGroup:@"55377VK7X2.net.kortina.labs.Venmo" bundleId:vbid];
+    [lines addObject:[@"outside " stringByAppendingString:outside ?: @""]];
+    outside = [self NDClearKeychainAccessGroup:@"6DEPQ9SPDK.net.kortina.labs.Venmo" bundleId:vbid];
+    [lines addObject:[@"outside " stringByAppendingString:outside ?: @""]];
+
+    // Stage in-app clear flag (Venmo tweak reads these paths).
+    for (NSString *dir in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-clear-kc"],
+             @"/var/mobile/Media/NewDevice/pending-clear-kc",
+         ]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *flag = [dir stringByAppendingPathComponent:vbid];
+        [@"1" writeToFile:flag atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [NDPaths makePathWorldReadable:flag];
+        [NDPaths makePathWorldReadable:dir];
     }
-    NSString *body = [lines componentsJoinedByString:@"\n"];
-    [body writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    return body;
+    [lines addObject:@"pending-clear-kc=staged"];
+
+    // Remove stale result so we can detect a fresh write.
+    for (NSString *p in @[
+             @"/var/jb/Library/NewDevice/last-venmo-kc-clear.txt",
+             @"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt",
+         ]) {
+        [fm removeItemAtPath:p error:nil];
+    }
+
+    // Launch Venmo and wait for in-app clear (KeychainRestore delayed ~0.6s).
+    @try {
+        Class WS = NSClassFromString(@"LSApplicationWorkspace");
+        if (WS && [WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) {
+            id (*msg0)(Class, SEL) = (void *)objc_msgSend;
+            id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
+            SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
+            if (ws && [ws respondsToSelector:openSel]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, vbid);
+                [lines addObject:@"launched=Venmo"];
+            }
+        }
+    } @catch (__unused NSException *ex) {
+        [lines addObject:@"launch=failed"];
+    }
+
+    BOOL cleared = NO;
+    for (NSInteger i = 0; i < 40; i++) { // ~20s
+        [NSThread sleepForTimeInterval:0.5];
+        NSString *body = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt"
+                                                   encoding:NSUTF8StringEncoding error:nil];
+        if (!body.length) {
+            body = [NSString stringWithContentsOfFile:@"/var/jb/Library/NewDevice/last-venmo-kc-clear.txt"
+                                             encoding:NSUTF8StringEncoding error:nil];
+        }
+        if (body.length && [body containsString:@"in-app-clear"]) {
+            cleared = YES;
+            [lines addObject:[NSString stringWithFormat:@"in-app-clear OK t=%.1fs", (i + 1) * 0.5]];
+            [lines addObject:body];
+            break;
+        }
+    }
+    if (!cleared) [lines addObject:@"in-app-clear TIMEOUT — open Venmo once manually, then retry"];
+
+    [self terminateApps:@[vbid]];
+    [self clearDataForApps:@[vbid] error:nil];
+    [lines addObject:@"sandbox=rewiped"];
+
+    NSString *report = [lines componentsJoinedByString:@"\n"];
+    [report writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return report;
+}
+
+- (NSString *)clearVenmoKeychainAllKnownGroups {
+    // Daemon/App SecItem cannot see Venmo's keychain partition on iOS 18 — that is why
+    // uninstall+redownload still auto-logs into the old account. Always drive in-app clear.
+    return [self purgeVenmoSessionInApp];
 }
 
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled {
