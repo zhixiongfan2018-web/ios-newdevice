@@ -455,7 +455,8 @@ extern char **environ;
     }
     unsigned long long staged = [self byteSizeAtPath:backupRoot];
     if (staged == 0) {
-        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (source empty %@)", bid, srcNote ?: @"")];
+        NSString *emptyNote = srcNote.length ? srcNote : @"-";
+        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (source empty %@)", bid, emptyNote]];
         return NO;
     }
     [lines addObject:[NSString stringWithFormat:@"SRC %@ <- %@", bid, (srcNote.length ? srcNote : backupRoot)]];
