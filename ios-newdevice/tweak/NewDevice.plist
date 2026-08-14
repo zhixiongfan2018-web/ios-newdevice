@@ -1,17 +1,15 @@
 {
 	Filter = {
 		Bundles = (
-			"com.apple.UIKit",
-			"net.kortina.labs.Venmo",
 			"com.apple.springboard"
 		);
 		Executables = (
-			"Venmo",
 			"CommCenter",
 			"CommCenterRootHelper"
 		);
 		RejectList = (
 			"com.local.newdevice",
+			"net.kortina.labs.Venmo",
 			"xyz.willy.Sileo",
 			"org.coolstar.SileoStore",
 			"com.saurik.Cydia",

@@ -975,181 +975,136 @@ extern char **environ;
 }
 
 - (NSString *)restoreKeychainHintsForApps:(NSArray<NSString *> *)bundleIds fromRecord:(NSString *)recordName {
+    // CRITICAL (iOS 18): never SecItemAdd/Delete from newdeviced into app access groups.
+    // Daemon has keychain-access-groups=* and previously scanned/wrote globally-visible items,
+    // which can leave Venmo unable to launch even after reinstall. In-app KeychainRestore.x
+    // is the only safe writer; here we only stage akc.plist into the live Documents folder.
     NSMutableArray *parts = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *bid in bundleIds) {
         NSString *dir = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-        // Materialize AMG akc → keychain-full if needed (imports that only staged Documents/)
         [self NDMaterializeKeychainFullFromAMGInAppDir:dir importKeychain:YES];
-        NSArray *items = [self NDLoadKeychainItemsFromBackupDir:dir];
-        // Staging may be empty after a bad backup — fall back to holographic source (AMG live)
-        if (![items isKindOfClass:[NSArray class]] || !items.count) {
+        NSString *srcAkc = nil;
+        for (NSString *rel in @[@"Documents/akc.plist", @"akc.plist"]) {
+            NSString *p = [dir stringByAppendingPathComponent:rel];
+            if ([fm fileExistsAtPath:p]) { srcAkc = p; break; }
+        }
+        if (!srcAkc.length) {
             NSString *note = nil;
             NSString *holo = [self holographicSourceDirForBundleId:bid recordName:recordName sourceNote:&note];
-            if (holo.length && ![holo isEqualToString:dir]) {
-                [self NDMaterializeKeychainFullFromAMGInAppDir:holo importKeychain:YES];
-                items = [self NDLoadKeychainItemsFromBackupDir:holo];
-                // Also copy akc into staging so later passes / tweak pending paths see it
-                if (items.count) {
-                    NSFileManager *fm = [NSFileManager defaultManager];
-                    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-                    NSString *srcAkc = nil;
-                    for (NSString *rel in @[@"Documents/akc.plist", @"akc.plist"]) {
-                        NSString *p = [holo stringByAppendingPathComponent:rel];
-                        if ([fm fileExistsAtPath:p]) { srcAkc = p; break; }
-                    }
-                    if (srcAkc) {
-                        NSString *dstAkc = [dir stringByAppendingPathComponent:@"akc.plist"];
-                        [fm removeItemAtPath:dstAkc error:nil];
-                        [fm copyItemAtPath:srcAkc toPath:dstAkc error:nil];
-                    }
-                    [items writeToFile:[dir stringByAppendingPathComponent:@"keychain-full.plist"] atomically:YES];
+            if (holo.length) {
+                for (NSString *rel in @[@"Documents/akc.plist", @"akc.plist"]) {
+                    NSString *p = [holo stringByAppendingPathComponent:rel];
+                    if ([fm fileExistsAtPath:p]) { srcAkc = p; break; }
                 }
             }
         }
-        // Last resort: live container Documents/akc.plist already restored onto device
-        if (![items isKindOfClass:[NSArray class]] || !items.count) {
-            NSString *live = [self containerPathForBundleId:bid];
-            if (live.length) {
-                NSString *liveAkc = [[live stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"];
-                NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:liveAkc];
-                items = [self NDKeychainItemsFromAMGAkcDictionary:akc];
-            }
+        NSString *live = [self containerPathForBundleId:bid];
+        NSString *liveAkc = live.length
+            ? [[live stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]
+            : nil;
+        BOOL copied = NO;
+        if (srcAkc.length && liveAkc.length) {
+            [fm createDirectoryAtPath:[liveAkc stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+            [fm removeItemAtPath:liveAkc error:nil];
+            copied = [fm copyItemAtPath:srcAkc toPath:liveAkc error:nil];
         }
-        if (![items isKindOfClass:[NSArray class]] || !items.count) {
-            [parts addObject:[NSString stringWithFormat:@"%@: items=0", bid]];
-            continue;
+        // Pending pointer for in-app restore
+        if (srcAkc.length) {
+            NSString *pendingDir = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"];
+            [fm createDirectoryAtPath:pendingDir withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString *pending = [pendingDir stringByAppendingPathComponent:[bid stringByAppendingString:@".txt"]];
+            [srcAkc writeToFile:pending atomically:YES encoding:NSUTF8StringEncoding error:nil];
         }
-
-        // Collect services/accounts from dump so VenmoKit / token entries get cleared even when
-        // their service string does not contain the bundle id.
-        NSMutableSet *dumpServices = [NSMutableSet set];
-        NSMutableSet *dumpAccounts = [NSMutableSet set];
-        for (NSDictionary *it in items) {
-            if (![it isKindOfClass:[NSDictionary class]]) continue;
-            if ([it[@"service"] isKindOfClass:[NSString class]] && [it[@"service"] length]) [dumpServices addObject:it[@"service"]];
-            if ([it[@"account"] isKindOfClass:[NSString class]] && [it[@"account"] length]) [dumpAccounts addObject:it[@"account"]];
-        }
-
-        // Clear existing items that look related before restore (avoid duplicates)
-        for (id secClass in @[ (__bridge id)kSecClassGenericPassword, (__bridge id)kSecClassInternetPassword ]) {
-            NSDictionary *query = @{
-                (__bridge id)kSecClass: secClass,
-                (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
-                (__bridge id)kSecReturnAttributes: @YES,
-                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
-            };
-            CFTypeRef result = NULL;
-            if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) {
-                if (result) CFRelease(result);
-                continue;
-            }
-            NSArray *arr = (__bridge_transfer NSArray *)result;
-            for (NSDictionary *item in arr) {
-                NSString *service = item[(__bridge id)kSecAttrService] ?: @"";
-                NSString *account = item[(__bridge id)kSecAttrAccount] ?: @"";
-                NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup] ?: @"";
-                BOOL related = [service containsString:bid] || [account containsString:bid] || [accessGroup containsString:bid]
-                    || (service.length && [dumpServices containsObject:service])
-                    || (account.length && [dumpAccounts containsObject:account]);
-                if (!related) continue;
-                NSMutableDictionary *del = [@{
-                    (__bridge id)kSecClass: secClass,
-                } mutableCopy];
-                if (service.length) del[(__bridge id)kSecAttrService] = service;
-                if (account.length) del[(__bridge id)kSecAttrAccount] = account;
-                if (accessGroup.length) del[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-                SecItemDelete((__bridge CFDictionaryRef)del);
-            }
-        }
-
-        NSUInteger added = 0;
-        NSUInteger failed = 0;
-        NSMutableArray *failCodes = [NSMutableArray array];
-        for (NSDictionary *item in items) {
-            if (![item isKindOfClass:[NSDictionary class]]) continue;
-            NSString *cls = item[@"class"] ?: @"generic";
-            NSData *data = nil;
-            id rawData = item[@"data"];
-            if ([rawData isKindOfClass:[NSData class]]) {
-                data = rawData;
-            } else if ([rawData isKindOfClass:[NSString class]]) {
-                data = [[NSData alloc] initWithBase64EncodedString:rawData options:0];
-            }
-            if ([cls isEqualToString:@"certificate"]) {
-                if (!data.length) continue;
-                NSMutableDictionary *add = [@{
-                    (__bridge id)kSecClass: (__bridge id)kSecClassCertificate,
-                    (__bridge id)kSecValueData: data,
-                } mutableCopy];
-                if (item[@"label"]) add[(__bridge id)kSecAttrLabel] = item[@"label"];
-                if (item[@"accessGroup"]) add[(__bridge id)kSecAttrAccessGroup] = item[@"accessGroup"];
-                OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-                if (st == errSecMissingEntitlement && item[@"accessGroup"]) {
-                    [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
-                    st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-                }
-                if (st == errSecSuccess || st == errSecDuplicateItem) added++;
-                else {
-                    failed++;
-                    if (failCodes.count < 6) [failCodes addObject:[NSString stringWithFormat:@"%d", (int)st]];
-                }
-                continue;
-            }
-            if (!data.length) continue;
-            CFStringRef secClass = [cls isEqualToString:@"internet"] ? kSecClassInternetPassword : kSecClassGenericPassword;
-            NSMutableDictionary *del = [@{
-                (__bridge id)kSecClass: (__bridge id)secClass,
-            } mutableCopy];
-            NSString *service = item[@"service"] ?: @"";
-            NSString *account = item[@"account"] ?: @"";
-            NSString *accessGroup = item[@"accessGroup"] ?: @"";
-            NSString *server = item[@"server"] ?: @"";
-            if (!service.length && !server.length && !account.length) continue;
-            // AMG akc often omits agrp — must target TEAMID.bundleId or Venmo cannot read items
-            if (!accessGroup.length) {
-                accessGroup = [self defaultKeychainAccessGroupForBundleId:bid] ?: @"";
-            }
-            if (service.length) del[(__bridge id)kSecAttrService] = service;
-            if (account.length) del[(__bridge id)kSecAttrAccount] = account;
-            if (server.length) del[(__bridge id)kSecAttrServer] = server;
-            if (accessGroup.length) del[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-            SecItemDelete((__bridge CFDictionaryRef)del);
-
-            NSMutableDictionary *add = [del mutableCopy];
-            add[(__bridge id)kSecValueData] = data;
-            if (item[@"label"]) add[(__bridge id)kSecAttrLabel] = item[@"label"];
-            if (item[@"path"]) add[(__bridge id)kSecAttrPath] = item[@"path"];
-            if (item[@"port"]) add[(__bridge id)kSecAttrPort] = item[@"port"];
-            if (item[@"synchronizable"]) add[(__bridge id)kSecAttrSynchronizable] = item[@"synchronizable"];
-            // Prefer AfterFirstUnlock so background restore works
-            add[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-            if (accessGroup.length) add[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-            OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-            // Do NOT strip agrp on failure — without it items land in daemon group and Venmo stays logged out
-            if (st == errSecDuplicateItem) {
-                NSMutableDictionary *query = [del mutableCopy];
-                NSDictionary *attrs = @{ (__bridge id)kSecValueData: data };
-                st = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)attrs);
-            }
-            if (st == errSecSuccess) {
-                added++;
-            } else {
-                failed++;
-                if (failCodes.count < 6) {
-                    [failCodes addObject:[NSString stringWithFormat:@"%d%@%@", (int)st,
-                                          accessGroup.length ? @"@" : @"",
-                                          accessGroup.length ? accessGroup : @""]];
-                }
-            }
-        }
-        NSString *defAgrp = [self defaultKeychainAccessGroupForBundleId:bid] ?: @"?";
-        NSString *line = [NSString stringWithFormat:@"%@: items=%lu added=%lu failed=%lu agrp=%@%@",
-                          bid, (unsigned long)items.count, (unsigned long)added, (unsigned long)failed, defAgrp,
-                          failCodes.count ? [NSString stringWithFormat:@" codes=%@", [failCodes componentsJoinedByString:@","]] : @""];
-        [parts addObject:line];
-        NSLog(@"[NewDevice] keychain restore %@", line);
+        [parts addObject:[NSString stringWithFormat:@"%@: daemonKeychain=SKIP stagedAkc=%@ liveAkc=%@",
+                          bid, srcAkc.length ? @"yes" : @"no", copied ? @"copied" : (liveAkc.length && [fm fileExistsAtPath:liveAkc] ? @"present" : @"missing")]];
     }
     return parts.count ? [parts componentsJoinedByString:@"; "] : @"none";
+}
+
+- (NSString *)clearKeychainAccessGroupForBundleId:(NSString *)bundleId {
+    if (!bundleId.length) return @"missing bundleId";
+    NSString *agrp = [self defaultKeychainAccessGroupForBundleId:bundleId];
+    if (!agrp.length) return [NSString stringWithFormat:@"%@: no agrp", bundleId];
+    NSUInteger deleted = 0;
+    NSMutableArray *notes = [NSMutableArray array];
+    for (id secClass in @[ (__bridge id)kSecClassGenericPassword,
+                           (__bridge id)kSecClassInternetPassword,
+                           (__bridge id)kSecClassCertificate,
+                           (__bridge id)kSecClassKey,
+                           (__bridge id)kSecClassIdentity ]) {
+        // ONLY this access group — never MatchLimitAll without agrp
+        NSDictionary *query = @{
+            (__bridge id)kSecClass: secClass,
+            (__bridge id)kSecAttrAccessGroup: agrp,
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+            (__bridge id)kSecReturnAttributes: @YES,
+            (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+        };
+        CFTypeRef result = NULL;
+        OSStatus st = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        if (st == errSecItemNotFound) continue;
+        if (st != errSecSuccess || !result) {
+            if (result) CFRelease(result);
+            if (notes.count < 4) [notes addObject:[NSString stringWithFormat:@"query=%d", (int)st]];
+            continue;
+        }
+        NSArray *arr = (__bridge_transfer NSArray *)result;
+        for (NSDictionary *item in arr) {
+            NSMutableDictionary *del = [@{ (__bridge id)kSecClass: secClass,
+                                           (__bridge id)kSecAttrAccessGroup: agrp } mutableCopy];
+            id acct = item[(__bridge id)kSecAttrAccount];
+            id svce = item[(__bridge id)kSecAttrService];
+            id srvr = item[(__bridge id)kSecAttrServer];
+            id lab = item[(__bridge id)kSecAttrLabel];
+            if ([acct isKindOfClass:[NSString class]] && [acct length]) del[(__bridge id)kSecAttrAccount] = acct;
+            if ([svce isKindOfClass:[NSString class]] && [svce length]) del[(__bridge id)kSecAttrService] = svce;
+            if ([srvr isKindOfClass:[NSString class]] && [srvr length]) del[(__bridge id)kSecAttrServer] = srvr;
+            if ([lab isKindOfClass:[NSString class]] && [lab length]) del[(__bridge id)kSecAttrLabel] = lab;
+            if (SecItemDelete((__bridge CFDictionaryRef)del) == errSecSuccess) deleted++;
+        }
+    }
+    NSString *line = [NSString stringWithFormat:@"%@ agrp=%@ deleted=%lu%@",
+                      bundleId, agrp, (unsigned long)deleted,
+                      notes.count ? [NSString stringWithFormat:@" notes=%@", [notes componentsJoinedByString:@","]] : @""];
+    NSLog(@"[NewDevice] clearKeychain %@", line);
+    [line writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return line;
+}
+
+- (NSString *)setTweakInjectionEnabled:(BOOL)enabled {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *pairs = @[
+        @[ @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.dylib",
+           @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.dylib.off" ],
+        @[ @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.plist",
+           @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.plist.off" ],
+        @[ @"/var/jb/usr/lib/TweakInject/NewDevice.dylib",
+           @"/var/jb/usr/lib/TweakInject/NewDevice.dylib.off" ],
+        @[ @"/var/jb/usr/lib/TweakInject/NewDevice.plist",
+           @"/var/jb/usr/lib/TweakInject/NewDevice.plist.off" ],
+    ];
+    NSMutableArray *lines = [NSMutableArray array];
+    [lines addObject:[NSString stringWithFormat:@"setTweakInjectionEnabled=%@", enabled ? @"YES" : @"NO"]];
+    for (NSArray *pair in pairs) {
+        NSString *on = pair[0];
+        NSString *off = pair[1];
+        NSString *from = enabled ? off : on;
+        NSString *to = enabled ? on : off;
+        if (![fm fileExistsAtPath:from]) {
+            [lines addObject:[NSString stringWithFormat:@"skip missing %@", from]];
+            continue;
+        }
+        [fm removeItemAtPath:to error:nil];
+        NSError *err = nil;
+        BOOL ok = [fm moveItemAtPath:from toPath:to error:&err];
+        [lines addObject:[NSString stringWithFormat:@"%@ %@ → %@%@",
+                          ok ? @"OK" : @"FAIL", from, to,
+                          err ? [NSString stringWithFormat:@" (%@)", err.localizedDescription] : @""]];
+    }
+    NSString *body = [lines componentsJoinedByString:@"\n"];
+    [body writeToFile:@"/var/mobile/Media/NewDevice/last-tweak-toggle.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return body;
 }
 
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {

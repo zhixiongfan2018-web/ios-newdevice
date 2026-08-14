@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Disable JailbreakHide C hooks (stat/lstat) that SIGILL Venmo on iOS18+ElleKit.
+Description: Stop Venmo inject; no daemon Keychain writes; clearAppKeychain + disableTweak APIs.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -54,6 +54,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Diagnose whether NewDevice.dylib is installed / injectable (ElleKit paths + markers + keychain readback).
 - (NSString *)probeTweakInjection;
 
+/// Delete Keychain items ONLY inside the app's TEAMID.bundleId access group (never scan globally).
+- (NSString *)clearKeychainAccessGroupForBundleId:(NSString *)bundleId;
+
+/// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
+- (NSString *)setTweakInjectionEnabled:(BOOL)enabled;
+
 /// Best-effort: open app once so iOS creates its data container (restoreHolo only).
 - (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
 

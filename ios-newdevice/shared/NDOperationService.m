@@ -311,6 +311,28 @@
             return;
         }
 
+        if ([fun isEqualToString:@"clearAppKeychain"] || [fun isEqualToString:@"clearVenmoKeychain"]) {
+            NSString *bid = query[@"bundleId"] ?: @"net.kortina.labs.Venmo";
+            body = [[NDAppDataManager shared] clearKeychainAccessGroupForBundleId:bid] ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"disableTweak"] || [fun isEqualToString:@"disableTweakInject"]) {
+            body = [[NDAppDataManager shared] setTweakInjectionEnabled:NO] ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"enableTweak"] || [fun isEqualToString:@"enableTweakInject"]) {
+            body = [[NDAppDataManager shared] setTweakInjectionEnabled:YES] ?: @"";
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body, 200);
+            return;
+        }
+
         if ([fun isEqualToString:@"getTargetApps"]) {
             NSArray *targets = [NDConfig shared].targetApps ?: [NSArray array];
             body = [targets componentsJoinedByString:@"\n"];
