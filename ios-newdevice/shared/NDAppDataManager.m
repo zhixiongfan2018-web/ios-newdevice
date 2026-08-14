@@ -386,18 +386,79 @@ extern char **environ;
     return YES;
 }
 
+/// Prefer Records staging; fall back to classic /var/mobile/AMG/<liveName>/<bid>
+/// (import log names differ: ND uses 1916…-2026…, AMG live keeps +1916… 2026…).
+- (NSString *)holographicSourceDirForBundleId:(NSString *)bid recordName:(NSString *)recordName sourceNote:(NSString **)noteOut {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *staged = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
+    unsigned long long stagedBytes = [self byteSizeAtPath:staged];
+
+    NSString *liveApp = nil;
+    NSString *recDir = [NDPaths recordDir:recordName];
+    NSString *livePathFile = [recDir stringByAppendingPathComponent:@"amg-live-path.txt"];
+    NSString *liveNameFile = [recDir stringByAppendingPathComponent:@"amg-live-name.txt"];
+    NSString *livePath = [[NSString stringWithContentsOfFile:livePathFile encoding:NSUTF8StringEncoding error:nil]
+                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *liveName = [[NSString stringWithContentsOfFile:liveNameFile encoding:NSUTF8StringEncoding error:nil]
+                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!livePath.length && liveName.length) {
+        livePath = [@"/var/mobile/AMG" stringByAppendingPathComponent:liveName];
+    }
+    if (livePath.length) {
+        NSString *cand = [livePath stringByAppendingPathComponent:bid];
+        if ([fm fileExistsAtPath:cand]) liveApp = cand;
+    }
+    if (!liveApp.length) {
+        // Fuzzy: normalize record token vs /var/mobile/AMG/* folder names
+        NSString *want = [[recordName stringByReplacingOccurrencesOfString:@"+" withString:@""]
+                          stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+        while ([want containsString:@"--"]) want = [want stringByReplacingOccurrencesOfString:@"--" withString:@"-"];
+        NSArray *kids = [fm contentsOfDirectoryAtPath:@"/var/mobile/AMG" error:nil] ?: @[];
+        for (NSString *k in kids) {
+            NSString *got = [[k stringByReplacingOccurrencesOfString:@"+" withString:@""]
+                             stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+            while ([got containsString:@"--"]) got = [got stringByReplacingOccurrencesOfString:@"--" withString:@"-"];
+            if (![got isEqualToString:want] && ![got containsString:want] && ![want containsString:got]) continue;
+            NSString *cand = [[@"/var/mobile/AMG" stringByAppendingPathComponent:k] stringByAppendingPathComponent:bid];
+            if ([fm fileExistsAtPath:cand]) { liveApp = cand; break; }
+        }
+    }
+
+    unsigned long long liveBytes = liveApp.length ? [self byteSizeAtPath:liveApp] : 0;
+    // Prefer the richer tree (classic live often fuller than a partial stage)
+    if (liveBytes > stagedBytes && liveBytes > 0) {
+        if (noteOut) *noteOut = [NSString stringWithFormat:@"AMG-live(%lluKB)", liveBytes / 1024];
+        return liveApp;
+    }
+    if (stagedBytes > 0) {
+        if (noteOut) *noteOut = [NSString stringWithFormat:@"Records/apps(%lluKB)", stagedBytes / 1024];
+        return staged;
+    }
+    if (liveApp.length) {
+        if (noteOut) *noteOut = [NSString stringWithFormat:@"AMG-live-fallback(%lluKB)", liveBytes / 1024];
+        return liveApp;
+    }
+    if (noteOut) *noteOut = @"none";
+    return nil;
+}
+
 - (BOOL)restoreOneApp:(NSString *)bid
            fromRecord:(NSString *)recordName
                 lines:(NSMutableArray<NSString *> *)lines
               missing:(NSMutableArray<NSString *> *)missing {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-    if (![fm fileExistsAtPath:backupRoot]) return NO;
-    unsigned long long staged = [self byteSizeAtPath:backupRoot];
-    if (staged == 0) {
-        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (staged empty)", bid]];
+    NSString *srcNote = nil;
+    NSString *backupRoot = [self holographicSourceDirForBundleId:bid recordName:recordName sourceNote:&srcNote];
+    if (!backupRoot.length) {
+        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (no Records/apps and no /var/mobile/AMG live)", bid]];
         return NO;
     }
+    unsigned long long staged = [self byteSizeAtPath:backupRoot];
+    if (staged == 0) {
+        [lines addObject:[NSString stringWithFormat:@"SKIP %@ (source empty %@)", bid, srcNote ?: @"")];
+        return NO;
+    }
+    [lines addObject:[NSString stringWithFormat:@"SRC %@ ← %@", bid, srcNote ?: backupRoot]];
 
     NSString *container = nil;
     @try {
@@ -1082,6 +1143,22 @@ extern char **environ;
     if (!recordName.length) return YES;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *agRoot = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"AppGroup"];
+    if (![fm fileExistsAtPath:agRoot]) {
+        // Fall back to classic live AMG AppGroup
+        NSString *livePath = [[[NSString stringWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"amg-live-path.txt"]
+                                                        encoding:NSUTF8StringEncoding error:nil]
+                               stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
+        if (!livePath.length) {
+            NSString *liveName = [[NSString stringWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"amg-live-name.txt"]
+                                                           encoding:NSUTF8StringEncoding error:nil]
+                                  stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (liveName.length) livePath = [@"/var/mobile/AMG" stringByAppendingPathComponent:liveName];
+        }
+        if (livePath.length) {
+            NSString *liveAG = [livePath stringByAppendingPathComponent:@"AppGroup"];
+            if ([fm fileExistsAtPath:liveAG]) agRoot = liveAG;
+        }
+    }
     if (![fm fileExistsAtPath:agRoot]) return YES;
 
     NSArray *appBids = [fm contentsOfDirectoryAtPath:agRoot error:nil] ?: @[];

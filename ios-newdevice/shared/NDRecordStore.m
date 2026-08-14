@@ -943,28 +943,58 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
         return NO;
     }
 
+    // Pointer so restore can find classic live even when ND record name was sanitized
+    // (e.g. record=19169699785-2026-… vs live=+19169699785 2026-…).
+    NSString *recDir = [NDPaths recordDir:saved.name];
+    [liveName writeToFile:[recDir stringByAppendingPathComponent:@"amg-live-name.txt"]
+               atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [livePath writeToFile:[recDir stringByAppendingPathComponent:@"amg-live-path.txt"]
+               atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    // Immediately write holographic into REAL app sandboxes (Containers/…), not only AMG live.
+    NSArray *restoreBids = apps.array.count ? apps.array : @[@"net.kortina.labs.Venmo"];
+    [[NDAppDataManager shared] terminateApps:restoreBids];
+    NSError *restoreErr = nil;
+    [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:saved.name error:&restoreErr];
+    [[NDAppDataManager shared] restoreAppGroupsForRecord:saved.name];
+    NSString *restoreReport = [NDAppDataManager shared].lastRestoreReport ?: @"";
+    NSString *sandboxLine = @"sandboxWrite=UNKNOWN";
+    if ([restoreReport containsString:@"OK net.kortina.labs.Venmo"] || [restoreReport containsString:@"liveAkc=yes"]) {
+        sandboxLine = @"sandboxWrite=OK (Containers Data + akc)";
+    } else if ([restoreReport containsString:@"FAIL net.kortina.labs.Venmo"] || [restoreReport containsString:@"未找到数据容器"]) {
+        sandboxLine = @"sandboxWrite=FAIL (no container / copy failed — see Media/NewDevice/last-restore.txt)";
+    } else if (restoreReport.length) {
+        sandboxLine = [@"sandboxWrite=SEE_REPORT " stringByAppendingString:
+                       ([restoreReport length] > 180 ? [[restoreReport substringToIndex:180] stringByAppendingString:@"…"] : restoreReport)];
+    }
+    if (restoreErr) {
+        sandboxLine = [sandboxLine stringByAppendingFormat:@" err=%@", restoreErr.localizedDescription ?: @"?"];
+    }
+
     NSString *note = [NSString stringWithFormat:
                       @"Classic AMG write-back OK.\n"
                       @"liveAMG=%@\nliveFiles=%llu liveAkc=YES\n"
                       @"recordsRoot=%@\nrecord=%@\n"
                       @"stagedApps=%@\nvenmoKB=%llu akc=YES\n"
-                      @"fakerEncrypted=%@ spoof=%@\n",
+                      @"fakerEncrypted=%@ spoof=%@\n"
+                      @"%@\n",
                       livePath, liveFiles,
                       [NDPaths recordsRoot], saved.name,
                       [staged componentsJoinedByString:@","],
                       venmoKB,
                       fakerEncrypted ? @"YES" : @"NO",
-                      saved.spoofDeviceIdentity ? @"YES" : @"NO"];
-    [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
+                      saved.spoofDeviceIdentity ? @"YES" : @"NO",
+                      sandboxLine];
+    [note writeToFile:[recDir stringByAppendingPathComponent:@"amg-import-note.txt"]
           atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [note writeToFile:@"/var/mobile/Media/AMG/import/nd-import-status.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     if (![self.importingNames containsObject:saved.name]) [self.importingNames addObject:saved.name];
-    [self.importingHoloLines addObject:[NSString stringWithFormat:@"classic %@ → live=%@ apps=%lu venmoKB=%llu akc=YES",
-                                        saved.name, liveName, (unsigned long)staged.count, venmoKB]];
+    [self.importingHoloLines addObject:[NSString stringWithFormat:@"classic %@ → live=%@ apps=%lu venmoKB=%llu akc=YES %@",
+                                        saved.name, liveName, (unsigned long)staged.count, venmoKB, sandboxLine]];
     if (outNote) {
-        *outNote = [NSString stringWithFormat:@"OK classic→/var/mobile/AMG/%@ venmoKB=%llu akc=YES liveFiles=%llu",
-                    liveName, venmoKB, liveFiles];
+        *outNote = [NSString stringWithFormat:@"OK classic→/var/mobile/AMG/%@ venmoKB=%llu akc=YES liveFiles=%llu %@",
+                    liveName, venmoKB, liveFiles, sandboxLine];
     }
     return YES;
 }

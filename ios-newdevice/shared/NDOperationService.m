@@ -447,8 +447,15 @@
                         NSError *rErr = nil;
                         [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:&rErr];
                         [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
+                        NSString *rr = [NDAppDataManager shared].lastRestoreReport ?: @"";
+                        // Append sandbox write proof into the same import log the user reads
+                        NSString *prev = [NSString stringWithContentsOfFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
+                                                                  encoding:NSUTF8StringEncoding error:nil] ?: @"";
+                        NSString *extra = [NSString stringWithFormat:@"\n--- sandbox write (Containers) ---\n%@", rr];
+                        [[prev stringByAppendingString:extra] writeToFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
+                                                               atomically:YES encoding:NSUTF8StringEncoding error:nil];
                         applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
-                                    [NDAppDataManager shared].lastRestoreReport ?: (rErr.localizedDescription ?: @"")];
+                                    rr.length ? rr : (rErr.localizedDescription ?: @"")];
                     } @catch (NSException *ex) {
                         applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
                     }
