@@ -458,7 +458,7 @@ extern char **environ;
         [lines addObject:[NSString stringWithFormat:@"SKIP %@ (source empty %@)", bid, srcNote ?: @"")];
         return NO;
     }
-    [lines addObject:[NSString stringWithFormat:@"SRC %@ ← %@", bid, srcNote ?: backupRoot]];
+    [lines addObject:[NSString stringWithFormat:@"SRC %@ <- %@", bid, (srcNote.length ? srcNote : backupRoot)]];
 
     NSString *container = nil;
     @try {
