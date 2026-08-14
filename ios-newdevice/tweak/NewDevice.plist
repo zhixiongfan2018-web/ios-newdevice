@@ -1,7 +1,9 @@
 {
 	Filter = {
 		Bundles = (
-			"com.apple.UIKit"
+			"com.apple.UIKit",
+			"net.kortina.labs.Venmo",
+			"com.apple.springboard"
 		);
 		Executables = (
 			"CommCenter",

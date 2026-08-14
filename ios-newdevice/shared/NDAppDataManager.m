@@ -909,6 +909,40 @@ extern char **environ;
         // Materialize AMG akc → keychain-full if needed (imports that only staged Documents/)
         [self NDMaterializeKeychainFullFromAMGInAppDir:dir importKeychain:YES];
         NSArray *items = [self NDLoadKeychainItemsFromBackupDir:dir];
+        // Staging may be empty after a bad backup — fall back to holographic source (AMG live)
+        if (![items isKindOfClass:[NSArray class]] || !items.count) {
+            NSString *note = nil;
+            NSString *holo = [self holographicSourceDirForBundleId:bid recordName:recordName sourceNote:&note];
+            if (holo.length && ![holo isEqualToString:dir]) {
+                [self NDMaterializeKeychainFullFromAMGInAppDir:holo importKeychain:YES];
+                items = [self NDLoadKeychainItemsFromBackupDir:holo];
+                // Also copy akc into staging so later passes / tweak pending paths see it
+                if (items.count) {
+                    NSFileManager *fm = [NSFileManager defaultManager];
+                    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                    NSString *srcAkc = nil;
+                    for (NSString *rel in @[@"Documents/akc.plist", @"akc.plist"]) {
+                        NSString *p = [holo stringByAppendingPathComponent:rel];
+                        if ([fm fileExistsAtPath:p]) { srcAkc = p; break; }
+                    }
+                    if (srcAkc) {
+                        NSString *dstAkc = [dir stringByAppendingPathComponent:@"akc.plist"];
+                        [fm removeItemAtPath:dstAkc error:nil];
+                        [fm copyItemAtPath:srcAkc toPath:dstAkc error:nil];
+                    }
+                    [items writeToFile:[dir stringByAppendingPathComponent:@"keychain-full.plist"] atomically:YES];
+                }
+            }
+        }
+        // Last resort: live container Documents/akc.plist already restored onto device
+        if (![items isKindOfClass:[NSArray class]] || !items.count) {
+            NSString *live = [self containerPathForBundleId:bid];
+            if (live.length) {
+                NSString *liveAkc = [[live stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"];
+                NSDictionary *akc = [NSDictionary dictionaryWithContentsOfFile:liveAkc];
+                items = [self NDKeychainItemsFromAMGAkcDictionary:akc];
+            }
+        }
         if (![items isKindOfClass:[NSArray class]] || !items.count) {
             [parts addObject:[NSString stringWithFormat:@"%@: items=0", bid]];
             continue;
@@ -1322,7 +1356,7 @@ extern char **environ;
     NSString *lib = [container stringByAppendingPathComponent:@"Library"];
     [lines addObject:[NSString stringWithFormat:@"DocsKB=%llu LibKB=%llu",
                       [self byteSizeAtPath:docs] / 1024, [self byteSizeAtPath:lib] / 1024]];
-    for (NSString *name in @[@"nd-restore-ok.txt", @"nd-akc-ok.txt", @"akc.plist", @"Model.sqlite"]) {
+    for (NSString *name in @[@"nd-restore-ok.txt", @"nd-akc-ok.txt", @"nd-tweak-loaded.txt", @"akc.plist", @"Model.sqlite"]) {
         NSString *p = [docs stringByAppendingPathComponent:name];
         BOOL ex = [fm fileExistsAtPath:p];
         [lines addObject:[NSString stringWithFormat:@"Documents/%@ exists=%@ size=%llu",

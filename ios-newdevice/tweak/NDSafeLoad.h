@@ -37,11 +37,9 @@ static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
 static inline BOOL NDShouldLoadTweak(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if (NDBundleIsJailbreakTool(bid)) return NO;
-    // Allow UIKit apps + telephony daemons listed in NewDevice.plist Executables
-    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
-    if (!bid.length) {
-        return [proc isEqualToString:@"CommCenter"] || [proc isEqualToString:@"CommCenterRootHelper"];
-    }
+    // Empty bundle id is common in very early %ctor — do NOT refuse here;
+    // callers should retry on main queue once UIKit/app bundle is ready.
+    if (!bid.length) return YES;
     return YES;
 }
 

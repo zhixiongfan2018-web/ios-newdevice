@@ -190,29 +190,44 @@ static void NDApplyPendingKeychainRestore(void) {
 
 %ctor {
     @autoreleasepool {
-        if (!NDShouldLoadTweak()) return;
-        // Prove injection even when akc restore fails
-        @try {
-            NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-            NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
-            [[NSFileManager defaultManager] createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
-            NSString *loaded = [NSString stringWithFormat:@"bid=%@\ntime=%@\n", bid, [NSDate date]];
-            [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            NSString *media = @"/var/mobile/Media/NewDevice/last-tweak-loaded.txt";
-            [loaded writeToFile:media atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        } @catch (__unused NSException *ex) {}
-        // MUST be synchronous: Venmo reads Keychain (tokens + Encryption_symmetricKey)
-        // during early launch. A delayed restore races and leaves the UI logged-out.
-        @try {
-            NDApplyPendingKeychainRestore();
-        } @catch (__unused NSException *ex) {
-        }
-        // Second pass after UIKit is up (covers Home not ready in very early ctor)
-        dispatch_async(dispatch_get_main_queue(), ^{
+        void (^run)(void) = ^{
             @try {
+                NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+                if (NDBundleIsJailbreakTool(bid)) return;
+                // Skip anonymous early ctor only for known non-app hosts
+                NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+                if (!bid.length) {
+                    if ([proc isEqualToString:@"CommCenter"] || [proc isEqualToString:@"CommCenterRootHelper"]) {
+                        // telephony hosts: no Documents/akc path
+                    } else {
+                        return; // wait for delayed pass with real bundle id
+                    }
+                }
+                if ([bid hasPrefix:@"com.apple."] && ![bid containsString:@"mobilesafari"]) return;
+                if (!bid.length) return;
+
+                NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+                NSFileManager *fm = [NSFileManager defaultManager];
+                [fm createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\n", bid, proc, [NSDate date]];
+                [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
+                         atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                // jb Library is reachable from many injected contexts; Media may be sandboxed
+                NSString *rt = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
+                [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+                [loaded writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
                 NDApplyPendingKeychainRestore();
             } @catch (__unused NSException *ex) {
             }
-        });
+        };
+
+        // Immediate attempt (works when bundle id already available)
+        run();
+        // Main queue: bundle id is ready; Venmo still early enough for many token reads
+        dispatch_async(dispatch_get_main_queue(), run);
+        // Delayed retries — cover late injection / first-unlock races
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), run);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), run);
     }
 }
