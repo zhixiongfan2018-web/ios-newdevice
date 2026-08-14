@@ -173,13 +173,8 @@ static pid_t hooked_fork(void) {
 %ctor {
     NDRunAfterUIKitReady(^{
         %init(NDJailbreakHide);
-        MSHookFunction((void *)stat, (void *)hooked_stat, (void **)&orig_stat);
-        MSHookFunction((void *)lstat, (void *)hooked_lstat, (void **)&orig_lstat);
-        MSHookFunction((void *)access, (void *)hooked_access, (void **)&orig_access);
-        MSHookFunction((void *)fopen, (void *)hooked_fopen, (void **)&orig_fopen);
-        MSHookFunction((void *)_dyld_get_image_name, (void *)hooked_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
-        MSHookFunction((void *)_dyld_image_count, (void *)hooked_dyld_image_count, (void **)&orig_dyld_image_count);
-        MSHookFunction((void *)getenv, (void *)hooked_getenv, (void **)&orig_getenv);
-        MSHookFunction((void *)fork, (void *)hooked_fork, (void **)&orig_fork);
+        // NOTE (iOS 18 + ElleKit): MSHookFunction on stat/lstat/access/fopen/dyld causes
+        // SIGILL in Venmo (sqlite/CFNetwork call lstat during launch). Keep ObjC-only hide.
+        // Deep C hooks can be re-enabled later behind an explicit opt-in once verified.
     });
 }

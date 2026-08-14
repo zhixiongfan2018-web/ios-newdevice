@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Defer ObjC hooks until after UIApplication init (fix Venmo/ElleKit crash).
+Description: Disable JailbreakHide C hooks (stat/lstat) that SIGILL Venmo on iOS18+ElleKit.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
