@@ -38,6 +38,77 @@ extern char **environ;
     dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
 }
 
+/// App Store apps store Keychain under TEAMID.bundleId when akc.plist has no agrp.
+/// Writing without agrp from newdeviced lands in the daemon's own group — Venmo never sees it.
+- (NSString *)defaultKeychainAccessGroupForBundleId:(NSString *)bid {
+    if (!bid.length) return nil;
+    static NSMutableDictionary *cache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    @synchronized (cache) {
+        if (cache[bid]) return cache[bid];
+    }
+    NSString *team = nil;
+    @try {
+        Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+        if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+            id (*msg)(Class, SEL, id) = (void *)objc_msgSend;
+            id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bid);
+            if (proxy) {
+                if ([proxy respondsToSelector:NSSelectorFromString(@"teamID")]) {
+                    team = ((id (*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"teamID"));
+                }
+                if (![team isKindOfClass:[NSString class]] || !team.length) {
+                    if ([proxy respondsToSelector:NSSelectorFromString(@"applicationIdentifier")]) {
+                        // some proxies expose full application-identifier TEAMID.bid
+                        NSString *appId = ((id (*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"applicationIdentifier"));
+                        if ([appId isKindOfClass:[NSString class]] && [appId containsString:@"."] && ![appId isEqualToString:bid]) {
+                            // If already TEAMID.bid use as agrp directly
+                            if ([appId hasSuffix:bid] || [appId containsString:bid]) {
+                                @synchronized (cache) { cache[bid] = appId; }
+                                return appId;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } @catch (__unused NSException *ex) {}
+    if (![team isKindOfClass:[NSString class]] || !team.length) {
+        // Fallback: scan bundle for embedded.mobileprovision TeamIdentifier (best-effort)
+        @try {
+            Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+            id (*msg)(Class, SEL, id) = (void *)objc_msgSend;
+            id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bid);
+            NSURL *bundleURL = nil;
+            if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"bundleURL")]) {
+                bundleURL = ((id (*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"bundleURL"));
+            }
+            if ([bundleURL isKindOfClass:[NSURL class]]) {
+                NSString *prov = [bundleURL.path stringByAppendingPathComponent:@"embedded.mobileprovision"];
+                NSData *data = [NSData dataWithContentsOfFile:prov];
+                if (data.length) {
+                    NSString *raw = [[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding];
+                    if (!raw) raw = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+                    NSRange r = [raw rangeOfString:@"<key>TeamIdentifier</key>"];
+                    if (r.location != NSNotFound) {
+                        NSString *tail = [raw substringFromIndex:r.location];
+                        NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"<string>([A-Z0-9]+)</string>"
+                                                                                           options:0 error:nil];
+                        NSTextCheckingResult *m = [re firstMatchInString:tail options:0 range:NSMakeRange(0, MIN((NSUInteger)200, tail.length))];
+                        if (m.numberOfRanges >= 2) team = [tail substringWithRange:[m rangeAtIndex:1]];
+                    }
+                }
+            }
+        } @catch (__unused NSException *ex) {}
+    }
+    if (![team isKindOfClass:[NSString class]] || !team.length) return nil;
+    NSString *agrp = [NSString stringWithFormat:@"%@.%@", team, bid];
+    @synchronized (cache) { cache[bid] = agrp; }
+    NSLog(@"[NewDevice] keychain agrp for %@ => %@", bid, agrp);
+    return agrp;
+}
+
 - (void)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
     pid_t pid = 0;
     const char *path = launchPath.fileSystemRepresentation;
@@ -1033,6 +1104,10 @@ extern char **environ;
             NSString *accessGroup = item[@"accessGroup"] ?: @"";
             NSString *server = item[@"server"] ?: @"";
             if (!service.length && !server.length && !account.length) continue;
+            // AMG akc often omits agrp — must target TEAMID.bundleId or Venmo cannot read items
+            if (!accessGroup.length) {
+                accessGroup = [self defaultKeychainAccessGroupForBundleId:bid] ?: @"";
+            }
             if (service.length) del[(__bridge id)kSecAttrService] = service;
             if (account.length) del[(__bridge id)kSecAttrAccount] = account;
             if (server.length) del[(__bridge id)kSecAttrServer] = server;
@@ -1047,14 +1122,9 @@ extern char **environ;
             if (item[@"synchronizable"]) add[(__bridge id)kSecAttrSynchronizable] = item[@"synchronizable"];
             // Prefer AfterFirstUnlock so background restore works
             add[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+            if (accessGroup.length) add[(__bridge id)kSecAttrAccessGroup] = accessGroup;
             OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-            BOOL strippedAgrp = NO;
-            if (st == errSecMissingEntitlement && accessGroup.length) {
-                // Retry without access group when entitlement mismatch (may be invisible to Venmo)
-                [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
-                st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-                strippedAgrp = YES;
-            }
+            // Do NOT strip agrp on failure — without it items land in daemon group and Venmo stays logged out
             if (st == errSecDuplicateItem) {
                 NSMutableDictionary *query = [del mutableCopy];
                 NSDictionary *attrs = @{ (__bridge id)kSecValueData: data };
@@ -1062,14 +1132,18 @@ extern char **environ;
             }
             if (st == errSecSuccess) {
                 added++;
-                if (strippedAgrp && failCodes.count < 6) [failCodes addObject:@"strippedAgrp"];
             } else {
                 failed++;
-                if (failCodes.count < 6) [failCodes addObject:[NSString stringWithFormat:@"%d", (int)st]];
+                if (failCodes.count < 6) {
+                    [failCodes addObject:[NSString stringWithFormat:@"%d%@%@", (int)st,
+                                          accessGroup.length ? @"@" : @"",
+                                          accessGroup.length ? accessGroup : @""]];
+                }
             }
         }
-        NSString *line = [NSString stringWithFormat:@"%@: items=%lu added=%lu failed=%lu%@",
-                          bid, (unsigned long)items.count, (unsigned long)added, (unsigned long)failed,
+        NSString *defAgrp = [self defaultKeychainAccessGroupForBundleId:bid] ?: @"?";
+        NSString *line = [NSString stringWithFormat:@"%@: items=%lu added=%lu failed=%lu agrp=%@%@",
+                          bid, (unsigned long)items.count, (unsigned long)added, (unsigned long)failed, defAgrp,
                           failCodes.count ? [NSString stringWithFormat:@" codes=%@", [failCodes componentsJoinedByString:@","]] : @""];
         [parts addObject:line];
         NSLog(@"[NewDevice] keychain restore %@", line);
