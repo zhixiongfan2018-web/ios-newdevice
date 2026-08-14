@@ -304,7 +304,8 @@
         }
 
         if ([fun isEqualToString:@"getTargetApps"]) {
-            body = [[[NDConfig shared].targetApps ?: @[]] componentsJoinedByString:@"\n"];
+            NSArray *targets = [NDConfig shared].targetApps ?: [NSArray array];
+            body = [targets componentsJoinedByString:@"\n"];
             [[NDRecordStore shared] writeResultCode:1];
             done(body ?: @"", 200);
             return;
