@@ -1393,6 +1393,14 @@ extern char **environ;
     if (rt.length) [lines addObject:[NSString stringWithFormat:@"--- runtime last-akc-restore ---\n%@", rt]];
     else [lines addObject:@"runtime last-akc-restore: (missing) — tweak may not have run in Venmo"];
 
+    NSString *tw = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
+    NSString *twBody = [NSString stringWithContentsOfFile:tw encoding:NSUTF8StringEncoding error:nil];
+    if (!twBody.length) {
+        twBody = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-tweak-loaded.txt" encoding:NSUTF8StringEncoding error:nil];
+    }
+    if (twBody.length) [lines addObject:[NSString stringWithFormat:@"--- last-tweak-loaded ---\n%@", twBody]];
+    else [lines addObject:@"last-tweak-loaded: (missing) — NewDevice.dylib not injected into Venmo"];
+
     NSString *groupLive = [self sharedAppGroupPathForGroupId:@"group.net.kortina.labs.Venmo"];
     [lines addObject:[NSString stringWithFormat:@"AppGroup group.net.kortina.labs.Venmo=%@",
                       groupLive.length ? groupLive : @"(not found)"]];
