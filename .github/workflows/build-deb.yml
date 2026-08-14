@@ -279,7 +279,7 @@ jobs:
           <body>
             <h1>NewDevice</h1>
             <p>Sileo 固定源（只用这一条）：</p>
-            <p class="box"><code>https://cdn.jsdelivr.net/gh/zhixiongfan2018-web/ios-newdevice/stable</code></p>
+            <p class="box"><code>https://zhixiongfan2018-web.github.io/ios-newdevice</code></p>
             <p>本页 deb：<a href="debs/${DEB_NAME}">${DEB_NAME}</a></p>
           </body>
           </html>
