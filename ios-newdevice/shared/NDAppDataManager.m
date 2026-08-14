@@ -9,6 +9,7 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <notify.h>
+#import <Security/Security.h>
 
 extern char **environ;
 
@@ -1482,6 +1483,113 @@ extern char **environ;
         [lines addObject:[NSString stringWithFormat:@"  AppGroupKB=%llu", [self byteSizeAtPath:groupLive] / 1024]];
     }
     return [lines componentsJoinedByString:@"\n"];
+}
+
+- (void)NDAppendPathProbe:(NSMutableArray *)lines path:(NSString *)path {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    BOOL ex = [fm fileExistsAtPath:path isDirectory:&isDir];
+    if (!ex) {
+        [lines addObject:[NSString stringWithFormat:@"MISS %@", path]];
+        return;
+    }
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+    unsigned long long sz = [attrs fileSize];
+    NSDate *m = attrs[NSFileModificationDate];
+    [lines addObject:[NSString stringWithFormat:@"OK %@ %@ size=%llu mtime=%@",
+                      isDir ? @"dir" : @"file", path, sz, m ?: @""]];
+}
+
+- (NSString *)probeTweakInjection {
+    NSMutableArray *lines = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [lines addObject:@"=== NewDevice injection probe ==="];
+    [lines addObject:[NSString stringWithFormat:@"time=%@", [NSDate date]]];
+
+    NSArray *paths = @[
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.plist",
+        @"/var/jb/usr/lib/TweakInject/NewDevice.dylib",
+        @"/var/jb/usr/lib/TweakInject/NewDevice.plist",
+        @"/var/jb/usr/lib/libellekit.dylib",
+        @"/var/jb/usr/lib/libsubstrate.dylib",
+        @"/var/jb/usr/lib/TweakLoader.dylib",
+        @"/usr/lib/TweakLoader.dylib",
+        @"/var/jb/Library/NewDevice/last-tweak-loaded.txt",
+        @"/var/mobile/Media/NewDevice/last-tweak-loaded.txt",
+        @"/var/jb/Applications/NewDevice.app/NewDevice",
+        @"/var/jb/usr/local/bin/newdeviced",
+    ];
+    for (NSString *p in paths) [self NDAppendPathProbe:lines path:p];
+
+    // List sibling tweaks (are ANY tweaks present?)
+    for (NSString *dir in @[
+             @"/var/jb/Library/MobileSubstrate/DynamicLibraries",
+             @"/var/jb/usr/lib/TweakInject",
+         ]) {
+        NSArray *kids = [fm contentsOfDirectoryAtPath:dir error:nil];
+        if (!kids) {
+            [lines addObject:[NSString stringWithFormat:@"list %@: (missing)", dir]];
+            continue;
+        }
+        NSArray *dylibs = [[kids filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self ENDSWITH '.dylib'"]]
+                           sortedArrayUsingSelector:@selector(compare:)];
+        [lines addObject:[NSString stringWithFormat:@"list %@: %lu dylibs", dir, (unsigned long)dylibs.count]];
+        for (NSUInteger i = 0; i < MIN((NSUInteger)20, dylibs.count); i++) {
+            [lines addObject:[NSString stringWithFormat:@"  - %@", dylibs[i]]];
+        }
+    }
+
+    // Filter plist body
+    NSString *filterPath = @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.plist";
+    NSString *filterBody = [NSString stringWithContentsOfFile:filterPath encoding:NSUTF8StringEncoding error:nil];
+    if (!filterBody.length) {
+        id pl = [NSDictionary dictionaryWithContentsOfFile:filterPath];
+        if (pl) filterBody = [pl description];
+    }
+    if (filterBody.length) {
+        if (filterBody.length > 600) filterBody = [[filterBody substringToIndex:600] stringByAppendingString:@"…"];
+        [lines addObject:[NSString stringWithFormat:@"--- NewDevice.plist ---\n%@", filterBody]];
+    }
+
+    NSString *marker = [NSString stringWithContentsOfFile:@"/var/jb/Library/NewDevice/last-tweak-loaded.txt"
+                                                 encoding:NSUTF8StringEncoding error:nil];
+    if (!marker.length) {
+        marker = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-tweak-loaded.txt"
+                                           encoding:NSUTF8StringEncoding error:nil];
+    }
+    if (marker.length) [lines addObject:[NSString stringWithFormat:@"--- last-tweak-loaded ---\n%@", marker]];
+    else [lines addObject:@"last-tweak-loaded: (missing) — dylib never ran in any injected app since install/respring"];
+
+    // Keychain readback for Venmo agrp (daemon can see what it wrote)
+    NSString *bid = @"net.kortina.labs.Venmo";
+    NSString *agrp = [self defaultKeychainAccessGroupForBundleId:bid] ?: @"";
+    [lines addObject:[NSString stringWithFormat:@"venmoAgrp=%@", agrp.length ? agrp : @"(unknown)"]];
+    if (agrp.length) {
+        NSDictionary *q = @{
+            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecAttrAccessGroup: agrp,
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+            (__bridge id)kSecReturnAttributes: @YES,
+            (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+        };
+        CFTypeRef result = NULL;
+        OSStatus st = SecItemCopyMatching((__bridge CFDictionaryRef)q, &result);
+        NSUInteger n = 0;
+        if (st == errSecSuccess && result) {
+            n = [(__bridge NSArray *)result count];
+            CFRelease(result);
+        } else if (result) {
+            CFRelease(result);
+        }
+        [lines addObject:[NSString stringWithFormat:@"keychainReadback agrp items=%lu status=%d", (unsigned long)n, (int)st]];
+    }
+
+    [lines addObject:@"hint: if dylib OK but last-tweak-loaded missing → Dopamine/Choicy blocking injection or need Respring"];
+    [lines addObject:@"hint: Venmo login needs in-app inject (identity + akc); daemon SecItemAdd alone is not enough"];
+    NSString *body = [lines componentsJoinedByString:@"\n"];
+    [body writeToFile:@"/var/mobile/Media/NewDevice/last-inject-probe.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return body;
 }
 
 - (id)generalPasteboard {

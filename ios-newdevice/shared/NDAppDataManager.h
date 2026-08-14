@@ -51,6 +51,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Filza-less live sandbox probe (markers, sizes, in-app akc report).
 - (NSString *)probeLiveContainerForBundleId:(NSString *)bundleId;
 
+/// Diagnose whether NewDevice.dylib is installed / injectable (ElleKit paths + markers + keychain readback).
+- (NSString *)probeTweakInjection;
+
 /// Best-effort: open app once so iOS creates its data container (restoreHolo only).
 - (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
 

@@ -50,4 +50,19 @@ if [ -d "$APP" ] && command -v uicache >/dev/null 2>&1; then
   uicache -p "$APP" 2>/dev/null || uicache --path "$APP" 2>/dev/null || true
 fi
 
+# ElleKit / some Dopamine builds also scan TweakInject — mirror our filter+dylib there.
+DYLIB_DIR="${JB_PREFIX}/Library/MobileSubstrate/DynamicLibraries"
+INJECT_DIR="${JB_PREFIX}/usr/lib/TweakInject"
+if [ -d "$DYLIB_DIR" ] && [ -f "$DYLIB_DIR/NewDevice.dylib" ]; then
+  mkdir -p "$INJECT_DIR" 2>/dev/null || true
+  if [ -d "$INJECT_DIR" ]; then
+    ln -sf "$DYLIB_DIR/NewDevice.dylib" "$INJECT_DIR/NewDevice.dylib" 2>/dev/null || \
+      cp -f "$DYLIB_DIR/NewDevice.dylib" "$INJECT_DIR/NewDevice.dylib" 2>/dev/null || true
+    if [ -f "$DYLIB_DIR/NewDevice.plist" ]; then
+      ln -sf "$DYLIB_DIR/NewDevice.plist" "$INJECT_DIR/NewDevice.plist" 2>/dev/null || \
+        cp -f "$DYLIB_DIR/NewDevice.plist" "$INJECT_DIR/NewDevice.plist" 2>/dev/null || true
+    fi
+  fi
+fi
+
 exit 0

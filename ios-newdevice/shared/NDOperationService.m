@@ -303,6 +303,14 @@
             return;
         }
 
+        if ([fun isEqualToString:@"probeInject"] || [fun isEqualToString:@"probeTweak"] || [fun isEqualToString:@"probeInjection"]) {
+            body = [[NDAppDataManager shared] probeTweakInjection] ?: @"";
+            [body writeToFile:@"/var/mobile/Media/NewDevice/last-inject-probe.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [[NDRecordStore shared] writeResultCode:body.length ? 1 : 0];
+            done(body, body.length ? 200 : 500);
+            return;
+        }
+
         if ([fun isEqualToString:@"getTargetApps"]) {
             NSArray *targets = [NDConfig shared].targetApps ?: [NSArray array];
             body = [targets componentsJoinedByString:@"\n"];
