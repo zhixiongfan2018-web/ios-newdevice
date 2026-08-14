@@ -4,11 +4,22 @@
 #import "NDRecordStore.h"
 #import "NDRuntimeState.h"
 #import "NDConfig.h"
+#import "NDAppDataManager.h"
 #import <errno.h>
+#import <string.h>
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         [NDPaths ensureDirectories];
+
+        // One-shot: clear Venmo keychain with daemon entitlements (App UI cannot).
+        if (argc >= 2 && argv[1] && strcmp(argv[1], "clear-venmo-kc") == 0) {
+            NSString *body = [[NDAppDataManager shared] clearVenmoKeychainAllKnownGroups] ?: @"";
+            [body writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
+                   atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            fprintf(stdout, "%s\n", body.UTF8String ?: "");
+            return 0;
+        }
 
         // Publish world-readable runtime snapshot at boot so sandboxed target apps
         // can spoof even before the NewDevice UI is opened.

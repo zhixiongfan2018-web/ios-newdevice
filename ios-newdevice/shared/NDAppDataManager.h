@@ -57,6 +57,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Delete Keychain items ONLY inside the app's TEAMID.bundleId access group (never scan globally).
 - (NSString *)clearKeychainAccessGroupForBundleId:(NSString *)bundleId;
 
+/// Venmo may have items under App Store team, sideload team, or no agrp — wipe known groups.
+- (NSString *)clearVenmoKeychainAllKnownGroups;
+
 /// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled;
 

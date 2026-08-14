@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Stop Venmo inject (crash); SpringBoard spoof only. Login keychain already on device.
+Description: Per-record isolation: clear Venmo keychain on switch/new; Venmo not injected.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

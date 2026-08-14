@@ -114,6 +114,9 @@
             if ([current isEqualToString:@"原始机器"]) {
                 [[NDAppDataManager shared] clearDataForApps:apps error:nil];
             } else if (hasStaged) {
+                // Always wipe live app+keychain first so destination identity can't leak
+                // the previous record's Venmo session into a "new" environment.
+                [[NDAppDataManager shared] clearDataForApps:apps error:nil];
                 NSError *restoreErr = nil;
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
                 [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
@@ -314,7 +317,11 @@
 
         if ([fun isEqualToString:@"clearAppKeychain"] || [fun isEqualToString:@"clearVenmoKeychain"]) {
             NSString *bid = query[@"bundleId"] ?: @"net.kortina.labs.Venmo";
-            body = [[NDAppDataManager shared] clearKeychainAccessGroupForBundleId:bid] ?: @"";
+            if ([bid isEqualToString:@"net.kortina.labs.Venmo"] || [fun isEqualToString:@"clearVenmoKeychain"]) {
+                body = [[NDAppDataManager shared] clearVenmoKeychainAllKnownGroups] ?: @"";
+            } else {
+                body = [[NDAppDataManager shared] clearKeychainAccessGroupForBundleId:bid] ?: @"";
+            }
             [[NDRecordStore shared] writeResultCode:1];
             done(body, 200);
             return;

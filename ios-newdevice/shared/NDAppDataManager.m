@@ -463,6 +463,13 @@ extern char **environ;
         if ([fm fileExistsAtPath:globalPref]) [fm removeItemAtPath:globalPref error:nil];
         NSString *cacheRoot = [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bid];
         if ([fm fileExistsAtPath:cacheRoot]) [fm removeItemAtPath:cacheRoot error:nil];
+
+        // Keychain is process-global — without this, every NewDevice "environment"
+        // keeps the same Venmo login after the first successful akc restore.
+        [self clearKeychainAccessGroupForBundleId:bid];
+        if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
+            [self clearVenmoKeychainAllKnownGroups];
+        }
     }
     return YES;
 }
@@ -1026,6 +1033,11 @@ extern char **environ;
     if (!bundleId.length) return @"missing bundleId";
     NSString *agrp = [self defaultKeychainAccessGroupForBundleId:bundleId];
     if (!agrp.length) return [NSString stringWithFormat:@"%@: no agrp", bundleId];
+    return [self NDClearKeychainAccessGroup:agrp bundleId:bundleId];
+}
+
+- (NSString *)NDClearKeychainAccessGroup:(NSString *)agrp bundleId:(NSString *)bundleId {
+    if (!agrp.length) return @"missing agrp";
     NSUInteger deleted = 0;
     NSMutableArray *notes = [NSMutableArray array];
     for (id secClass in @[ (__bridge id)kSecClassGenericPassword,
@@ -1033,7 +1045,6 @@ extern char **environ;
                            (__bridge id)kSecClassCertificate,
                            (__bridge id)kSecClassKey,
                            (__bridge id)kSecClassIdentity ]) {
-        // ONLY this access group — never MatchLimitAll without agrp
         NSDictionary *query = @{
             (__bridge id)kSecClass: secClass,
             (__bridge id)kSecAttrAccessGroup: agrp,
@@ -1065,11 +1076,65 @@ extern char **environ;
         }
     }
     NSString *line = [NSString stringWithFormat:@"%@ agrp=%@ deleted=%lu%@",
-                      bundleId, agrp, (unsigned long)deleted,
+                      bundleId.length ? bundleId : @"?", agrp, (unsigned long)deleted,
                       notes.count ? [NSString stringWithFormat:@" notes=%@", [notes componentsJoinedByString:@","]] : @""];
     NSLog(@"[NewDevice] clearKeychain %@", line);
     [line writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     return line;
+}
+
+- (NSString *)clearVenmoKeychainAllKnownGroups {
+    // Prefer daemon one-shot: App process lacks Venmo keychain-access-groups.
+    NSString *helper = @"/var/jb/usr/local/bin/newdeviced";
+    NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    BOOL inDaemon = !bid.length || [bid containsString:@"newdevice.daemon"] ||
+                    [[NSProcessInfo processInfo].processName isEqualToString:@"newdeviced"];
+    if (!inDaemon && [[NSFileManager defaultManager] isExecutableFileAtPath:helper]) {
+        pid_t pid = 0;
+        char *argv[] = { (char *)helper.fileSystemRepresentation, "clear-venmo-kc", NULL };
+        int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
+        if (rc == 0 && pid > 0) {
+            int status = 0;
+            waitpid(pid, &status, 0);
+            NSString *body = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
+                                                       encoding:NSUTF8StringEncoding error:nil];
+            if (body.length) return [@"via-daemon\n" stringByAppendingString:body];
+            return [NSString stringWithFormat:@"via-daemon exit=%d (no log)", status];
+        }
+        return [NSString stringWithFormat:@"daemon-spawn-failed rc=%d; falling back in-process", rc];
+    }
+
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    NSMutableArray *lines = [NSMutableArray array];
+    NSMutableOrderedSet *groups = [NSMutableOrderedSet orderedSet];
+    NSString *primary = [self defaultKeychainAccessGroupForBundleId:vbid];
+    if (primary.length) [groups addObject:primary];
+    [groups addObject:@"6DEPQ9SPDK.net.kortina.labs.Venmo"];
+    [groups addObject:@"55377VK7X2.net.kortina.labs.Venmo"];
+    for (NSString *g in groups) {
+        [lines addObject:[self NDClearKeychainAccessGroup:g bundleId:vbid]];
+    }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *live = [self containerPathForBundleId:vbid];
+    if (live.length) {
+        NSString *docs = [live stringByAppendingPathComponent:@"Documents"];
+        for (NSString *name in @[@"akc.plist", @"nd-akc-ok.txt", @"nd-tweak-loaded.txt", @"nd-restore-ok.txt"]) {
+            NSString *p = [docs stringByAppendingPathComponent:name];
+            if ([fm fileExistsAtPath:p]) {
+                [fm removeItemAtPath:p error:nil];
+                [lines addObject:[@"removed " stringByAppendingString:name]];
+            }
+        }
+    }
+    NSString *pending = [[[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"]
+                         stringByAppendingPathComponent:@"net.kortina.labs.Venmo.txt"];
+    if ([fm fileExistsAtPath:pending]) {
+        [fm removeItemAtPath:pending error:nil];
+        [lines addObject:@"removed pending-akc"];
+    }
+    NSString *body = [lines componentsJoinedByString:@"\n"];
+    [body writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return body;
 }
 
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled {
