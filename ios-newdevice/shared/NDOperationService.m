@@ -419,7 +419,7 @@
             NDDeviceProfile *p = nil;
             NSString *b64 = query[@"plistBase64"] ?: query[@"base64"] ?: @"";
             if (b64.length) {
-                NSData *data = [[NSData alloc] initWithBase64EncodedString:b64 options:NSDataBase64DecodingOptionsIgnoreUnknownCharacters];
+                NSData *data = [[NSData alloc] initWithBase64EncodedString:b64 options:NSDataBase64DecodingIgnoreUnknownCharacters];
                 if (data.length) {
                     NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-set-param.plist"];
                     [data writeToFile:tmp atomically:YES];
