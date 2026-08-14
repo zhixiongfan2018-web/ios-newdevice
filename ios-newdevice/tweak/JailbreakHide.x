@@ -1,14 +1,10 @@
 #import <Foundation/Foundation.h>
-#import <dlfcn.h>
-#import <sys/stat.h>
-#import <unistd.h>
-#import <errno.h>
-#import <stdlib.h>
-#import <string.h>
-#import <mach-o/dyld.h>
-#import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
+
+/// ObjC-only jailbreak path hide.
+/// C hooks on stat/lstat/access/fopen/dyld were removed: on iOS 18 + ElleKit they
+/// SIGILL inside Venmo (sqlite/CFNetwork call lstat during launch).
 
 static NSArray<NSString *> *NDJBPaths(void) {
     return @[
@@ -45,50 +41,9 @@ static BOOL NDIsJBPath(const char *path) {
     return NO;
 }
 
-static BOOL NDDeepHideActive(void) {
-    NDTweakState *st = [NDTweakState shared];
-    return [st shouldSpoof] && st.config.jailbreakHideDeep;
-}
-
 static BOOL NDBasicHideActive(void) {
     NDTweakState *st = [NDTweakState shared];
     return [st shouldSpoof] && st.config.jailbreakHideBasic;
-}
-
-static int (*orig_stat)(const char *, struct stat *);
-static int hooked_stat(const char *path, struct stat *buf) {
-    if (NDBasicHideActive() && NDIsJBPath(path)) {
-        errno = ENOENT;
-        return -1;
-    }
-    return orig_stat(path, buf);
-}
-
-static int (*orig_lstat)(const char *, struct stat *);
-static int hooked_lstat(const char *path, struct stat *buf) {
-    if (NDBasicHideActive() && NDIsJBPath(path)) {
-        errno = ENOENT;
-        return -1;
-    }
-    return orig_lstat(path, buf);
-}
-
-static int (*orig_access)(const char *, int);
-static int hooked_access(const char *path, int mode) {
-    if (NDBasicHideActive() && NDIsJBPath(path)) {
-        errno = ENOENT;
-        return -1;
-    }
-    return orig_access(path, mode);
-}
-
-static FILE *(*orig_fopen)(const char *, const char *);
-static FILE *hooked_fopen(const char *path, const char *mode) {
-    if (NDBasicHideActive() && NDIsJBPath(path)) {
-        errno = ENOENT;
-        return NULL;
-    }
-    return orig_fopen(path, mode);
 }
 
 %group NDJailbreakHide
@@ -109,72 +64,8 @@ static FILE *hooked_fopen(const char *path, const char *mode) {
 %end
 %end // NDJailbreakHide
 
-static const char *(*orig_dyld_get_image_name)(uint32_t);
-static uint32_t (*orig_dyld_image_count)(void);
-
-static uint32_t NDRealIndexForVisible(uint32_t visible) {
-    uint32_t realCount = orig_dyld_image_count ? orig_dyld_image_count() : 0;
-    uint32_t seen = 0;
-    for (uint32_t i = 0; i < realCount; i++) {
-        const char *n = orig_dyld_get_image_name ? orig_dyld_get_image_name(i) : NULL;
-        if (n && NDIsJBPath(n)) continue;
-        if (seen == visible) return i;
-        seen++;
-    }
-    return 0;
-}
-
-static uint32_t hooked_dyld_image_count(void) {
-    uint32_t real = orig_dyld_image_count ? orig_dyld_image_count() : 0;
-    if (!NDDeepHideActive()) return real;
-    uint32_t hide = 0;
-    for (uint32_t i = 0; i < real; i++) {
-        const char *n = orig_dyld_get_image_name ? orig_dyld_get_image_name(i) : NULL;
-        if (n && NDIsJBPath(n)) hide++;
-    }
-    return (real > hide) ? (real - hide) : 0;
-}
-
-static const char *hooked_dyld_get_image_name(uint32_t image_index) {
-    if (NDDeepHideActive()) {
-        uint32_t realIdx = NDRealIndexForVisible(image_index);
-        return orig_dyld_get_image_name ? orig_dyld_get_image_name(realIdx) : NULL;
-    }
-    const char *name = orig_dyld_get_image_name ? orig_dyld_get_image_name(image_index) : NULL;
-    // Basic mode: rename instead of removing (safer)
-    NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.jailbreakHideBasic && name && NDIsJBPath(name)) {
-        return "/usr/lib/system/libsystem_c.dylib";
-    }
-    return name;
-}
-
-static char *(*orig_getenv)(const char *);
-static char *hooked_getenv(const char *name) {
-    if (NDDeepHideActive() && name) {
-        if (strcmp(name, "DYLD_INSERT_LIBRARIES") == 0 ||
-            strcmp(name, "DYLD_LIBRARY_PATH") == 0 ||
-            strcmp(name, "DYLD_FORCE_FLAT_NAMESPACE") == 0 ||
-            strcmp(name, "_MSSafeMode") == 0) {
-            return NULL;
-        }
-    }
-    return orig_getenv ? orig_getenv(name) : NULL;
-}
-
-static pid_t (*orig_fork)(void);
-static pid_t hooked_fork(void) {
-    if (NDDeepHideActive()) {
-        errno = ENOSYS;
-        return -1;
-    }
-    return orig_fork();
-}
 %ctor {
     NDRunAfterUIKitReady(^{
         %init(NDJailbreakHide);
-        // NOTE (iOS 18 + ElleKit): MSHookFunction on stat/lstat/access/fopen/dyld causes
-        // SIGILL in Venmo (sqlite/CFNetwork call lstat during launch). Keep ObjC-only hide.
-        // Deep C hooks can be re-enabled later behind an explicit opt-in once verified.
     });
 }
