@@ -12,6 +12,7 @@ static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         deny = [NSSet setWithArray:@[
+            @"com.local.newdevice",
             @"xyz.willy.Sileo",
             @"org.coolstar.SileoStore",
             @"org.coolstar.SileoNightly",
@@ -25,6 +26,7 @@ static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
         ]];
     });
     if ([deny containsObject:bundleId]) return YES;
+    if ([bundleId hasPrefix:@"com.local.newdevice"]) return YES;
     if ([bundleId hasPrefix:@"xyz.willy.Sileo"]) return YES;
     if ([bundleId hasPrefix:@"com.opa334.Dopamine"]) return YES;
     NSString *lower = bundleId.lowercaseString;

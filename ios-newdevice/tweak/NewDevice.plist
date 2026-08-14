@@ -11,6 +11,7 @@
 			"CommCenterRootHelper"
 		);
 		RejectList = (
+			"com.local.newdevice",
 			"xyz.willy.Sileo",
 			"org.coolstar.SileoStore",
 			"com.saurik.Cydia",
