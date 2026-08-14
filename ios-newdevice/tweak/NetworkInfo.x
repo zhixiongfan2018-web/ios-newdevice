@@ -121,6 +121,7 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     return rc;
 }
 
+%group NDNetworkInfo
 %hook NEHotspotNetwork
 - (NSString *)SSID {
     NDTweakState *st = [NDTweakState shared];
@@ -133,19 +134,22 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     return %orig;
 }
 %end
+%end // NDNetworkInfo
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");
-    void *symInfo = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
-    if (symIf) {
+    NDRunAfterUIKitReady(^{
+        %init(NDNetworkInfo);
+        void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");
+        void *symInfo = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
+        if (symIf) {
         MSHookFunction(symIf, (void *)hooked_CNCopySupportedInterfaces, (void **)&orig_CNCopySupportedInterfaces);
-    }
-    if (symInfo) {
+        }
+        if (symInfo) {
         MSHookFunction(symInfo, (void *)hooked_CNCopyCurrentNetworkInfo, (void **)&orig_CNCopyCurrentNetworkInfo);
-    }
-    void *symGetIf = dlsym(RTLD_DEFAULT, "getifaddrs");
-    if (symGetIf) {
+        }
+        void *symGetIf = dlsym(RTLD_DEFAULT, "getifaddrs");
+        if (symGetIf) {
         MSHookFunction(symGetIf, (void *)hooked_getifaddrs, (void **)&orig_getifaddrs);
-    }
+        }
+    });
 }

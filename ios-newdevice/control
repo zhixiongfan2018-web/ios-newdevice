@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Classic AMG import + akc restore; skip injecting into NewDevice.app (ElleKit crash fix).
+Description: Defer ObjC hooks until after UIApplication init (fix Venmo/ElleKit crash).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

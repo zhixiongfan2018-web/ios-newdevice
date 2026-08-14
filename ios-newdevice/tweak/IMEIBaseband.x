@@ -75,6 +75,7 @@ static CFDictionaryRef hooked_CTServerConnectionCopyMobileEquipmentInfo(void *co
     return CFBridgingRetain(out);
 }
 
+%group NDIMEIBaseband
 %hook NSDictionary
 - (id)objectForKey:(id)aKey {
     id v = %orig;
@@ -87,19 +88,22 @@ static CFDictionaryRef hooked_CTServerConnectionCopyMobileEquipmentInfo(void *co
     return spoof.length ? spoof : v;
 }
 %end
+%end // NDIMEIBaseband
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
-    if (!iokit) iokit = dlopen("/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", RTLD_NOW);
-    if (iokit) {
+    NDRunAfterUIKitReady(^{
+        %init(NDIMEIBaseband);
+        void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
+        if (!iokit) iokit = dlopen("/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", RTLD_NOW);
+        if (iokit) {
         void *p1 = dlsym(iokit, "IORegistryEntryCreateCFProperty");
         if (p1) MSHookFunction(p1, (void *)hooked_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
         void *p2 = dlsym(iokit, "IORegistryEntrySearchCFProperty");
         if (p2) MSHookFunction(p2, (void *)hooked_IORegistryEntrySearchCFProperty, (void **)&orig_IORegistryEntrySearchCFProperty);
-    }
-    void *ct = dlsym(RTLD_DEFAULT, "CTServerConnectionCopyMobileEquipmentInfo");
-    if (ct) {
+        }
+        void *ct = dlsym(RTLD_DEFAULT, "CTServerConnectionCopyMobileEquipmentInfo");
+        if (ct) {
         MSHookFunction(ct, (void *)hooked_CTServerConnectionCopyMobileEquipmentInfo, (void **)&orig_CTServerConnectionCopyMobileEquipmentInfo);
-    }
+        }
+    });
 }

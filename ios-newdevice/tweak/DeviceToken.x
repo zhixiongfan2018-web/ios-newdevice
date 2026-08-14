@@ -39,6 +39,7 @@ static void NDDeliverSpoofedToken(UIApplication *app) {
     [inv invoke];
 }
 
+%group NDDeviceToken
 %hook UIApplication
 - (void)registerForRemoteNotifications {
     %orig;
@@ -64,7 +65,10 @@ static void NDDeliverSpoofedToken(UIApplication *app) {
     return v;
 }
 %end
+%end // NDDeviceToken
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDDeviceToken);
+    });
 }

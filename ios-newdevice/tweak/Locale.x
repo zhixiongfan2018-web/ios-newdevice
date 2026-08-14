@@ -2,6 +2,7 @@
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
 
+%group NDLocale
 %hook NSLocale
 + (NSLocale *)currentLocale {
     NDTweakState *st = [NDTweakState shared];
@@ -68,7 +69,10 @@
     return %orig;
 }
 %end
+%end // NDLocale
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDLocale);
+    });
 }

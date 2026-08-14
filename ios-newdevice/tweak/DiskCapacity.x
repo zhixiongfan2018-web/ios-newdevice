@@ -6,6 +6,7 @@
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
 
+%group NDDiskCapacity
 %hook NSFileManager
 - (NSDictionary *)attributesOfFileSystemForPath:(NSString *)path error:(NSError **)error {
     NSDictionary *orig = %orig;
@@ -28,6 +29,7 @@
     return m;
 }
 %end
+%end // NDDiskCapacity
 
 static int (*orig_statfs)(const char *, struct statfs *);
 static int (*orig_statfs64)(const char *, struct statfs *);
@@ -59,9 +61,11 @@ static int hooked_statfs64(const char *path, struct statfs *buf) {
 }
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    void *s = dlsym(RTLD_DEFAULT, "statfs");
-    if (s) MSHookFunction(s, (void *)hooked_statfs, (void **)&orig_statfs);
-    void *s64 = dlsym(RTLD_DEFAULT, "statfs64");
-    if (s64) MSHookFunction(s64, (void *)hooked_statfs64, (void **)&orig_statfs64);
+    NDRunAfterUIKitReady(^{
+        %init(NDDiskCapacity);
+        void *s = dlsym(RTLD_DEFAULT, "statfs");
+        if (s) MSHookFunction(s, (void *)hooked_statfs, (void **)&orig_statfs);
+        void *s64 = dlsym(RTLD_DEFAULT, "statfs64");
+        if (s64) MSHookFunction(s64, (void *)hooked_statfs64, (void **)&orig_statfs64);
+    });
 }

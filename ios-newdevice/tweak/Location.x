@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import "NDTweakState.h"
+#import "NDSafeLoad.h"
 
 static CLLocation *NDFakeLocation(void) {
     NDTweakState *st = [NDTweakState shared];
@@ -27,6 +28,7 @@ static void NDDeliverFake(CLLocationManager *manager) {
     }
 }
 
+%group NDLocation
 %hook CLLocationManager
 - (CLLocation *)location {
     CLLocation *fake = NDFakeLocation();
@@ -72,3 +74,10 @@ static void NDDeliverFake(CLLocationManager *manager) {
     }
 }
 %end
+%end // NDLocation
+
+%ctor {
+    NDRunAfterUIKitReady(^{
+        %init(NDLocation);
+    });
+}

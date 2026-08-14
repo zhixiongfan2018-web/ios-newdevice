@@ -23,6 +23,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     return CTRadioAccessTechnologyLTE;
 }
 
+%group NDModelVersion
 %hook UIDevice
 - (NSString *)model {
     NDTweakState *st = [NDTweakState shared];
@@ -135,6 +136,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     return orig; // values are CTCarrier instances; their getters are hooked
 }
 %end
+%end // NDModelVersion
 
 static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
 static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
@@ -200,9 +202,10 @@ static int hooked_uname(struct utsname *buf) {
     }
     return ret;
 }
-
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
-    MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);
+    NDRunAfterUIKitReady(^{
+        %init(NDModelVersion);
+        MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
+        MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);
+    });
 }

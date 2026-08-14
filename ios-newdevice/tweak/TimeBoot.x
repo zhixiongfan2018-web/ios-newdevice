@@ -2,6 +2,7 @@
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
 
+%group NDTimeBoot
 %hook NSTimeZone
 + (NSTimeZone *)systemTimeZone {
     NDTweakState *st = [NDTweakState shared];
@@ -30,7 +31,10 @@
     return %orig;
 }
 %end
+%end // NDTimeBoot
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDTimeBoot);
+    });
 }

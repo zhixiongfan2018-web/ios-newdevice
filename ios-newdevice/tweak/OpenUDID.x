@@ -13,6 +13,7 @@ static BOOL NDKeyLooksOpenUDID(NSString *key) {
         || [l isEqualToString:@"device_uuid"];
 }
 
+%group NDOpenUDID
 %hook NSUserDefaults
 - (id)objectForKey:(NSString *)defaultName {
     id v = %orig;
@@ -34,7 +35,10 @@ static BOOL NDKeyLooksOpenUDID(NSString *key) {
     return %orig;
 }
 %end
+%end // NDOpenUDID
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDOpenUDID);
+    });
 }

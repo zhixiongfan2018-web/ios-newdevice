@@ -3,6 +3,7 @@
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
 
+%group NDBattery
 %hook UIDevice
 - (float)batteryLevel {
     NDTweakState *st = [NDTweakState shared];
@@ -25,7 +26,10 @@
     return %orig;
 }
 %end
+%end // NDBattery
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDBattery);
+    });
 }

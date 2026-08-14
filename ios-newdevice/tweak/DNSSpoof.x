@@ -122,19 +122,18 @@ static int hooked_res_getservers(void *statp, void *set, int cnt) {
 }
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-
-    void *sc = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyValue");
-    if (sc) MSHookFunction(sc, (void *)hooked_SCDynamicStoreCopyValue, (void **)&orig_SCDynamicStoreCopyValue);
-    void *scm = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyMultiple");
-    if (scm) MSHookFunction(scm, (void *)hooked_SCDynamicStoreCopyMultiple, (void **)&orig_SCDynamicStoreCopyMultiple);
-
-    void *resolv = dlopen("/usr/lib/libresolv.9.dylib", RTLD_NOW);
-    if (!resolv) resolv = dlopen("/usr/lib/libresolv.dylib", RTLD_NOW);
-    if (resolv) {
+    NDRunAfterUIKitReady(^{
+        void *sc = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyValue");
+        if (sc) MSHookFunction(sc, (void *)hooked_SCDynamicStoreCopyValue, (void **)&orig_SCDynamicStoreCopyValue);
+        void *scm = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyMultiple");
+        if (scm) MSHookFunction(scm, (void *)hooked_SCDynamicStoreCopyMultiple, (void **)&orig_SCDynamicStoreCopyMultiple);
+        void *resolv = dlopen("/usr/lib/libresolv.9.dylib", RTLD_NOW);
+        if (!resolv) resolv = dlopen("/usr/lib/libresolv.dylib", RTLD_NOW);
+        if (resolv) {
         void *g9 = dlsym(resolv, "res_9_getservers");
         if (g9) MSHookFunction(g9, (void *)hooked_res_9_getservers, (void **)&orig_res_9_getservers);
         void *g = dlsym(resolv, "res_getservers");
         if (g) MSHookFunction(g, (void *)hooked_res_getservers, (void **)&orig_res_getservers);
-    }
+        }
+    });
 }

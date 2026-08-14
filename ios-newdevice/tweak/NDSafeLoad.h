@@ -45,4 +45,13 @@ static inline BOOL NDShouldLoadTweak(void) {
     return YES;
 }
 
+/// ObjC / UIKit hooks must NOT install before UIApplication init — ElleKit + iOS 18
+/// crashes inside _UIApplicationInfoParser when UIDevice/NSBundle are swizzled early.
+/// %ctors run before main(); dispatch_async(main) runs after UIApplicationMain's init.
+static inline void NDRunAfterUIKitReady(void (^block)(void)) {
+    if (!block) return;
+    if (!NDShouldLoadTweak()) return;
+    dispatch_async(dispatch_get_main_queue(), block);
+}
+
 #endif /* NDSafeLoad_h */

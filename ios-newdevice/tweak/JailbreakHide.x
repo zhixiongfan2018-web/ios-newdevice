@@ -91,6 +91,7 @@ static FILE *hooked_fopen(const char *path, const char *mode) {
     return orig_fopen(path, mode);
 }
 
+%group NDJailbreakHide
 %hook NSFileManager
 - (BOOL)fileExistsAtPath:(NSString *)path {
     if (NDBasicHideActive() && path.length && NDIsJBPath(path.fileSystemRepresentation)) {
@@ -106,6 +107,7 @@ static FILE *hooked_fopen(const char *path, const char *mode) {
     return %orig;
 }
 %end
+%end // NDJailbreakHide
 
 static const char *(*orig_dyld_get_image_name)(uint32_t);
 static uint32_t (*orig_dyld_image_count)(void);
@@ -168,15 +170,16 @@ static pid_t hooked_fork(void) {
     }
     return orig_fork();
 }
-
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    MSHookFunction((void *)stat, (void *)hooked_stat, (void **)&orig_stat);
-    MSHookFunction((void *)lstat, (void *)hooked_lstat, (void **)&orig_lstat);
-    MSHookFunction((void *)access, (void *)hooked_access, (void **)&orig_access);
-    MSHookFunction((void *)fopen, (void *)hooked_fopen, (void **)&orig_fopen);
-    MSHookFunction((void *)_dyld_get_image_name, (void *)hooked_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
-    MSHookFunction((void *)_dyld_image_count, (void *)hooked_dyld_image_count, (void **)&orig_dyld_image_count);
-    MSHookFunction((void *)getenv, (void *)hooked_getenv, (void **)&orig_getenv);
-    MSHookFunction((void *)fork, (void *)hooked_fork, (void **)&orig_fork);
+    NDRunAfterUIKitReady(^{
+        %init(NDJailbreakHide);
+        MSHookFunction((void *)stat, (void *)hooked_stat, (void **)&orig_stat);
+        MSHookFunction((void *)lstat, (void *)hooked_lstat, (void **)&orig_lstat);
+        MSHookFunction((void *)access, (void *)hooked_access, (void **)&orig_access);
+        MSHookFunction((void *)fopen, (void *)hooked_fopen, (void **)&orig_fopen);
+        MSHookFunction((void *)_dyld_get_image_name, (void *)hooked_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
+        MSHookFunction((void *)_dyld_image_count, (void *)hooked_dyld_image_count, (void **)&orig_dyld_image_count);
+        MSHookFunction((void *)getenv, (void *)hooked_getenv, (void **)&orig_getenv);
+        MSHookFunction((void *)fork, (void *)hooked_fork, (void **)&orig_fork);
+    });
 }

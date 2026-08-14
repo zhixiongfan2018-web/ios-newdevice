@@ -23,6 +23,7 @@ static BOOL NDIsJBURLScheme(NSString *scheme) {
     return NO;
 }
 
+%group NDURLSchemeHide
 %hook UIApplication
 - (BOOL)canOpenURL:(NSURL *)url {
     NDTweakState *st = [NDTweakState shared];
@@ -32,7 +33,10 @@ static BOOL NDIsJBURLScheme(NSString *scheme) {
     return %orig;
 }
 %end
+%end // NDURLSchemeHide
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDURLSchemeHide);
+    });
 }

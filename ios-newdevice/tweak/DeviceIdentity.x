@@ -26,6 +26,7 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
     return data;
 }
 
+%group NDDeviceIdentity
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     NDTweakState *st = [NDTweakState shared];
@@ -63,6 +64,7 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
     return %orig;
 }
 %end
+%end // NDDeviceIdentity
 
 typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 
@@ -204,19 +206,20 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     CFTypeRef v = hooked_MGCopyAnswer(key);
     return v;
 }
-
 %ctor {
-    if (!NDShouldLoadTweak()) return;
-    void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-    if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-    if (gestalt) {
+    NDRunAfterUIKitReady(^{
+        %init(NDDeviceIdentity);
+        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (gestalt) {
         void *sym = dlsym(gestalt, "MGCopyAnswer");
         if (sym) {
-            MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+        MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
         }
         void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
         if (symErr) {
-            MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+        MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
         }
-    }
+        }
+    });
 }

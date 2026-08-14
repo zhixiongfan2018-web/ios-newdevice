@@ -19,6 +19,7 @@ static CGFloat NDSpoofScale(void) {
     return m ? [m[@"scale"] doubleValue] : 0;
 }
 
+%group NDScreenMetrics
 %hook UIScreen
 - (CGRect)bounds {
     CGRect spoof = NDSpoofBounds();
@@ -49,18 +50,10 @@ static CGFloat NDSpoofScale(void) {
     return %orig;
 }
 %end
-
-%hook UIDevice
-- (UIUserInterfaceIdiom)userInterfaceIdiom {
-    NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.ProductType.length) {
-        if ([st.profile.ProductType hasPrefix:@"iPad"]) return UIUserInterfaceIdiomPad;
-        return UIUserInterfaceIdiomPhone;
-    }
-    return %orig;
-}
-%end
+%end // NDScreenMetrics
 
 %ctor {
-    if (!NDShouldLoadTweak()) return;
+    NDRunAfterUIKitReady(^{
+        %init(NDScreenMetrics);
+    });
 }
