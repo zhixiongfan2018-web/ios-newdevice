@@ -400,6 +400,17 @@ extern char **environ;
         NSString *container = [self containerPathForBundleId:bid];
         if (!container) continue;
         NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
+        unsigned long long existing = [self byteSizeAtPath:backupRoot];
+        unsigned long long liveSize = 0;
+        for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+            liveSize += [self byteSizeAtPath:[container stringByAppendingPathComponent:sub]];
+        }
+        // Never clobber a fat AMG stage with a wiped/thin live sandbox (caused apps=0 restores).
+        if (existing > 1024 * 1024 && liveSize < existing / 4) {
+            NSLog(@"[NewDevice] skip backup %@ — keep staged %lluKB, live only %lluKB",
+                  bid, existing / 1024, liveSize / 1024);
+            continue;
+        }
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
             NSString *src = [container stringByAppendingPathComponent:sub];
             NSString *dst = [backupRoot stringByAppendingPathComponent:sub];
@@ -743,7 +754,7 @@ extern char **environ;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *appsRoot = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"apps"];
     NSArray *entries = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
-    NSMutableArray<NSString *> *bids = [NSMutableArray array];
+    NSMutableOrderedSet *bids = [NSMutableOrderedSet orderedSet];
     for (NSString *e in entries) {
         if ([e hasPrefix:@"."]) continue;
         BOOL isDir = NO;
@@ -751,16 +762,37 @@ extern char **environ;
             [bids addObject:e];
         }
     }
-    // Also include selectApp ids so we attempt launch-to-create for installed-but-empty
+    // selectApp ids — always include so holographicSourceDir can fall back to /var/mobile/AMG live
     NSArray *selectApps = [NSArray arrayWithContentsOfFile:[[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"selectApp.plist"]];
     if (![selectApps isKindOfClass:[NSArray class]]) selectApps = @[];
     for (id item in selectApps) {
-        if (![item isKindOfClass:[NSString class]]) continue;
-        NSString *b = (NSString *)item;
-        if (!b.length || [bids containsObject:b]) continue;
-        if ([fm fileExistsAtPath:[NDPaths appsBackupDirForRecord:recordName bundleId:b]]) [bids addObject:b];
+        if ([item isKindOfClass:[NSString class]] && [item length]) [bids addObject:item];
     }
-    return [self restoreApps:bids fromRecord:recordName error:error];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:recordName] ?: @[]) {
+        if (b.length) [bids addObject:b];
+    }
+    // Scan classic AMG live tree for bundle-id folders when staging was wiped by a bad backup
+    NSString *recDir = [NDPaths recordDir:recordName];
+    NSString *livePath = [[NSString stringWithContentsOfFile:[recDir stringByAppendingPathComponent:@"amg-live-path.txt"]
+                                                    encoding:NSUTF8StringEncoding error:nil]
+                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!livePath.length) {
+        NSString *liveName = [[NSString stringWithContentsOfFile:[recDir stringByAppendingPathComponent:@"amg-live-name.txt"]
+                                                        encoding:NSUTF8StringEncoding error:nil]
+                              stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (liveName.length) livePath = [@"/var/mobile/AMG" stringByAppendingPathComponent:liveName];
+    }
+    if (livePath.length) {
+        for (NSString *e in ([fm contentsOfDirectoryAtPath:livePath error:nil] ?: @[])) {
+            if ([e hasPrefix:@"."] || [e isEqualToString:@"AppGroup"] || [e isEqualToString:@"Pasteboard"]) continue;
+            if (![e containsString:@"."]) continue; // bundle ids look like a.b.c
+            BOOL isDir = NO;
+            NSString *p = [livePath stringByAppendingPathComponent:e];
+            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) [bids addObject:e];
+        }
+    }
+    if (!bids.count) [bids addObject:@"net.kortina.labs.Venmo"];
+    return [self restoreApps:bids.array fromRecord:recordName error:error];
 }
 
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName {

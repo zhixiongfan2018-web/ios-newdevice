@@ -191,6 +191,16 @@ static void NDApplyPendingKeychainRestore(void) {
 %ctor {
     @autoreleasepool {
         if (!NDShouldLoadTweak()) return;
+        // Prove injection even when akc restore fails
+        @try {
+            NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+            NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+            [[NSFileManager defaultManager] createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString *loaded = [NSString stringWithFormat:@"bid=%@\ntime=%@\n", bid, [NSDate date]];
+            [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            NSString *media = @"/var/mobile/Media/NewDevice/last-tweak-loaded.txt";
+            [loaded writeToFile:media atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        } @catch (__unused NSException *ex) {}
         // MUST be synchronous: Venmo reads Keychain (tokens + Encryption_symmetricKey)
         // during early launch. A delayed restore races and leaves the UI logged-out.
         @try {
