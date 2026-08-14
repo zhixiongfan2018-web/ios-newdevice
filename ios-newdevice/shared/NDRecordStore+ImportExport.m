@@ -141,6 +141,7 @@
         @"/var/mobile/Media/AMG/import/nd-last-import.txt",
         @"/var/mobile/Media/NewDevice/import/nd-last-import.txt",
         @"/var/mobile/AMG_tar/nd-last-import.txt",
+        @"/var/mobile/Library/Logs/CrashReporter/nd-last-import.txt",
     ];
     NSString *stamp = [NSDateFormatter localizedStringFromDate:[NSDate date]
                                                      dateStyle:NSDateFormatterShortStyle

@@ -278,6 +278,32 @@
             return;
         }
 
+        if ([fun isEqualToString:@"getLastImportLog"] || [fun isEqualToString:@"getImportLog"]) {
+            NSArray *paths = @[
+                @"/var/mobile/Media/AMG/import/nd-last-import.txt",
+                @"/var/mobile/Media/AMG/import/nd-import-status.txt",
+                @"/var/mobile/Media/NewDevice/last-restore.txt",
+                @"/var/mobile/Media/NewDevice/import/nd-last-import.txt",
+                @"/var/mobile/AMG_tar/nd-last-import.txt",
+            ];
+            NSMutableArray *chunks = [NSMutableArray array];
+            for (NSString *p in paths) {
+                NSString *t = [NSString stringWithContentsOfFile:p encoding:NSUTF8StringEncoding error:nil];
+                if (t.length) {
+                    [chunks addObject:[NSString stringWithFormat:@"===== %@ =====\n%@", p, t]];
+                } else {
+                    [chunks addObject:[NSString stringWithFormat:@"===== %@ =====\n(missing)", p]];
+                }
+            }
+            body = [chunks componentsJoinedByString:@"\n\n"];
+            // Mirror into CrashReporter for USB pull when Media AFC is unavailable
+            [body writeToFile:@"/var/mobile/Library/Logs/CrashReporter/nd-last-import.txt"
+                   atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [[NDRecordStore shared] writeResultCode:1];
+            done(body.length ? body : @"(empty)", 200);
+            return;
+        }
+
         if ([fun isEqualToString:@"getCurrentRecordName"]) {
             body = [[NDRecordStore shared] currentRecordName] ?: @"";
             [[NDRecordStore shared] writeResultCode:1];
@@ -390,10 +416,20 @@
         if ([fun isEqualToString:@"setCurrentRecordParam"] || [fun isEqualToString:@"setRecordParam"]) {
             NSString *filePath = query[@"filePath"] ?: @"";
             NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName];
-            NDDeviceProfile *p = [NDDeviceProfile profileAtPath:filePath];
+            NDDeviceProfile *p = nil;
+            NSString *b64 = query[@"plistBase64"] ?: query[@"base64"] ?: @"";
+            if (b64.length) {
+                NSData *data = [[NSData alloc] initWithBase64EncodedString:b64 options:NSDataBase64DecodingOptionsIgnoreUnknownCharacters];
+                if (data.length) {
+                    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"nd-set-param.plist"];
+                    [data writeToFile:tmp atomically:YES];
+                    p = [NDDeviceProfile profileAtPath:tmp];
+                }
+            }
+            if (!p) p = [NDDeviceProfile profileAtPath:filePath];
             if (!p) {
                 [[NDRecordStore shared] writeResultCode:0];
-                done(@"", 500);
+                done(@"need filePath or plistBase64", 500);
                 return;
             }
             if (name.length) p.name = name;
@@ -403,7 +439,7 @@
                 [[NDRecordStore shared] notifyReload];
             }
             [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(@"", ok ? 200 : 500);
+            done(ok ? @"ok" : (error.localizedDescription ?: @""), ok ? 200 : 500);
             return;
         }
 

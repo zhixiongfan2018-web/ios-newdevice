@@ -108,17 +108,27 @@ extern char **environ;
             NSString *dir = [appsRoot stringByAppendingPathComponent:uuid];
             NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
             NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:identifier]) return dir;
+            id mid = plist[@"MCMMetadataIdentifier"] ?: plist[@"identifier"] ?: plist[@"MCMMetadataInfo"][@"MCMMetadataIdentifier"];
+            if ([mid isKindOfClass:[NSString class]] && [mid isEqualToString:identifier]) return dir;
+            // Heuristic: Preferences/<bundleId>.plist is almost always present after first launch
+            NSString *pref = [[dir stringByAppendingPathComponent:@"Library/Preferences"]
+                              stringByAppendingPathComponent:[identifier stringByAppendingString:@".plist"]];
+            if ([fm fileExistsAtPath:pref]) return dir;
         }
     }
     return nil;
 }
 
 - (NSURL *)NDMCMContainerURLSafe:(NSString *)identifier classNames:(NSArray<NSString *> *)classNames {
-    // iOS 18: calling +[MCMContainer containerWithIdentifier:error:] can resolve to
-    // createIfNecessary path and abort("You cannot init this class directly").
-    // Always use subclass + createIfNecessary:NO.
+    // iOS 18+: ANY MCM containerWithIdentifier:… (even createIfNecessary:NO on
+    // MCMDataContainer) still hits -[MCMContainer init…] and abort() — confirmed
+    // live on SE/18.5 (newdeviced-2026-08-14-154645). Never call MCM here.
     if (!identifier.length) return nil;
+    NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
+    if (v.majorVersion >= 18) {
+        NSLog(@"[NewDevice] skip MCM lookup on iOS %ld for %@", (long)v.majorVersion, identifier);
+        return nil;
+    }
     [[self class] loadMCM];
     for (NSString *clsName in classNames) {
         Class cls = NSClassFromString(clsName);
@@ -159,18 +169,14 @@ extern char **environ;
     if (!bundleId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // 1) Metadata scan FIRST — safe, no private API ABI risk (fixes 一键新机 crash)
+    // 1) Metadata / Preferences scan — safe, no private API ABI risk
     NSString *scanned = [self NDScanContainerUnderRoots:@[
         @"/var/mobile/Containers/Data/Application",
         @"/private/var/mobile/Containers/Data/Application",
     ] identifier:bundleId];
     if (scanned.length) return scanned;
 
-    // 2) Safe MCM lookup (no createIfNecessary)
-    NSURL *mcm = [self NDMCMContainerURLSafe:bundleId classNames:@[@"MCMAppDataContainer", @"MCMDataContainer"]];
-    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
-
-    // 3) LSApplicationProxy last resort
+    // 2) LSApplicationProxy (no MCM abort)
     @try {
         Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
         if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
@@ -182,6 +188,11 @@ extern char **environ;
             }
         }
     } @catch (__unused NSException *ex) {}
+
+    // 3) MCM only on iOS < 18 (iOS 18 aborts inside MCMContainer init)
+    NSURL *mcm = [self NDMCMContainerURLSafe:bundleId classNames:@[@"MCMAppDataContainer", @"MCMDataContainer"]];
+    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
+
     return nil;
 }
 
