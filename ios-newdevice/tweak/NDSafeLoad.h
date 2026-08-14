@@ -61,16 +61,17 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
 
 /// ObjC / UIKit hooks must NOT install before UIApplication init — ElleKit + iOS 18
 /// crashes inside _UIApplicationInfoParser when UIDevice/NSBundle are swizzled early.
-/// %ctors run before main(); dispatch_async(main) runs after UIApplicationMain's init.
-/// Venmo is included: deferred identity spoof is required for session accept.
+/// Venmo: skip ALL of these — UIDevice/ASIdentifier hooks caused SIGBUS with mParticle.
+/// Venmo only gets KeychainRestore + MGCopyAnswer (see DeviceIdentity.x).
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
+    if (NDIsVenmoHost()) return;
     dispatch_async(dispatch_get_main_queue(), block);
 }
 
 /// C/MSHookFunction hooks that previously SIGILL'd Venmo on iOS 18 + ElleKit
-/// (getifaddrs / statfs / DNS / IOKit). Skip those inside Venmo; keep ObjC identity.
+/// (getifaddrs / statfs / DNS / IOKit / sysctl). Always skip inside Venmo.
 static inline void NDRunRiskyCHooksAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;

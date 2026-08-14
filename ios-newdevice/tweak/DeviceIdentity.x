@@ -207,6 +207,26 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     return v;
 }
 %ctor {
+    // Venmo: ONLY MobileGestalt spoof (no UIDevice/ASIdentifier Logos hooks — those
+    // SIGBUS'd inside mParticle/objc_storeStrong on iOS 18). Delay past first UI frame.
+    if (NDIsVenmoHost()) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                if (!NDShouldLoadTweak()) return;
+                [[NDTweakState shared] reload];
+                void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+                if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+                if (!gestalt) return;
+                void *sym = dlsym(gestalt, "MGCopyAnswer");
+                if (sym) MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+                void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+                if (symErr) MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+            } @catch (__unused NSException *ex) {
+            }
+        });
+        return;
+    }
     NDRunAfterUIKitReady(^{
         %init(NDDeviceIdentity);
         void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);

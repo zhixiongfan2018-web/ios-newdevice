@@ -289,29 +289,48 @@ static void NDApplyPendingKeychainRestore(void) {
 
 %ctor {
     @autoreleasepool {
+        static BOOL sRan = NO;
         void (^run)(void) = ^{
             @try {
+                if (sRan) return;
                 NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
                 if (NDBundleIsJailbreakTool(bid)) return;
-                // Skip anonymous early ctor only for known non-app hosts
                 NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
                 if (!bid.length) {
-                    if ([proc isEqualToString:@"CommCenter"] || [proc isEqualToString:@"CommCenterRootHelper"]) {
-                        // telephony hosts: no Documents/akc path
-                    } else {
-                        return; // wait for delayed pass with real bundle id
-                    }
+                    if (![proc isEqualToString:@"Venmo"]) return;
                 }
                 if ([bid hasPrefix:@"com.apple."] && ![bid containsString:@"mobilesafari"]) return;
-                if (!bid.length) return;
+                if (!bid.length && ![proc isEqualToString:@"Venmo"]) return;
+                if (!bid.length) bid = @"net.kortina.labs.Venmo";
 
                 NSString *homeDocs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
                 NSFileManager *fm = [NSFileManager defaultManager];
                 [fm createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
+
+                // If a prior successful restore exists, don't re-hit SecItem (races / SIGBUS).
+                NSString *marker = [homeDocs stringByAppendingPathComponent:@"nd-akc-ok.txt"];
+                NSString *prev = [NSString stringWithContentsOfFile:marker encoding:NSUTF8StringEncoding error:nil];
+                BOOL alreadyOK = (prev.length && [prev rangeOfString:@"ok="].location != NSNotFound &&
+                                  ![prev containsString:@"ok=0"]);
+                // Treat ok=N where N>0
+                if (alreadyOK) {
+                    NSRange r = [prev rangeOfString:@"ok="];
+                    if (r.location != NSNotFound) {
+                        NSInteger n = [[prev substringFromIndex:r.location + 3] integerValue];
+                        if (n > 0) {
+                            sRan = YES;
+                            NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\nakc=skip-existing\n", bid, proc, [NSDate date]];
+                            [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
+                                     atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                            return;
+                        }
+                    }
+                }
+
+                sRan = YES;
                 NSString *loaded = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\n", bid, proc, [NSDate date]];
                 [loaded writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-tweak-loaded.txt"]
                          atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                // jb Library is reachable from many injected contexts; Media may be sandboxed
                 NSString *rt = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
                 [fm createDirectoryAtPath:[rt stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
                 [loaded writeToFile:rt atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -321,12 +340,17 @@ static void NDApplyPendingKeychainRestore(void) {
             }
         };
 
-        // Immediate attempt (works when bundle id already available)
-        run();
-        // Main queue: bundle id is ready; Venmo still early enough for many token reads
-        dispatch_async(dispatch_get_main_queue(), run);
-        // Delayed retries — cover late injection / first-unlock races
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), run);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), run);
+        // Never run SecItemAdd in %ctor synchronously — wait for main runloop.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (NDIsVenmoHost()) {
+                // One delayed pass only (avoid multi-retry races with mParticle)
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), run);
+            } else {
+                run();
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), run);
+            }
+        });
     }
 }

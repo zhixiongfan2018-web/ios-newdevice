@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Clear ElleKit safemode; Venmo inject (identity+akc); skip risky C hooks incl. ModelVersion.
+Description: Venmo crash fix: no UIDevice hooks; akc once; MG-only spoof.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
