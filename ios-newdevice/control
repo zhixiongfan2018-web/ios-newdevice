@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Stop Venmo inject; no daemon Keychain writes; clearAppKeychain + disableTweak APIs.
+Description: Venmo keychain-only inject (no UIKit/identity hooks); SpringBoard spoof unchanged.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

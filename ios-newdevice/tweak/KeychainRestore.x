@@ -31,7 +31,22 @@ static id NDAccessibleForPdmn(NSString *pdmn) {
     return (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
 }
 
+/// Prefer the host app's real keychain-access-group (Venmo App Store uses 6DEPQ9SPDK.*).
+static NSString *NDHostKeychainAccessGroup(void) {
+    NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
+        return @"6DEPQ9SPDK.net.kortina.labs.Venmo";
+    }
+    // Fallback: <first path component of application-identifier> is unavailable here;
+    // leave agrp from dump when unknown.
+    return nil;
+}
+
 static OSStatus NDKCAddOrUpdate(NSMutableDictionary *add, NSDictionary *del, NSData *data) {
+    NSString *hostAgrp = NDHostKeychainAccessGroup();
+    if (hostAgrp.length) {
+        add[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
+    }
     OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
     if (st == errSecMissingEntitlement && add[(__bridge id)kSecAttrAccessGroup]) {
         [add removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
@@ -39,6 +54,7 @@ static OSStatus NDKCAddOrUpdate(NSMutableDictionary *add, NSDictionary *del, NSD
     }
     if (st == errSecDuplicateItem) {
         NSMutableDictionary *q = [del mutableCopy] ?: [@{ (__bridge id)kSecClass: add[(__bridge id)kSecClass] } mutableCopy];
+        if (hostAgrp.length) q[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
         st = SecItemUpdate((__bridge CFDictionaryRef)q, (__bridge CFDictionaryRef)@{ (__bridge id)kSecValueData: data });
     }
     return st;
@@ -60,10 +76,22 @@ static NSUInteger NDRestoreAkcDictionary(NSDictionary *akc, NSMutableArray *fail
         if ([raw[@"acct"] isKindOfClass:[NSString class]] && [raw[@"acct"] length]) del[(__bridge id)kSecAttrAccount] = raw[@"acct"];
         if ([raw[@"svce"] isKindOfClass:[NSString class]] && [raw[@"svce"] length]) del[(__bridge id)kSecAttrService] = raw[@"svce"];
         if ([raw[@"srvr"] isKindOfClass:[NSString class]] && [raw[@"srvr"] length]) del[(__bridge id)kSecAttrServer] = raw[@"srvr"];
-        if ([raw[@"agrp"] isKindOfClass:[NSString class]] && [raw[@"agrp"] length]) del[(__bridge id)kSecAttrAccessGroup] = raw[@"agrp"];
+        NSString *hostAgrp = NDHostKeychainAccessGroup();
+        if (hostAgrp.length) {
+            del[(__bridge id)kSecAttrAccessGroup] = hostAgrp;
+        } else if ([raw[@"agrp"] isKindOfClass:[NSString class]] && [raw[@"agrp"] length]) {
+            del[(__bridge id)kSecAttrAccessGroup] = raw[@"agrp"];
+        }
         if (!del[(__bridge id)kSecAttrAccount] && !del[(__bridge id)kSecAttrService] && !del[(__bridge id)kSecAttrServer]) continue;
 
         SecItemDelete((__bridge CFDictionaryRef)del);
+        // Also delete under dump agrp if it differed (stale daemon writes)
+        if (hostAgrp.length && [raw[@"agrp"] isKindOfClass:[NSString class]] &&
+            [raw[@"agrp"] length] && ![raw[@"agrp"] isEqualToString:hostAgrp]) {
+            NSMutableDictionary *delOld = [del mutableCopy];
+            delOld[(__bridge id)kSecAttrAccessGroup] = raw[@"agrp"];
+            SecItemDelete((__bridge CFDictionaryRef)delOld);
+        }
 
         NSMutableDictionary *add = [del mutableCopy];
         add[(__bridge id)kSecValueData] = vData;
