@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 208: follow AMG one-tap logic - scope amg.plist via selectApp (keep amg.dylib); Venmo no UIDevice model hooks.
+Description: 210: Venmo IDFA/IDFV only - no MG hook (scroll SIGBUS via CoreText/MGGetBoolAnswer).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

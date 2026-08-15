@@ -26,6 +26,39 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
     return data;
 }
 
+/// Venmo-safe: IDFA/IDFV only. Never hook UIDevice.name or MobileGestalt here —
+/// MG MSHookFunction corrupts MGGetBoolAnswer and SIGBUS on SwiftUI scroll/text layout.
+%group NDDeviceIdentityVenmo
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.IDFA.length) {
+        NSUUID *u = NDUUIDFromString(st.profile.IDFA);
+        if (u) return u;
+    }
+    return %orig;
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof]) {
+        return st.profile.AdvertisingTrackingEnabled;
+    }
+    return %orig;
+}
+%end
+
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.IDFV.length) {
+        NSUUID *u = NDUUIDFromString(st.profile.IDFV);
+        if (u) return u;
+    }
+    return %orig;
+}
+%end
+%end // NDDeviceIdentityVenmo
+
 %group NDDeviceIdentity
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
@@ -241,66 +274,62 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     return v;
 }
 %ctor {
-    void (^installIdentity)(void) = ^{
-        [[NDTweakState shared] reload];
-        if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
-
-        BOOL amgOwns = NDIsVenmoHost() && NDAmgDylibLoaded();
-        // Co-inject with amg: do NOT re-hook MG/UIDevice (PAC/SIGBUS). AMG serves identity;
-        // NewDevice still owns holographic akc via KeychainRestore. Prefer excluding targets
-        // from amg.plist so this branch is rare and NewDevice owns the full AMG-style surface.
-        if (!amgOwns) {
-            %init(NDDeviceIdentity);
-
-            void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-            if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-            if (gestalt) {
-                void *sym = dlsym(gestalt, "MGCopyAnswer");
-                if (sym) {
-                    MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
-                }
-                void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
-                if (symErr) {
-                    MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
-                }
-            }
-        }
-
-        // Marker so probeVenmo can confirm identity path.
+    void (^writeVenmoMarker)(BOOL amgOwns, BOOL mgHook) = ^(BOOL amgOwns, BOOL mgHook) {
         @try {
             NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-            if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
-                NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
-                [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
-                NDDeviceProfile *p = [NDTweakState shared].profile;
-                NSString *line = [NSString stringWithFormat:
-                                  @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\namgOwns=%@\ntime=%@\n",
-                                  bid,
-                                  p.IDFA ?: @"",
-                                  p.ProductType ?: @"",
-                                  p.SystemVer ?: @"",
-                                  amgOwns ? @"1" : @"0",
-                                  [NSDate date]];
-                [line writeToFile:[docs stringByAppendingPathComponent:@"nd-identity-ok.txt"]
-                       atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            }
+            if (![bid isEqualToString:@"net.kortina.labs.Venmo"]) return;
+            NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+            [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
+            NDDeviceProfile *p = [NDTweakState shared].profile;
+            NSString *line = [NSString stringWithFormat:
+                              @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\namgOwns=%@\nmgHook=%@\ntime=%@\n",
+                              bid,
+                              p.IDFA ?: @"",
+                              p.ProductType ?: @"",
+                              p.SystemVer ?: @"",
+                              amgOwns ? @"1" : @"0",
+                              mgHook ? @"1" : @"0",
+                              [NSDate date]];
+            [line writeToFile:[docs stringByAppendingPathComponent:@"nd-identity-ok.txt"]
+                   atomically:YES encoding:NSUTF8StringEncoding error:nil];
         } @catch (__unused NSException *ex) {
         }
     };
 
-    // Venmo (AMG-style): delayed ObjC + whitelist MG — past mParticle / UIKit init.
+    // Venmo: IDFA/IDFV ObjC only. MG MSHookFunction breaks MGGetBoolAnswer → SIGBUS on scroll/text.
     if (NDIsVenmoHost()) {
         NDRunVenmoSafeObjCHooksAfterReady(^{
-            // Extra beat before MG hook — MGCopyAnswer early = historical SIGSEGV.
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                @try { installIdentity(); } @catch (__unused NSException *ex) {}
-            });
+            @try {
+                [[NDTweakState shared] reload];
+                if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
+                BOOL amgOwns = NDAmgDylibLoaded();
+                if (!amgOwns) {
+                    %init(NDDeviceIdentityVenmo);
+                }
+                writeVenmoMarker(amgOwns, NO);
+            } @catch (__unused NSException *ex) {
+            }
         });
         return;
     }
 
     NDRunAfterUIKitReady(^{
-        installIdentity();
+        [[NDTweakState shared] reload];
+        if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
+
+        %init(NDDeviceIdentity);
+
+        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (gestalt) {
+            void *sym = dlsym(gestalt, "MGCopyAnswer");
+            if (sym) {
+                MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+            }
+            void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+            if (symErr) {
+                MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+            }
+        }
     });
 }

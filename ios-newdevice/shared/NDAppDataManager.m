@@ -1614,6 +1614,10 @@ extern char **environ;
     if (!path.length) {
         // Prefer staged upgrade packages under Media/NewDevice
         NSArray *cands = @[
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-210.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-210.deb",
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-209.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-209.deb",
             @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-208.deb",
             @"/var/mobile/Media/Downloads/NewDevice-1.0.0-208.deb",
             @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-207.deb",

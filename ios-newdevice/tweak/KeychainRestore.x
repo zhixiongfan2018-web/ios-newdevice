@@ -419,7 +419,16 @@ static void NDApplyPendingKeychainRestore(void) {
                         NSRange r = [prev rangeOfString:@"ok="];
                         if (r.location != NSNotFound) {
                             NSInteger n = [[prev substringFromIndex:r.location + 3] integerValue];
-                            if (n > 0 && !wantClear) return;
+                            if (n > 0 && !wantClear) {
+                                // Drop stale pending pointers so idle launches stay quiet.
+                                for (NSString *p in @[
+                                         @"/var/jb/Library/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+                                         @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+                                     ]) {
+                                    [fm removeItemAtPath:p error:nil];
+                                }
+                                return;
+                            }
                         }
                     }
                     NDApplyPendingKeychainRestore();
