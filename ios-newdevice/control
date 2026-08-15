@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 192: unique AMG import identities; no Venmo flash / remark on 一键新机.
+Description: 194: SystemVer pool/picker ≥ iOS 18; export crash fix (193).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

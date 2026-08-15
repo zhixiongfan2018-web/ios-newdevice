@@ -4,8 +4,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface NDDeviceCatalog : NSObject
 + (NSArray<NSDictionary *> *)deviceModels; // Model, ProductType, HardwareMachine
-/// Official public iOS/iPadOS versions (aligned with Apple release builds).
+/// Official public iOS/iPadOS versions offered to users / 一键新机 (iOS 18+ only).
 + (NSArray<NSString *> *)systemVersions;
+/// Major from "18.5" style string (unknown → 0).
++ (NSInteger)majorSystemVersion:(NSString *)systemVer;
 /// Official Build for a SystemVer (empty if unknown).
 + (NSString *)buildForSystemVersion:(NSString *)systemVer;
 /// Full map SystemVer → Build (source of truth for spoof + UI).

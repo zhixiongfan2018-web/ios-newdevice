@@ -319,18 +319,14 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
     }
 
-    NSArray *systems = [NDDeviceCatalog systemVersions];
+    NSArray *systems = [NDDeviceCatalog systemVersions]; // already iOS 18+ only
     NSString *sys = systemVer;
+    if (sys.length && [NDDeviceCatalog majorSystemVersion:sys] < 18) sys = @"";
     if (!sys.length) {
-        // Bias toward iOS 17/18 for modern app compatibility
-        NSMutableArray *modern = [NSMutableArray array];
-        for (NSString *v in systems) {
-            if ([v hasPrefix:@"17."] || [v hasPrefix:@"18."]) [modern addObject:v];
-        }
-        if (modern.count && arc4random_uniform(100) < 75) {
-            sys = modern[(arc4random_uniform((uint32_t)modern.count) + tick) % modern.count];
-        } else {
+        if (systems.count) {
             sys = systems[(arc4random_uniform((uint32_t)systems.count) + tick) % systems.count];
+        } else {
+            sys = @"18.5";
         }
     }
     NSArray *carrierList = [NDDeviceCatalog carriers];
@@ -839,8 +835,14 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
     }
 
-    // --- SystemVer ↔ Build (known public release pairs) ---
-    if (self.SystemVer.length) {
+    // --- SystemVer must be iOS 18+; keep Build aligned ---
+    if (!self.SystemVer.length || [NDDeviceCatalog majorSystemVersion:self.SystemVer] < 18) {
+        NSArray *pool = [NDDeviceCatalog systemVersions];
+        NSString *pick = pool.count ? pool[seed % pool.count] : @"18.5";
+        self.SystemVer = pick;
+        self.Build = [NDDeviceCatalog buildForSystemVersion:pick] ?: NDRandomBuild(pick);
+        [fixes addObject:[NSString stringWithFormat:@"SystemVer=%@ (≥18)", pick]];
+    } else {
         NSString *known = NDKnownBuilds()[self.SystemVer];
         if (known.length && (![self.Build isEqualToString:known] || !self.Build.length)) {
             self.Build = known;

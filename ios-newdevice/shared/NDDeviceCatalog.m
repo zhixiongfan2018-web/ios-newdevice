@@ -106,8 +106,19 @@
     return [self officialSystemBuilds][systemVer] ?: @"";
 }
 
+/// Major version from "18.5" / "18.7.9" style strings. Unknown → 0.
++ (NSInteger)majorSystemVersion:(NSString *)systemVer {
+    if (!systemVer.length) return 0;
+    return [[[systemVer componentsSeparatedByString:@"."] firstObject] integerValue];
+}
+
 + (NSArray<NSString *> *)systemVersions {
-    NSArray *keys = [self officialSystemBuilds].allKeys;
+    // Environments must be iOS 18+ (picker + 一键新机 pool). Older keys stay in
+    // officialSystemBuilds only so imported AMG Build lookup still works.
+    NSMutableArray *keys = [NSMutableArray array];
+    for (NSString *k in [self officialSystemBuilds].allKeys) {
+        if ([self majorSystemVersion:k] >= 18) [keys addObject:k];
+    }
     return [keys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
         return [a compare:b options:NSNumericSearch];
     }];
