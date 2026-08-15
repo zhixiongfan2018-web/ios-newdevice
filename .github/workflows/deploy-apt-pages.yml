@@ -2,6 +2,12 @@ name: Deploy apt to GitHub Pages
 
 on:
   workflow_dispatch:
+  # GITHUB_TOKEN commits from Build NewDevice do not trigger path-filter pushes;
+  # auto-deploy after a successful build so Sileo Pages stay current.
+  workflow_run:
+    workflows: ["Build NewDevice deb"]
+    types: [completed]
+    branches: [master]
   push:
     branches:
       - master
@@ -21,6 +27,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -28,6 +35,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # workflow_run checkout defaults to the workflow file commit; always take latest master Packages.
+          ref: master
 
       # Prefer stable/ (Sileo URL without @). Fall back to apt/ mirror.
       - name: Prepare site from stable/
