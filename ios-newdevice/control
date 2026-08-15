@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 197: harden switch/import (no auto-restore jetsam; holo-off no wipe; +query; sort/CI fixes).
+Description: 198: stream tar extract; async busy=409; delete/setParam afterSwitch; daemon rebind.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

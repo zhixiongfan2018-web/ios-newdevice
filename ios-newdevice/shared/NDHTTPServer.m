@@ -56,7 +56,11 @@
 }
 
 - (void)sendResponse:(int)clientFD code:(NSInteger)code body:(NSString *)body {
-    NSString *status = code == 200 ? @"200 OK" : (code == 404 ? @"404 Not Found" : @"500 Internal Server Error");
+    NSString *status = @"500 Internal Server Error";
+    if (code == 200) status = @"200 OK";
+    else if (code == 404) status = @"404 Not Found";
+    else if (code == 409) status = @"409 Conflict";
+    else if (code == 400) status = @"400 Bad Request";
     NSData *data = [(body ?: @"") dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
     NSString *header = [NSString stringWithFormat:
                         @"HTTP/1.1 %@\r\n"
@@ -110,11 +114,16 @@
     }
 
     // AMG-compatible: long tasks ACK 200 immediately; scripts poll result file.
+    // Reject concurrent async jobs so they cannot overwrite the shared result file.
     if ([NDOperationService isAsyncAckFun:fun]) {
+        if (![[NDOperationService shared] tryBeginAsyncJob]) {
+            [self sendResponse:clientFD code:409 body:@"busy"];
+            return;
+        }
         [[NDRecordStore shared] writeResultCode:2];
         [self sendResponse:clientFD code:200 body:@"accepted"];
-        [[NDOperationService shared] runAsync:fun query:params completion:^(__unused NSString *body, __unused NSInteger httpCode) {
-            // result file already written inside service
+        [[NDOperationService shared] runAsync:fun query:params preclaimed:YES completion:^(__unused NSString *body, __unused NSInteger httpCode) {
+            // result file already written inside service; job slot released in done
         }];
         return;
     }

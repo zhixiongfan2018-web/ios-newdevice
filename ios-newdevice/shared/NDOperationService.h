@@ -6,7 +6,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)shared;
 /// Long-running funs that should ACK HTTP immediately (AMG-compatible).
 + (BOOL)isAsyncAckFun:(NSString *)fun;
+/// Claim the single global async job slot (result file). Returns NO if busy.
+- (BOOL)tryBeginAsyncJob;
+- (void)endAsyncJob;
+- (BOOL)isAsyncBusy;
+/// @param preclaimed YES when caller already succeeded at tryBeginAsyncJob (HTTP ACK path).
 - (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *, NSString *> *)query completion:(void (^)(NSString * _Nullable body, NSInteger httpCode))completion;
+- (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *, NSString *> *)query preclaimed:(BOOL)preclaimed completion:(void (^)(NSString * _Nullable body, NSInteger httpCode))completion;
 @end
 
 NS_ASSUME_NONNULL_END

@@ -7,6 +7,7 @@
 #import "NDAppDataManager.h"
 #import <errno.h>
 #import <string.h>
+#import <unistd.h>
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
@@ -23,30 +24,42 @@ int main(int argc, char *argv[]) {
 
         // Publish world-readable runtime snapshot at boot so sandboxed target apps
         // can spoof even before the NewDevice UI is opened.
-        @try {
-            [[NDRecordStore shared] notifyReload];
-        } @catch (__unused NSException *e) {
-            NSLog(@"[newdeviced] runtime publish failed: %@", e);
-            NDConfig *cfg = [NDConfig shared];
-            [cfg reload];
-            [NDRuntimeState publishWithConfig:cfg
-                                      profile:[[NDRecordStore shared] currentProfile]
-                                  currentName:[[NDRecordStore shared] currentRecordName]];
-        }
+        void (^publishRuntime)(void) = ^{
+            @try {
+                [[NDRecordStore shared] notifyReload];
+            } @catch (__unused NSException *e) {
+                NSLog(@"[newdeviced] runtime publish failed: %@", e);
+                NDConfig *cfg = [NDConfig shared];
+                [cfg reload];
+                [NDRuntimeState publishWithConfig:cfg
+                                          profile:[[NDRecordStore shared] currentProfile]
+                                      currentName:[[NDRecordStore shared] currentRecordName]];
+            }
+        };
+        publishRuntime();
 
-        NSError *error = nil;
-        if (![[NDHTTPServer shared] startWithPort:(uint16_t)NDHTTPPort error:&error]) {
-            // If App already holds the port, exit quietly — App is serving API.
-            // Runtime snapshot was already published above.
-            if (error.code == EADDRINUSE || [error.localizedDescription containsString:@"bind"]) {
-                NSLog(@"[newdeviced] port in use, exit (App may be serving API)");
-                return 0;
+        // If App holds the port, keep waiting and rebind when it exits so API
+        // survives App death (scripts / AMG keep working via daemon).
+        for (;;) {
+            NSError *error = nil;
+            if ([[NDHTTPServer shared] startWithPort:(uint16_t)NDHTTPPort error:&error]) {
+                NSLog(@"[newdeviced] listening on http://127.0.0.1:%ld/cmd", (long)NDHTTPPort);
+                [[NSRunLoop currentRunLoop] run];
+                // runLoop ended unexpectedly — try to rebind
+                [[NDHTTPServer shared] stop];
+                NSLog(@"[newdeviced] runloop ended, will rebind");
+                continue;
+            }
+            BOOL inUse = (error.code == EADDRINUSE) || [error.localizedDescription containsString:@"bind"];
+            if (inUse) {
+                NSLog(@"[newdeviced] port in use (App may be serving), retry in 3s");
+                publishRuntime();
+                sleep(3);
+                continue;
             }
             NSLog(@"[newdeviced] failed to start: %@", error);
             return 1;
         }
-        NSLog(@"[newdeviced] listening on http://127.0.0.1:%ld/cmd", (long)NDHTTPPort);
-        [[NSRunLoop currentRunLoop] run];
     }
     return 0;
 }

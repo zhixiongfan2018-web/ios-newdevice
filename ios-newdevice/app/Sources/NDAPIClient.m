@@ -60,6 +60,13 @@
     if (![[NDHTTPServer shared] ensureRunning:&ensureErr]) {
         // Fallback: call service in-process if bind failed for unexpected reasons
         [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *body, NSInteger httpCode) {
+            if (httpCode == 409) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    completion(NO, @"busy", [NSError errorWithDomain:@"NDAPI" code:409
+                                                            userInfo:@{NSLocalizedDescriptionKey: @"正在执行其他任务，请稍后"}]);
+                });
+                return;
+            }
             if ([NDOperationService isAsyncAckFun:fun]) {
                 // Body already written; prefer direct completion over polling a raced result file.
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -89,10 +96,24 @@
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
         NSString *body = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
+        if (http.statusCode == 409) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(NO, @"busy", [NSError errorWithDomain:@"NDAPI" code:409
+                                                        userInfo:@{NSLocalizedDescriptionKey: @"正在执行其他任务，请稍后"}]);
+            });
+            return;
+        }
         BOOL ok = !error && http.statusCode == 200;
         if (!ok) {
             // Last resort in-process
             [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *b, NSInteger code) {
+                if (code == 409) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        completion(NO, @"busy", [NSError errorWithDomain:@"NDAPI" code:409
+                                                                userInfo:@{NSLocalizedDescriptionKey: @"正在执行其他任务，请稍后"}]);
+                    });
+                    return;
+                }
                 if ([NDOperationService isAsyncAckFun:fun]) {
                     [self pollResultWithTimeout:120 completion:completion];
                 } else {

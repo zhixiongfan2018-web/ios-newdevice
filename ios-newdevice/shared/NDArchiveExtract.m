@@ -47,45 +47,6 @@ static BOOL NDDestHasContent(NSString *destDir) {
     return kids.count > 0;
 }
 
-static NSData *NDGunzipData(NSData *gz, NSError **error) {
-    if (gz.length < 10) {
-        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:1 userInfo:@{NSLocalizedDescriptionKey: @"gzip 数据太短"}];
-        return nil;
-    }
-    const Bytef *src = gz.bytes;
-    if (!(src[0] == 0x1f && src[1] == 0x8b)) {
-        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:2 userInfo:@{NSLocalizedDescriptionKey: @"不是 gzip 格式"}];
-        return nil;
-    }
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) {
-        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:3 userInfo:@{NSLocalizedDescriptionKey: @"inflateInit 失败"}];
-        return nil;
-    }
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = (uInt)gz.length;
-    NSMutableData *out = [NSMutableData dataWithLength:MAX((NSUInteger)gz.length * 4, (NSUInteger)256 * 1024)];
-    int ret = Z_OK;
-    while (ret == Z_OK) {
-        if (strm.total_out >= out.length) {
-            [out increaseLengthBy:MAX(out.length, (NSUInteger)1024 * 1024)];
-        }
-        strm.next_out = (Bytef *)out.mutableBytes + strm.total_out;
-        strm.avail_out = (uInt)(out.length - strm.total_out);
-        ret = inflate(&strm, Z_NO_FLUSH);
-        if (ret == Z_STREAM_END) break;
-        if (ret != Z_OK) {
-            inflateEnd(&strm);
-            if (error) *error = [NSError errorWithDomain:@"NDArchive" code:4 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"gzip 解压失败 (%d)", ret]}];
-            return nil;
-        }
-    }
-    inflateEnd(&strm);
-    out.length = strm.total_out;
-    return out;
-}
-
 #pragma pack(push, 1)
 typedef struct {
     char name[100];
@@ -180,47 +141,116 @@ static NSString *NDTarPaxPath(NSData *payload) {
     return found;
 }
 
-static BOOL NDExtractTarBytes(NSData *tar, NSString *destDir, NSError **error) {
+
+static BOOL NDGunzipFileToFile(NSString *gzPath, NSString *outPath, NSError **error) {
+    FILE *fin = fopen(gzPath.UTF8String, "rb");
+    if (!fin) {
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:12 userInfo:@{NSLocalizedDescriptionKey: @"无法打开 gzip"}];
+        return NO;
+    }
+    unsigned char mag[2] = {0, 0};
+    if (fread(mag, 1, 2, fin) != 2 || mag[0] != 0x1f || mag[1] != 0x8b) {
+        fclose(fin);
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:2 userInfo:@{NSLocalizedDescriptionKey: @"不是 gzip 格式"}];
+        return NO;
+    }
+    rewind(fin);
+
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) {
+        fclose(fin);
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:3 userInfo:@{NSLocalizedDescriptionKey: @"inflateInit 失败"}];
+        return NO;
+    }
+    FILE *fout = fopen(outPath.UTF8String, "wb");
+    if (!fout) {
+        inflateEnd(&strm);
+        fclose(fin);
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:13 userInfo:@{NSLocalizedDescriptionKey: @"无法写入临时 tar"}];
+        return NO;
+    }
+
+    unsigned char inBuf[64 * 1024];
+    unsigned char outBuf[64 * 1024];
+    int ret = Z_OK;
+    int flush = Z_NO_FLUSH;
+    while (ret == Z_OK) {
+        size_t nread = fread(inBuf, 1, sizeof(inBuf), fin);
+        if (nread == 0 && ferror(fin)) {
+            ret = Z_ERRNO;
+            break;
+        }
+        if (nread == 0) flush = Z_FINISH;
+        strm.next_in = inBuf;
+        strm.avail_in = (uInt)nread;
+        do {
+            strm.next_out = outBuf;
+            strm.avail_out = sizeof(outBuf);
+            ret = inflate(&strm, flush);
+            if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) break;
+            size_t have = sizeof(outBuf) - strm.avail_out;
+            if (have && fwrite(outBuf, 1, have, fout) != have) {
+                ret = Z_ERRNO;
+                break;
+            }
+        } while (strm.avail_out == 0);
+        if (flush == Z_FINISH && ret == Z_STREAM_END) break;
+        if (nread == 0) break;
+    }
+    inflateEnd(&strm);
+    fclose(fin);
+    fclose(fout);
+    if (ret != Z_STREAM_END && ret != Z_OK) {
+        [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:4 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"gzip 流式解压失败 (%d)", ret]}];
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL NDExtractTarFILE(FILE *fp, NSString *destDir, NSError **error) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
-    const uint8_t *bytes = tar.bytes;
-    NSUInteger len = tar.length;
-    NSUInteger off = 0;
     NSUInteger written = 0;
     NSString *pendingLongName = nil;
     NSString *pendingPaxPath = nil;
+    unsigned char header[512];
+    unsigned char ioBuf[64 * 1024];
 
-    while (off + 512 <= len) {
-        const NDTarHeader *h = (const NDTarHeader *)(bytes + off);
-        off += 512;
+    while (fread(header, 1, 512, fp) == 512) {
         BOOL allZero = YES;
         for (int i = 0; i < 512; i++) {
-            if (((const uint8_t *)h)[i] != 0) { allZero = NO; break; }
+            if (header[i] != 0) { allZero = NO; break; }
         }
         if (allZero) break;
 
+        const NDTarHeader *h = (const NDTarHeader *)header;
         unsigned long long size = NDTarParseSize(h->size, sizeof(h->size));
-        NSUInteger padded = (NSUInteger)((size + 511ULL) / 512ULL * 512ULL);
-        NSUInteger payloadLen = (NSUInteger)MIN(size, (unsigned long long)(len > off ? len - off : 0));
-        NSData *payload = (payloadLen > 0) ? [NSData dataWithBytes:bytes + off length:payloadLen] : [NSData data];
+        unsigned long long padded = (size + 511ULL) / 512ULL * 512ULL;
         char type = h->typeflag ? h->typeflag : '0';
 
-        // GNU long name / long link
-        if (type == 'L' || type == 'K') {
-            NSString *longName = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding]
-                ?: [[NSString alloc] initWithData:payload encoding:NSISOLatin1StringEncoding];
-            if ([longName hasSuffix:@"\0"]) longName = [longName stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0"]];
-            if (type == 'L') pendingLongName = longName;
-            off += padded;
-            continue;
-        }
-        // pax extended header
-        if (type == 'x' || type == 'g') {
-            if (type == 'x') {
-                NSString *p = NDTarPaxPath(payload);
-                if (p.length) pendingPaxPath = p;
+        if (type == 'L' || type == 'K' || type == 'x' || type == 'g') {
+            NSUInteger cap = (NSUInteger)MIN(size, 1024ULL * 1024ULL);
+            NSMutableData *payload = [NSMutableData dataWithLength:cap];
+            size_t got = fread(payload.mutableBytes, 1, cap, fp);
+            payload.length = got;
+            unsigned long long skip = padded > got ? padded - got : 0;
+            while (skip > 0) {
+                size_t chunk = (size_t)MIN(skip, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                skip -= r;
             }
-            off += padded;
+            if (type == 'L' || type == 'K') {
+                NSString *longName = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding]
+                    ?: [[NSString alloc] initWithData:payload encoding:NSISOLatin1StringEncoding];
+                if ([longName hasSuffix:@"\0"]) longName = [longName stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0"]];
+                if (type == 'L') pendingLongName = longName;
+            } else if (type == 'x') {
+                NSString *pp = NDTarPaxPath(payload);
+                if (pp.length) pendingPaxPath = pp;
+            }
             continue;
         }
 
@@ -235,26 +265,60 @@ static BOOL NDExtractTarBytes(NSData *tar, NSString *destDir, NSError **error) {
         name = NDTarSanitizePath(name);
 
         if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."]) {
-            off += padded;
+            unsigned long long skip = padded;
+            while (skip > 0) {
+                size_t chunk = (size_t)MIN(skip, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                skip -= r;
+            }
             continue;
         }
 
         NSString *full = [destDir stringByAppendingPathComponent:name];
-
         if (type == '5' || [name hasSuffix:@"/"]) {
             [fm createDirectoryAtPath:full withIntermediateDirectories:YES attributes:nil error:nil];
-        } else if (type == '0' || type == '\0' || type == '7') { // 7 = contiguous file
+            unsigned long long skip = padded;
+            while (skip > 0) {
+                size_t chunk = (size_t)MIN(skip, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                skip -= r;
+            }
+        } else if (type == '0' || type == '\0' || type == '7') {
             NSString *parent = [full stringByDeletingLastPathComponent];
             [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
-            [payload writeToFile:full atomically:YES];
+            FILE *out = fopen(full.UTF8String, "wb");
+            unsigned long long left = size;
+            while (left > 0) {
+                size_t chunk = (size_t)MIN(left, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                if (out) fwrite(ioBuf, 1, r, out);
+                left -= r;
+            }
+            if (out) fclose(out);
+            unsigned long long pad = padded > size ? padded - size : 0;
+            while (pad > 0) {
+                size_t chunk = (size_t)MIN(pad, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                pad -= r;
+            }
             written++;
-        } else if (type == '1' || type == '2') {
-            // hard/symlink — ignore content, keep layout via parent dirs
-            NSString *parent = [full stringByDeletingLastPathComponent];
-            [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+        } else {
+            unsigned long long skip = padded;
+            while (skip > 0) {
+                size_t chunk = (size_t)MIN(skip, (unsigned long long)sizeof(ioBuf));
+                size_t r = fread(ioBuf, 1, chunk, fp);
+                if (r == 0) break;
+                skip -= r;
+            }
+            if (type == '1' || type == '2') {
+                NSString *parent = [full stringByDeletingLastPathComponent];
+                [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+            }
         }
-        // other types: skip payload
-        off += padded;
     }
 
     if (written == 0 && !NDDestHasContent(destDir)) {
@@ -265,29 +329,41 @@ static BOOL NDExtractTarBytes(NSData *tar, NSString *destDir, NSError **error) {
 }
 
 static BOOL NDExtractBuiltin(NSString *archivePath, NSString *destDir, NSError **error) {
-    NSError *readErr = nil;
-    NSData *raw = [NSData dataWithContentsOfFile:archivePath options:NSDataReadingMappedIfSafe error:&readErr];
-    if (!raw.length) {
-        if (error) *error = readErr ?: [NSError errorWithDomain:@"NDArchive" code:12 userInfo:@{NSLocalizedDescriptionKey: @"无法读取压缩包"}];
-        return NO;
-    }
-    const uint8_t *b = raw.bytes;
-    NSData *tar = raw;
+    NSFileManager *fm = [NSFileManager defaultManager];
     NSString *lower = archivePath.lowercaseString;
-
-    BOOL looksGzip = raw.length >= 2 && b[0] == 0x1f && b[1] == 0x8b;
     BOOL nameGzip = [lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".gz"];
+
+    FILE *peek = fopen(archivePath.UTF8String, "rb");
+    unsigned char mag[2] = {0, 0};
+    BOOL looksGzip = NO;
+    if (peek) {
+        if (fread(mag, 1, 2, peek) == 2) looksGzip = (mag[0] == 0x1f && mag[1] == 0x8b);
+        fclose(peek);
+    }
+
+    NSString *tarPath = archivePath;
+    NSString *tmpTar = nil;
     if (looksGzip || nameGzip) {
+        tmpTar = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"nd-stream-%u.tar", arc4random()]];
         NSError *gzErr = nil;
-        tar = NDGunzipData(raw, &gzErr);
-        if (!tar) {
+        if (!NDGunzipFileToFile(archivePath, tmpTar, &gzErr)) {
             if (error) *error = gzErr;
             return NO;
         }
+        tarPath = tmpTar;
     }
-    // Some "tar.gz" are actually plain ustar already gunzipped by sender wrongly named — handled above.
-    // If still looks like gzip magic after "gunzip" failure path skipped — already handled.
-    return NDExtractTarBytes(tar, destDir, error);
+
+    FILE *fp = fopen(tarPath.UTF8String, "rb");
+    if (!fp) {
+        if (tmpTar) [fm removeItemAtPath:tmpTar error:nil];
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:12 userInfo:@{NSLocalizedDescriptionKey: @"无法读取 tar"}];
+        return NO;
+    }
+    BOOL ok = NDExtractTarFILE(fp, destDir, error);
+    fclose(fp);
+    if (tmpTar) [fm removeItemAtPath:tmpTar error:nil];
+    return ok;
 }
 
 BOOL NDExtractArchiveToDirectory(NSString *archivePath, NSString *destDir, NSError **error) {

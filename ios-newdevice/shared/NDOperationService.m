@@ -7,6 +7,10 @@
 #import "NDPaths.h"
 #import "NDDeviceProfile.h"
 
+@interface NDOperationService ()
+@property (nonatomic, assign) BOOL asyncBusy;
+@end
+
 @implementation NDOperationService
 
 + (instancetype)shared {
@@ -26,6 +30,26 @@
         q = dispatch_queue_create("com.local.newdevice.mutate", DISPATCH_QUEUE_SERIAL);
     });
     return q;
+}
+
+- (BOOL)tryBeginAsyncJob {
+    @synchronized (self) {
+        if (self.asyncBusy) return NO;
+        self.asyncBusy = YES;
+        return YES;
+    }
+}
+
+- (void)endAsyncJob {
+    @synchronized (self) {
+        self.asyncBusy = NO;
+    }
+}
+
+- (BOOL)isAsyncBusy {
+    @synchronized (self) {
+        return self.asyncBusy;
+    }
 }
 
 + (BOOL)isAsyncAckFun:(NSString *)fun {
@@ -190,6 +214,18 @@
 }
 
 - (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *,NSString *> *)query completion:(void (^)(NSString * _Nullable, NSInteger))completion {
+    [self runAsync:fun query:query preclaimed:NO completion:completion];
+}
+
+- (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *,NSString *> *)query preclaimed:(BOOL)preclaimed completion:(void (^)(NSString * _Nullable, NSInteger))completion {
+    BOOL isAsync = [NDOperationService isAsyncAckFun:fun];
+    if (isAsync && !preclaimed) {
+        if (![self tryBeginAsyncJob]) {
+            if (completion) completion(@"busy", 409);
+            return;
+        }
+    }
+
     void (^done)(NSString *, NSInteger) = ^(NSString *body, NSInteger code) {
         // Persist body for async pollers (HTTP only ACKs "accepted").
         NSString *text = body ?: @"";
@@ -205,11 +241,12 @@
             [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
             [NDPaths makePathWorldReadable:path];
         }
+        if (isAsync) [self endAsyncJob];
         if (completion) completion(body, code);
     };
 
     dispatch_async([self mutateQueue], ^{
-        [[NDRecordStore shared] writeResultCode:2];
+        if (isAsync) [[NDRecordStore shared] writeResultCode:2];
         NSError *error = nil;
         NSString *body = @"";
         BOOL ok = YES;
@@ -494,9 +531,23 @@
         }
 
         if ([fun isEqualToString:@"deleteRecord"]) {
-            ok = [[NDRecordStore shared] deleteRecord:query[@"recordName"] ?: @"" error:&error];
+            NSString *name = query[@"recordName"] ?: @"";
+            NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+            // Deleting the live env must leave sandboxes (afterSwitch) before wiping the record.
+            if (name.length && [name isEqualToString:cur] && ![name isEqualToString:@"原始机器"]) {
+                [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                    NSError *err = nil;
+                    [[NDRecordStore shared] setCurrentRecordName:@"原始机器"];
+                    [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps];
+                    BOOL success = [[NDRecordStore shared] deleteRecord:name error:&err];
+                    [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
+                    done(success ? @"" : (err.localizedDescription ?: @""), success ? 200 : 500);
+                }];
+                return;
+            }
+            ok = [[NDRecordStore shared] deleteRecord:name error:&error];
             [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
-            done(@"", ok ? 200 : 500);
+            done(ok ? @"" : (error.localizedDescription ?: @""), ok ? 200 : 500);
             return;
         }
 
@@ -620,8 +671,20 @@
                 return;
             }
             if (name.length) p.name = name;
+            NSString *previous = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
             ok = [[NDRecordStore shared] saveProfile:p error:&error];
             if (ok && [fun isEqualToString:@"setCurrentRecordParam"]) {
+                BOOL switched = p.name.length && ![p.name isEqualToString:previous];
+                if (switched) {
+                    [self prepareTargetsForDestination:p.name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                        [[NDRecordStore shared] setCurrentRecordName:p.name];
+                        [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                        [[NDRecordStore shared] notifyReload];
+                        [[NDRecordStore shared] writeResultCode:1];
+                        done(@"ok", 200);
+                    }];
+                    return;
+                }
                 [[NDRecordStore shared] setCurrentRecordName:p.name];
                 [[NDRecordStore shared] notifyReload];
             }
