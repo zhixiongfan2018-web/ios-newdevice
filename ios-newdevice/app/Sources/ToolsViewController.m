@@ -73,11 +73,11 @@ extern char **environ;
     if (indexPath.section == 0) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"导出 NewDevice 环境";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"可多选 · .tar → %@", [NDPaths mediaExportDir]];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"可多选 · .tar.gz → %@", [NDPaths mediaExportDir]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
         } else {
             cell.textLabel.text = @"导入本机数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"从 %@ 读 .tar", [NDPaths mediaImportDir]];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"从 %@ 读 .tar.gz", [NDPaths mediaImportDir]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
         }
     } else if (indexPath.section == 1) {

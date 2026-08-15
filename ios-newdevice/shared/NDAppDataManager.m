@@ -1614,6 +1614,8 @@ extern char **environ;
     if (!path.length) {
         // Prefer staged upgrade packages under Media/NewDevice
         NSArray *cands = @[
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-211.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-211.deb",
             @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-210.deb",
             @"/var/mobile/Media/Downloads/NewDevice-1.0.0-210.deb",
             @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-209.deb",
@@ -2295,6 +2297,58 @@ extern char **environ;
         NSString *full = [root stringByAppendingPathComponent:rel];
         if ([fm removeItemAtPath:full error:nil]) removed++;
     }
+    return removed;
+}
+
+- (NSUInteger)slimAMGExportInDirectory:(NSString *)root stripMedia:(BOOL)stripMedia {
+    if (!root.length) return 0;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSUInteger removed = 0;
+    // Drop heavy rebuildable trees (AMG classic packs stay ~tens of MB, not 200MB+).
+    static NSArray *dropNames;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dropNames = @[
+            @"Caches", @"cache", @"fsCachedData", @"WebKit", @"HTTPStorages",
+            @"Snapshots", @"com.apple.metal", @"com.apple.metalfe", @"com.apple.gpuarchiver",
+        ];
+    });
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+    NSMutableArray *dirsToDrop = [NSMutableArray array];
+    for (NSString *rel in en) {
+        NSString *leaf = rel.lastPathComponent;
+        if ([dropNames containsObject:leaf] ||
+            [leaf.lowercaseString isEqualToString:@"tmp"] ||
+            [leaf containsString:@"fsCachedData"] ||
+            [leaf containsString:@"com.braze.assets-cache"]) {
+            BOOL isDir = NO;
+            NSString *full = [root stringByAppendingPathComponent:rel];
+            if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+                [dirsToDrop addObject:full];
+                [en skipDescendants];
+            }
+        }
+    }
+    // Longest paths first so nested drops don't race
+    [dirsToDrop sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [@(b.length) compare:@(a.length)];
+    }];
+    for (NSString *d in dirsToDrop) {
+        if ([fm removeItemAtPath:d error:nil]) removed++;
+    }
+    // Also clear empty top-level tmp under each app sandbox
+    NSDirectoryEnumerator *en2 = [fm enumeratorAtPath:root];
+    for (NSString *rel in en2) {
+        if (![rel.lastPathComponent.lowercaseString isEqualToString:@"tmp"]) continue;
+        NSString *full = [root stringByAppendingPathComponent:rel];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&isDir] || !isDir) continue;
+        // only sandbox tmp (…/bid/tmp)
+        NSArray *parts = [rel componentsSeparatedByString:@"/"];
+        if (parts.count >= 2 && [fm removeItemAtPath:full error:nil]) removed++;
+        [en2 skipDescendants];
+    }
+    if (stripMedia) removed += [self slimMediaInDirectory:root];
     return removed;
 }
 

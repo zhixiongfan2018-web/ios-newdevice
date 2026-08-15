@@ -54,6 +54,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// Strip image/video files under a holographic apps backup (AMG 瘦身).
 - (NSUInteger)slimMediaInRecord:(NSString *)recordName;
 - (NSUInteger)slimMediaInDirectory:(NSString *)root;
+/// AMG-style export slim: drop Caches / WebKit / tmp (+ optional media).
+- (NSUInteger)slimAMGExportInDirectory:(NSString *)root stripMedia:(BOOL)stripMedia;
 
 - (nullable NSString *)containerPathForBundleId:(NSString *)bundleId;
 

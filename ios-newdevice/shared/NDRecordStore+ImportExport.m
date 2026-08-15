@@ -712,18 +712,52 @@
             [[NDAppDataManager shared] backupPasteboardToRecord:name];
         }
 
-        // Prefer remark in filename when unique enough; keep record id in package.
-        NSString *safe = [[name componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:"]] componentsJoinedByString:@"_"];
-        if (!safe.length) safe = @"record";
-        if (p.remark.length) {
-            NSString *rSafe = [[p.remark componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"]] componentsJoinedByString:@"_"];
-            rSafe = [rSafe stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (rSafe.length) safe = [NSString stringWithFormat:@"%@__%@", rSafe, safe];
+        // AMG classic live folder name: prefer sidecar, else +digits + space + date.
+        NSString *liveName = name;
+        NSString *hintPath = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"amg-live-name.txt"];
+        NSString *hint = [[NSString stringWithContentsOfFile:hintPath encoding:NSUTF8StringEncoding error:nil]
+                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (hint.length) {
+            liveName = hint;
+        } else if (![liveName hasPrefix:@"+"]) {
+            NSRange r = [liveName rangeOfString:@"-20"];
+            if (r.location != NSNotFound && r.location > 0) {
+                liveName = [NSString stringWithFormat:@"+%@ %@",
+                            [liveName substringToIndex:r.location],
+                            [liveName substringFromIndex:r.location + 1]];
+            }
         }
+        // Mirror preferredAMGLiveRecordNameFrom (+underscore → +space)
+        if ([liveName hasPrefix:@"+"]) {
+            NSRange ur = [liveName rangeOfString:@"_20"];
+            if (ur.location != NSNotFound) {
+                liveName = [[liveName substringToIndex:ur.location]
+                            stringByAppendingFormat:@" %@", [liveName substringFromIndex:ur.location + 1]];
+            }
+        }
+        if (!liveName.length) liveName = name;
 
-        NSString *out = [stageRoot stringByAppendingPathComponent:safe];
+        // Filename: keep + and spaces (AMG style); only strip path separators.
+        NSString *safe = [[liveName componentsSeparatedByCharactersInSet:
+                           [NSCharacterSet characterSetWithCharactersInString:@"/\\:"]]
+                          componentsJoinedByString:@"_"];
+        if (!safe.length) safe = @"record";
+
+        // Classic writeback layout: var/mobile/AMG/<liveName>/… (AMG import requires this).
+        NSString *out = [[[stageRoot stringByAppendingPathComponent:@"var"]
+                          stringByAppendingPathComponent:@"mobile"]
+                         stringByAppendingPathComponent:@"AMG"];
+        out = [out stringByAppendingPathComponent:liveName];
         [fm removeItemAtPath:out error:nil];
+        [fm createDirectoryAtPath:out withIntermediateDirectories:YES attributes:nil error:nil];
         if (![p writeAMGFakerToDirectory:out error:nil]) continue;
+        // Plaintext sidecar so re-import never needs AES.
+        NSString *fakerPath = [out stringByAppendingPathComponent:@"faker.plist"];
+        NSString *plain = [out stringByAppendingPathComponent:@"faker_plaintext.plist"];
+        if ([fm fileExistsAtPath:fakerPath]) {
+            [fm removeItemAtPath:plain error:nil];
+            [fm copyItemAtPath:fakerPath toPath:plain error:nil];
+        }
 
         // NewDevice native profile (keeps remark + full identity for re-import)
         NSString *profileSrc = [NDPaths profilePathForRecord:name];
@@ -734,9 +768,9 @@
         }
 
         NSDictionary *desc = @{
-            @"title": name,
+            @"title": liveName,
             @"remark": p.remark ?: @"",
-            @"format": @"NewDevice",
+            @"format": @"AMG",
             @"appName": bids ?: @[],
         };
         [desc writeToFile:[out stringByAppendingPathComponent:@"description.plist"] atomically:YES];
@@ -755,11 +789,7 @@
             [self NDCopyTree:ag to:[out stringByAppendingPathComponent:@"AppGroup"]];
         }
 
-        // Native NewDevice apps tree + AMG flat layout (same content)
-        NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
-        if ([fm fileExistsAtPath:appsRoot]) {
-            [self NDCopyTree:appsRoot to:[out stringByAppendingPathComponent:@"apps"]];
-        }
+        // AMG flat layout only (one copy per bid) — never also pack apps/ (was ~2x size).
         for (NSString *bid in bids) {
             NSString *src = [NDPaths appsBackupDirForRecord:name bundleId:bid];
             if (![fm fileExistsAtPath:src]) continue;
@@ -767,29 +797,48 @@
             [self NDCopyTree:src to:dst];
         }
 
-        if (slim || [NDConfig shared].slimExportStripMedia) {
-            [[NDAppDataManager shared] slimMediaInDirectory:out];
-        }
+        // Always strip Caches/WebKit/tmp like AMG classic; optional media strip.
+        BOOL stripMedia = slim || [NDConfig shared].slimExportStripMedia;
+        [[NDAppDataManager shared] slimAMGExportInDirectory:out stripMedia:stripMedia];
 
-        NSString *tarName = [safe stringByAppendingPathExtension:@"tar"];
+        NSString *tarName = [safe stringByAppendingString:@".tar.gz"];
         NSString *primaryTar = [dir stringByAppendingPathComponent:tarName];
         [fm removeItemAtPath:primaryTar error:nil];
 
+        // Pack `var/` so archive paths match AMG: var/mobile/AMG/<live>/…
+        NSString *varRoot = [stageRoot stringByAppendingPathComponent:@"var"];
         NSError *tarErr = nil;
-        if (!NDCreateTarFromDirectory(out, primaryTar, &tarErr)) {
-            NSString *folderDst = [dir stringByAppendingPathComponent:safe];
-            [fm removeItemAtPath:folderDst error:nil];
-            [self NDCopyTree:out to:folderDst];
-            if (error && !*error) *error = tarErr;
-        } else {
-            for (NSString *mirror in uniqueMirrors) {
-                if ([mirror isEqualToString:dir]) continue;
-                NSString *copyTo = [mirror stringByAppendingPathComponent:tarName];
-                [fm removeItemAtPath:copyTo error:nil];
-                [fm copyItemAtPath:primaryTar toPath:copyTo error:nil];
+        if (!NDCreateTarGzFromDirectory(varRoot, primaryTar, &tarErr)) {
+            // Fallback uncompressed + folder copy for visibility
+            NSString *tarFallback = [[dir stringByAppendingPathComponent:safe] stringByAppendingPathExtension:@"tar"];
+            [fm removeItemAtPath:tarFallback error:nil];
+            if (NDCreateTarFromDirectory(varRoot, tarFallback, &tarErr)) {
+                primaryTar = tarFallback;
+                tarName = tarFallback.lastPathComponent;
+            } else {
+                NSString *folderDst = [dir stringByAppendingPathComponent:safe];
+                [fm removeItemAtPath:folderDst error:nil];
+                [self NDCopyTree:out to:folderDst];
+                if (error && !*error) *error = tarErr;
+                continue;
             }
         }
+        for (NSString *mirror in uniqueMirrors) {
+            if ([mirror isEqualToString:dir]) continue;
+            NSString *copyTo = [mirror stringByAppendingPathComponent:tarName];
+            [fm removeItemAtPath:copyTo error:nil];
+            [fm copyItemAtPath:primaryTar toPath:copyTo error:nil];
+        }
+        // Also drop into Media/AMG/import for easy AMG/NewDevice re-import
+        NSString *importDir = [NDRecordStore amgMediaImportPath];
+        [fm createDirectoryAtPath:importDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *importCopy = [importDir stringByAppendingPathComponent:tarName];
+        [fm removeItemAtPath:importCopy error:nil];
+        [fm copyItemAtPath:primaryTar toPath:importCopy error:nil];
+
         exported++;
+        // Clear staged var tree for next record (avoid mixing)
+        [fm removeItemAtPath:varRoot error:nil];
     }
     [fm removeItemAtPath:stageRoot error:nil];
     return exported;

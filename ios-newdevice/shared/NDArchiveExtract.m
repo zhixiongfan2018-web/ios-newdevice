@@ -599,3 +599,54 @@ BOOL NDCreateTarFromDirectory(NSString *sourceDir, NSString *tarPath, NSError **
         return NO;
     }
 }
+
+BOOL NDCreateTarGzFromDirectory(NSString *sourceDir, NSString *tarGzPath, NSError **error) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:sourceDir isDirectory:&isDir] || !isDir) {
+        if (error) *error = [NSError errorWithDomain:@"NDArchive" code:40 userInfo:@{NSLocalizedDescriptionKey: @"源目录不存在"}];
+        return NO;
+    }
+    NSString *parent = [tarGzPath stringByDeletingLastPathComponent];
+    [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:tarGzPath error:nil];
+    NSString *base = [sourceDir lastPathComponent];
+    NSString *cwd = [sourceDir stringByDeletingLastPathComponent];
+    NSString *qOut = [tarGzPath stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    NSString *qCwd = [cwd stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    NSString *qBase = [base stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    // AMG classic: gzip-compressed tar
+    NSArray *cmds = @[
+        [NSString stringWithFormat:@"tar -czf '%@' -C '%@' '%@'", qOut, qCwd, qBase],
+        [NSString stringWithFormat:@"/var/jb/usr/bin/tar -czf '%@' -C '%@' '%@'", qOut, qCwd, qBase],
+        [NSString stringWithFormat:@"/var/jb/bin/tar -czf '%@' -C '%@' '%@'", qOut, qCwd, qBase],
+    ];
+    for (NSString *cmd in cmds) {
+        if (NDSpawnShell(cmd) && [fm fileExistsAtPath:tarGzPath]) {
+            NSDictionary *attrs = [fm attributesOfItemAtPath:tarGzPath error:nil];
+            if ([attrs fileSize] > 0) return YES;
+        }
+        [fm removeItemAtPath:tarGzPath error:nil];
+    }
+    // Fallback: plain tar then gzip -c
+    NSString *tmpTar = [tarGzPath stringByAppendingString:@".tmp.tar"];
+    [fm removeItemAtPath:tmpTar error:nil];
+    if (!NDCreateTarFromDirectory(sourceDir, tmpTar, error)) return NO;
+    NSArray *gzCmds = @[
+        [NSString stringWithFormat:@"gzip -c '%@' > '%@'", [tmpTar stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"], qOut],
+        [NSString stringWithFormat:@"/var/jb/usr/bin/gzip -c '%@' > '%@'", [tmpTar stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"], qOut],
+    ];
+    BOOL ok = NO;
+    for (NSString *cmd in gzCmds) {
+        if (NDSpawnShell(cmd) && [fm fileExistsAtPath:tarGzPath]) {
+            NSDictionary *attrs = [fm attributesOfItemAtPath:tarGzPath error:nil];
+            if ([attrs fileSize] > 0) { ok = YES; break; }
+        }
+        [fm removeItemAtPath:tarGzPath error:nil];
+    }
+    [fm removeItemAtPath:tmpTar error:nil];
+    if (!ok && error && !*error) {
+        *error = [NSError errorWithDomain:@"NDArchive" code:43 userInfo:@{NSLocalizedDescriptionKey: @"gzip 打包失败"}];
+    }
+    return ok;
+}

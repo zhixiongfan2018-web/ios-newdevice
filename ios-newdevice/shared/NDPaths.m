@@ -140,8 +140,8 @@ NSInteger const NDHTTPPort = 8080;
         NSString *text =
             @"NewDevice 用户目录（爱思「文件管理」可见）\n"
             @"\n"
-            @"import/  把要导入的 .tar 放这里，然后打开 App → 工具 → 导入\n"
-            @"export/  App「导出本机数据」生成的 .tar 在这里\n"
+            @"import/  把要导入的 .tar.gz 放这里，然后打开 App → 工具 → 导入\n"
+            @"export/  App「导出」生成经典 AMG 包（.tar.gz，路径 var/mobile/AMG/…）\n"
             @"\n"
             @"内部运行数据在越狱路径，不在此显示：\n"
             @"/var/jb/var/mobile/NewDevice/Records\n";

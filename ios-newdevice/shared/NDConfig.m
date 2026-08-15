@@ -32,7 +32,7 @@
     self.allowIPadSpoof = NO;
     self.clearPasteboardOnSwitch = YES;
     self.importKeychainWithData = YES;
-    self.slimExportStripMedia = NO;
+    self.slimExportStripMedia = YES; // AMG-style: strip media on export by default
     self.targetApps = @[];
     self.preferredModels = @[];
     self.preferredSystems = @[];
@@ -53,7 +53,7 @@
     self.allowIPadSpoof = dict[@"allowIPadSpoof"] ? [dict[@"allowIPadSpoof"] boolValue] : NO;
     self.clearPasteboardOnSwitch = dict[@"clearPasteboardOnSwitch"] ? [dict[@"clearPasteboardOnSwitch"] boolValue] : YES;
     self.importKeychainWithData = dict[@"importKeychainWithData"] ? [dict[@"importKeychainWithData"] boolValue] : YES;
-    self.slimExportStripMedia = dict[@"slimExportStripMedia"] ? [dict[@"slimExportStripMedia"] boolValue] : NO;
+    self.slimExportStripMedia = dict[@"slimExportStripMedia"] ? [dict[@"slimExportStripMedia"] boolValue] : YES;
     self.targetApps = dict[@"targetApps"] ?: @[];
     self.preferredModels = dict[@"preferredModels"] ?: @[];
     self.preferredSystems = dict[@"preferredSystems"] ?: @[];
