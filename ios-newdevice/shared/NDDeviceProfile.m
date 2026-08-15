@@ -189,6 +189,33 @@ static NSString *NDRandomOpenUDID(void) {
     return NDRandomHex(40);
 }
 
+static NSString *NDModernUDID(NSString *productType, uint32_t seed) {
+    NSString *prefix = [NDDeviceCatalog modernUDIDPrefixForProductType:productType];
+    if (!prefix.length) {
+        // Fallback classic 40-hex
+        return [NSString stringWithFormat:@"%08x%08x%08x%08x%08x",
+                seed, seed ^ 0x9e3779b9u, seed * 2654435761u, ~seed, seed ^ 0x85ebca6bu];
+    }
+    uint32_t a = seed ? seed : 1u;
+    uint32_t b = a ^ 0xA5C3F1EDu;
+    return [NSString stringWithFormat:@"%@-%08X%08X", prefix, a, b];
+}
+
+static BOOL NDLooksLikeClassicUDID(NSString *s) {
+    if (s.length != 40) return NO;
+    NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+    return [s rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
+static BOOL NDLooksLikeModernUDID(NSString *s) {
+    // 00008110-001A28821E08801E
+    if (s.length != 25 || [s characterAtIndex:8] != '-') return NO;
+    NSString *compact = [s stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    if (compact.length != 24) return NO;
+    NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+    return [compact rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
 static NSTimeInterval NDRandomBootTime(void) {
     // Boot sometime in the last 1–14 days
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -337,7 +364,8 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.IDFV = NDRandomUUID();
     p.UUID = NDRandomUUID();
     p.Serial = NDRandomSerial();
-    p.UDID = NDRandomHex(40); // lowercase 40-hex, matches Apple UDID style
+    // A12+ use USB-style UDID; classic 40-hex looks wrong on iOS 18 SE3/14+.
+    p.UDID = NDModernUDID(dev[@"ProductType"], arc4random() ^ tick ^ nameMix);
     p.WiFiMAC = NDRandomMAC();
     p.BTMAC = NDPairedBTMAC(p.WiFiMAC, arc4random() ^ tick ^ nameMix);
     p.DeviceToken = NDRandomHex(64);
@@ -348,12 +376,8 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.BSSID = wifi[@"BSSID"] ?: @"00:00:00:00:00:00";
     p.OpenUDID = NDRandomOpenUDID();
     p.BootTime = NDRandomBootTime();
-    static NSArray<NSString *> *colors;
-    static dispatch_once_t colorOnce;
-    dispatch_once(&colorOnce, ^{
-        colors = @[@"Black", @"White", @"Blue", @"Pink", @"Yellow", @"Green", @"Purple", @"NaturalTitanium", @"BlueTitanium", @"WhiteTitanium", @"BlackTitanium"];
-    });
-    p.DeviceColor = colors[(arc4random_uniform((uint32_t)colors.count) + tick) % colors.count];
+    NSArray *colors = [NDDeviceCatalog deviceColorsForProductType:dev[@"ProductType"]];
+    p.DeviceColor = colors.count ? colors[(arc4random_uniform((uint32_t)colors.count) + tick) % colors.count] : @"Black";
     p.DiskCapacity = [NDDeviceCatalog diskBytesForProductType:dev[@"ProductType"]];
     p.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:dev[@"ProductType"]];
     p.Brightness = 0.35f + (arc4random_uniform(50) / 100.0f);
@@ -841,13 +865,15 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
     }
 
-    // --- SystemVer must be iOS 18+; keep Build aligned ---
-    if (!self.SystemVer.length || [NDDeviceCatalog majorSystemVersion:self.SystemVer] < 18) {
-        NSArray *pool = [NDDeviceCatalog systemVersions];
+    // --- SystemVer must be iOS 18+ mainstream; keep Build aligned ---
+    BOOL limitedVer = [NDDeviceCatalog isLimitedSupportSystemVersion:self.SystemVer];
+    BOOL limitedOkForDevice = limitedVer && [self.ProductType hasPrefix:@"iPhone11,"];
+    if (!self.SystemVer.length || [NDDeviceCatalog majorSystemVersion:self.SystemVer] < 18 || (limitedVer && !limitedOkForDevice)) {
+        NSArray *pool = [NDDeviceCatalog preferredSystemVersions];
         NSString *pick = pool.count ? pool[seed % pool.count] : @"18.5";
         self.SystemVer = pick;
         self.Build = [NDDeviceCatalog buildForSystemVersion:pick] ?: NDRandomBuild(pick);
-        [fixes addObject:[NSString stringWithFormat:@"SystemVer=%@ (≥18)", pick]];
+        [fixes addObject:[NSString stringWithFormat:@"SystemVer=%@ (mainstream)", pick]];
     } else {
         NSString *known = NDKnownBuilds()[self.SystemVer];
         if (known.length && (![self.Build isEqualToString:known] || !self.Build.length)) {
@@ -857,6 +883,13 @@ static BOOL NDLooksLikeProductType(NSString *s) {
             self.Build = NDRandomBuild(self.SystemVer);
             [fixes addObject:[NSString stringWithFormat:@"Build=%@", self.Build]];
         }
+    }
+
+    // --- Modern UDID for A12+ (40-hex classic looks synthetic on iOS 18) ---
+    NSString *udidPrefix = [NDDeviceCatalog modernUDIDPrefixForProductType:self.ProductType];
+    if (udidPrefix.length && (NDLooksLikeClassicUDID(self.UDID) || !NDLooksLikeModernUDID(self.UDID))) {
+        self.UDID = NDModernUDID(self.ProductType, seed);
+        [fixes addObject:[NSString stringWithFormat:@"UDID=%@", self.UDID]];
     }
 
     // --- Serial / IMEI look like Apple equipment ---
@@ -898,13 +931,13 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:[NSString stringWithFormat:@"BTMAC=%@", self.BTMAC]];
     }
 
-    // --- US carrier + radio ---
-    if (!self.Carrier.length || !self.MCC.length || !self.MNC.length) {
-        NSArray *carriers = [NDDeviceCatalog carriers];
-        NSDictionary *c = carriers[(seed / 7) % carriers.count];
-        if (!self.Carrier.length) self.Carrier = c[@"Carrier"] ?: @"";
-        if (!self.MCC.length) self.MCC = c[@"MCC"] ?: @"";
-        if (!self.MNC.length) self.MNC = c[@"MNC"] ?: @"";
+    // --- US carrier triplet (never keep ISP/POI as Carrier) ---
+    BOOL carrierBad = ![NDDeviceCatalog isPlausibleCarrierName:self.Carrier] || !self.MCC.length || !self.MNC.length;
+    if (carrierBad) {
+        NSDictionary *c = [NDDeviceCatalog carrierForSeed:seed / 7 preferMCC:self.MCC preferMNC:self.MNC];
+        self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
+        self.MCC = c[@"MCC"] ?: @"310";
+        self.MNC = c[@"MNC"] ?: @"260";
         [fixes addObject:[NSString stringWithFormat:@"Carrier=%@ %@/%@", self.Carrier, self.MCC, self.MNC]];
     }
     if (!self.RadioAccess.length) {
@@ -918,7 +951,6 @@ static BOOL NDLooksLikeProductType(NSString *s) {
             self.SSID = ssids.count ? ssids[(seed / 13) % ssids.count] : @"HomeWiFi";
         }
         if (!self.BSSID.length) {
-            // Router BSSID — not Apple OUI; private locally administered
             self.BSSID = [NSString stringWithFormat:@"%02x:%02x:%02x:%02x:%02x:%02x",
                           ((seed >> 16) & 0xfe) | 0x02, (seed >> 8) & 0xff, seed & 0xff,
                           (seed >> 24) & 0xff, (seed >> 4) & 0xff, (seed >> 12) & 0xff];
@@ -926,28 +958,23 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:[NSString stringWithFormat:@"SSID=%@", self.SSID]];
     }
 
-    // --- TimeZone must match GPS (真机一致) ---
-    if (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01) {
-        NSDictionary *best = nil;
-        double bestD = DBL_MAX;
-        for (NSDictionary *c in [NDDeviceCatalog usCityCoordinates]) {
-            double dlat = [c[@"lat"] doubleValue] - self.Latitude;
-            double dlon = [c[@"lon"] doubleValue] - self.Longitude;
-            double d = dlat * dlat + dlon * dlon;
-            if (d < bestD) { bestD = d; best = c; }
-        }
-        NSString *tz = best[@"timezone"] ?: @"America/New_York";
+    // --- GPS + TimeZone + US storyline must agree ---
+    BOOL gpsUS = [NDDeviceCatalog isCoordinateInUS:self.Latitude longitude:self.Longitude];
+    BOOL hasGPS = (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01);
+    if (!hasGPS || !gpsUS) {
+        NSDictionary *coord = [NDDeviceCatalog usCoordinateForSeed:seed / 17];
+        self.Latitude = [coord[@"lat"] doubleValue];
+        self.Longitude = [coord[@"lon"] doubleValue];
+        self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
+        [fixes addObject:[NSString stringWithFormat:@"GPS+TZ=%@ (US)", coord[@"city"] ?: self.TimeZone]];
+    } else {
+        NSDictionary *near = [NDDeviceCatalog nearestUSCityToLatitude:self.Latitude longitude:self.Longitude maxDegrees:6.0];
+        NSString *tz = near[@"timezone"] ?: self.TimeZone;
+        if (!tz.length) tz = @"America/New_York";
         if (![self.TimeZone isEqualToString:tz]) {
             self.TimeZone = tz;
             [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@ (GPS)", tz]];
         }
-    } else if (!self.TimeZone.length) {
-        NSArray *cities = [NDDeviceCatalog usCityCoordinates];
-        NSDictionary *coord = cities[(seed / 17) % cities.count];
-        self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
-        self.Latitude = [coord[@"lat"] doubleValue];
-        self.Longitude = [coord[@"lon"] doubleValue];
-        [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@", self.TimeZone]];
     }
 
     if (!self.OpenUDID.length) {
@@ -960,10 +987,17 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         self.BootTime = now - (3600.0 + (seed % (10 * 24 * 3600)));
         [fixes addObject:@"BootTime=filled"];
     }
-    if (!self.DeviceColor.length) {
-        // Colors plausible for the generation (avoid Titanium on iPhone 14)
-        NSArray *colors = @[@"Black", @"White", @"Blue", @"Purple", @"Yellow", @"Starlight", @"Midnight"];
-        self.DeviceColor = colors[(seed / 19) % colors.count];
+    // --- DeviceColor must match ProductType generation ---
+    NSArray *okColors = [NDDeviceCatalog deviceColorsForProductType:self.ProductType];
+    BOOL colorOk = self.DeviceColor.length > 0;
+    if (colorOk && okColors.count) {
+        colorOk = NO;
+        for (NSString *c in okColors) {
+            if ([c caseInsensitiveCompare:self.DeviceColor] == NSOrderedSame) { colorOk = YES; break; }
+        }
+    }
+    if (!colorOk) {
+        self.DeviceColor = okColors.count ? okColors[(seed / 19) % okColors.count] : @"Black";
         [fixes addObject:[NSString stringWithFormat:@"DeviceColor=%@", self.DeviceColor]];
     }
     if (self.Brightness < 0) {
@@ -987,28 +1021,51 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     double lat = [geo[@"lat"] doubleValue];
     double lon = [geo[@"lon"] doubleValue];
     if (fabs(lat) < 0.01 && fabs(lon) < 0.01) return @"";
+    NSString *cc = [geo[@"countryCode"] isKindOfClass:[NSString class]] ? geo[@"countryCode"] : @"";
+    NSString *city = [geo[@"city"] isKindOfClass:[NSString class]] ? geo[@"city"] : @"";
+    NSString *ip = [geo[@"ip"] isKindOfClass:[NSString class]] ? geo[@"ip"] : @"";
+    NSString *tz = [geo[@"timezone"] isKindOfClass:[NSString class]] ? geo[@"timezone"] : @"";
+
+    // Spoof storyline is US-locale (carrier pool). Never import foreign GPS or ISP-as-Carrier.
+    if (cc.length && ![cc.uppercaseString isEqualToString:@"US"]) {
+        uint32_t seed = 2166136261u;
+        const char *cs = (ip.length ? ip : (self.UDID ?: @"geo")).UTF8String ?: "geo";
+        while (*cs) { seed ^= (uint8_t)(*cs++); seed *= 16777619u; }
+        NSDictionary *us = [NDDeviceCatalog usCoordinateForSeed:seed];
+        self.Latitude = [us[@"lat"] doubleValue];
+        self.Longitude = [us[@"lon"] doubleValue];
+        self.TimeZone = us[@"timezone"] ?: @"America/New_York";
+        if (![NDDeviceCatalog isPlausibleCarrierName:self.Carrier] || !self.MCC.length || !self.MNC.length) {
+            NSDictionary *c = [NDDeviceCatalog carrierForSeed:seed preferMCC:nil preferMNC:nil];
+            self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
+            self.MCC = c[@"MCC"] ?: @"310";
+            self.MNC = c[@"MNC"] ?: @"260";
+        }
+        return [NSString stringWithFormat:@"geo %@ %@→US %@ (%.4f,%.4f) tz=%@",
+                ip.length ? ip : @"?", city.length ? city : cc,
+                us[@"city"] ?: @"?", self.Latitude, self.Longitude, self.TimeZone ?: @"?"];
+    }
+
     if (jitter) {
         lat += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
         lon += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
     }
     self.Latitude = lat;
     self.Longitude = lon;
-    NSString *tz = geo[@"timezone"];
-    if ([tz isKindOfClass:[NSString class]] && tz.length) self.TimeZone = tz;
-    NSString *cc = [geo[@"countryCode"] isKindOfClass:[NSString class]] ? geo[@"countryCode"] : @"";
-    // Keep US carrier pool only when egress IP is US; otherwise avoid NY GPS + AT&T mismatch.
-    if (cc.length && ![cc.uppercaseString isEqualToString:@"US"]) {
-        NSString *isp = [geo[@"isp"] isKindOfClass:[NSString class]] ? geo[@"isp"] : @"";
-        if (isp.length > 28) isp = [isp substringToIndex:28];
-        if (isp.length) self.Carrier = isp;
-        // Leave MCC/MNC empty so we don't claim a US PLMN abroad.
-        self.MCC = @"";
-        self.MNC = @"";
+    if (tz.length) {
+        self.TimeZone = tz;
+    } else {
+        NSDictionary *near = [NDDeviceCatalog nearestUSCityToLatitude:lat longitude:lon maxDegrees:8.0];
+        if (near[@"timezone"]) self.TimeZone = near[@"timezone"];
     }
-    NSString *city = [geo[@"city"] isKindOfClass:[NSString class]] ? geo[@"city"] : @"";
-    NSString *ip = [geo[@"ip"] isKindOfClass:[NSString class]] ? geo[@"ip"] : @"";
+    if (![NDDeviceCatalog isPlausibleCarrierName:self.Carrier]) {
+        NSDictionary *c = [NDDeviceCatalog carrierForSeed:(uint32_t)(fabs(lat) * 1000) preferMCC:self.MCC preferMNC:self.MNC];
+        self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
+        if (!self.MCC.length) self.MCC = c[@"MCC"] ?: @"310";
+        if (!self.MNC.length) self.MNC = c[@"MNC"] ?: @"260";
+    }
     return [NSString stringWithFormat:@"geo %@ %@ (%.4f,%.4f) tz=%@",
-            ip.length ? ip : @"?", city.length ? city : cc, lat, lon, self.TimeZone ?: @"?"];
+            ip.length ? ip : @"?", city.length ? city : (cc.length ? cc : @"US"), lat, lon, self.TimeZone ?: @"?"];
 }
 
 - (BOOL)writeToPath:(NSString *)path error:(NSError **)error {

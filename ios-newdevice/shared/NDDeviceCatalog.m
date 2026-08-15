@@ -1,4 +1,6 @@
 #import "NDDeviceCatalog.h"
+#import <float.h>
+#import <math.h>
 
 @implementation NDDeviceCatalog
 
@@ -112,16 +114,38 @@
     return [[[systemVer componentsSeparatedByString:@"."] firstObject] integerValue];
 }
 
++ (BOOL)isLimitedSupportSystemVersion:(NSString *)systemVer {
+    // Publicly these were narrow maintenance trains (e.g. XR/XS Australia emergency).
+    // Keep in officialSystemBuilds for import lookup, but do not offer / keep on SE3+.
+    if (!systemVer.length) return NO;
+    static NSSet *limited;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        limited = [NSSet setWithArray:@[
+            @"18.7.3", @"18.7.4", @"18.7.5", @"18.7.6", @"18.7.7", @"18.7.8", @"18.7.9",
+        ]];
+    });
+    return [limited containsObject:systemVer];
+}
+
++ (NSArray<NSString *> *)preferredSystemVersions {
+    static NSArray *prefs;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // General iOS 18 trains commonly seen on iPhone 12–16 / SE3.
+        prefs = @[
+            @"18.5",
+            @"18.6", @"18.6.1", @"18.6.2",
+            @"18.7", @"18.7.1", @"18.7.2",
+        ];
+    });
+    return prefs;
+}
+
 + (NSArray<NSString *> *)systemVersions {
-    // Environments must be iOS 18+ (picker + 一键新机 pool). Older keys stay in
-    // officialSystemBuilds only so imported AMG Build lookup still works.
-    NSMutableArray *keys = [NSMutableArray array];
-    for (NSString *k in [self officialSystemBuilds].allKeys) {
-        if ([self majorSystemVersion:k] >= 18) [keys addObject:k];
-    }
-    return [keys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
-        return [a compare:b options:NSNumericSearch];
-    }];
+    // Environments must be iOS 18+ (picker + 一键新机 pool). Prefer mainstream
+    // builds; older / limited keys stay in officialSystemBuilds for AMG import.
+    return [self preferredSystemVersions];
 }
 
 + (NSArray<NSDictionary *> *)carriers {
@@ -159,6 +183,43 @@
         @{@"Carrier": @"Mint Mobile", @"MCC": @"310", @"MNC": @"260"},
         @{@"Carrier": @"Google Fi", @"MCC": @"310", @"MNC": @"260"},
     ];
+}
+
++ (BOOL)isPlausibleCarrierName:(NSString *)name {
+    if (![name isKindOfClass:[NSString class]] || name.length < 2 || name.length > 32) return NO;
+    // POI / ISP / reverse-geocode leftovers (e.g. "Tencent Building, Kejizhongy")
+    if ([name rangeOfString:@","].location != NSNotFound) return NO;
+    if ([name rangeOfString:@"Building" options:NSCaseInsensitiveSearch].location != NSNotFound) return NO;
+    if ([name rangeOfString:@"Street" options:NSCaseInsensitiveSearch].location != NSNotFound) return NO;
+    if ([name rangeOfString:@"Road" options:NSCaseInsensitiveSearch].location != NSNotFound) return NO;
+    if ([name rangeOfString:@"Avenue" options:NSCaseInsensitiveSearch].location != NSNotFound) return NO;
+    if ([name rangeOfString:@"Kejizhong" options:NSCaseInsensitiveSearch].location != NSNotFound) return NO;
+    NSString *lower = name.lowercaseString;
+    for (NSString *bad in @[@"tencent", @"alibaba", @"chinanet", @"china unicom", @"china mobile",
+                             @"telecom", @"broadband", @"fiber", @"datacenter", @"cloud"]) {
+        if ([lower containsString:bad]) return NO;
+    }
+    for (NSDictionary *c in [self carriers]) {
+        NSString *cn = c[@"Carrier"];
+        if (cn.length && [name caseInsensitiveCompare:cn] == NSOrderedSame) return YES;
+    }
+    // Short alphanumeric brand-like names still OK (e.g. "Fi", "Spectrum")
+    NSCharacterSet *ok = [NSCharacterSet characterSetWithCharactersInString:
+                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 &+-.'"];
+    return [name rangeOfCharacterFromSet:ok.invertedSet].location == NSNotFound;
+}
+
++ (NSDictionary *)carrierForSeed:(uint32_t)seed preferMCC:(NSString *)mcc preferMNC:(NSString *)mnc {
+    NSArray *list = [self carriers];
+    if (mcc.length && mnc.length) {
+        for (NSDictionary *c in list) {
+            if ([c[@"MCC"] isEqualToString:mcc] && [c[@"MNC"] isEqualToString:mnc]) return c;
+        }
+        for (NSDictionary *c in list) {
+            if ([c[@"MCC"] isEqualToString:mcc]) return c;
+        }
+    }
+    return list.count ? list[seed % list.count] : @{@"Carrier": @"T-Mobile", @"MCC": @"310", @"MNC": @"260"};
 }
 
 + (NSArray<NSString *> *)radioAccessTypes {
@@ -232,12 +293,34 @@
     ];
 }
 
-+ (NSDictionary *)randomUSCoordinate {
++ (BOOL)isCoordinateInUS:(double)lat longitude:(double)lon {
+    // Contiguous US + Alaska + Hawaii (loose bounding boxes).
+    if (lat >= 24.5 && lat <= 49.5 && lon >= -125.0 && lon <= -66.5) return YES; // CONUS
+    if (lat >= 51.0 && lat <= 71.5 && lon >= -180.0 && lon <= -130.0) return YES; // AK
+    if (lat >= 18.5 && lat <= 22.5 && lon >= -161.0 && lon <= -154.0) return YES; // HI
+    return NO;
+}
+
++ (NSDictionary *)nearestUSCityToLatitude:(double)lat longitude:(double)lon maxDegrees:(double)maxDeg {
+    NSDictionary *best = nil;
+    double bestD = DBL_MAX;
+    for (NSDictionary *c in [self usCityCoordinates]) {
+        double dlat = [c[@"lat"] doubleValue] - lat;
+        double dlon = [c[@"lon"] doubleValue] - lon;
+        double d = dlat * dlat + dlon * dlon;
+        if (d < bestD) { bestD = d; best = c; }
+    }
+    if (!best) return nil;
+    double limit = maxDeg > 0 ? maxDeg : 8.0;
+    if (sqrt(bestD) > limit) return nil;
+    return best;
+}
+
++ (NSDictionary *)usCoordinateForSeed:(uint32_t)seed {
     NSArray *cities = [self usCityCoordinates];
-    NSDictionary *c = cities[arc4random_uniform((uint32_t)cities.count)];
-    // ~±0.04° ≈ 3–4km urban jitter
-    double jitterLat = ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
-    double jitterLon = ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
+    NSDictionary *c = cities.count ? cities[seed % cities.count] : @{};
+    double jitterLat = ((double)((seed >> 8) % 8000) / 100000.0) - 0.04;
+    double jitterLon = ((double)((seed >> 16) % 8000) / 100000.0) - 0.04;
     return @{
         @"lat": @([c[@"lat"] doubleValue] + jitterLat),
         @"lon": @([c[@"lon"] doubleValue] + jitterLon),
@@ -245,6 +328,42 @@
         @"country": @"US",
         @"timezone": c[@"timezone"] ?: @"America/New_York",
     };
+}
+
++ (NSDictionary *)randomUSCoordinate {
+    return [self usCoordinateForSeed:arc4random()];
+}
+
++ (NSArray<NSString *> *)deviceColorsForProductType:(NSString *)productType {
+    NSString *pt = productType ?: @"";
+    BOOL isPad = [pt hasPrefix:@"iPad"];
+    BOOL isProTitanium = [pt isEqualToString:@"iPhone15,2"] || [pt isEqualToString:@"iPhone15,3"] // 14 Pro
+        || [pt isEqualToString:@"iPhone16,1"] || [pt isEqualToString:@"iPhone16,2"] // 15 Pro
+        || [pt isEqualToString:@"iPhone17,1"] || [pt isEqualToString:@"iPhone17,2"]; // 16 Pro
+    BOOL isSE = [pt isEqualToString:@"iPhone12,8"] || [pt isEqualToString:@"iPhone14,6"] || [pt isEqualToString:@"iPhone17,5"];
+    if (isProTitanium) {
+        return @[@"NaturalTitanium", @"BlueTitanium", @"WhiteTitanium", @"BlackTitanium", @"DesertTitanium"];
+    }
+    if (isSE) {
+        return @[@"Midnight", @"Starlight", @"(PRODUCT)RED", @"Black", @"White"];
+    }
+    if (isPad) {
+        return @[@"Space Black", @"Silver", @"Blue", @"Purple", @"Starlight"];
+    }
+    // 12–16 non-Pro
+    return @[@"Black", @"White", @"Blue", @"Green", @"Yellow", @"Pink", @"Purple", @"Midnight", @"Starlight", @"(PRODUCT)RED", @"Ultramarine", @"Teal"];
+}
+
++ (NSString *)modernUDIDPrefixForProductType:(NSString *)productType {
+    NSString *pt = productType ?: @"";
+    if ([pt hasPrefix:@"iPhone12,"]) return @"00008030";
+    if ([pt hasPrefix:@"iPhone13,"]) return @"00008101";
+    if ([pt hasPrefix:@"iPhone14,"]) return @"00008110";
+    if ([pt hasPrefix:@"iPhone15,"]) return @"00008120";
+    if ([pt hasPrefix:@"iPhone16,"]) return @"00008130";
+    if ([pt hasPrefix:@"iPhone17,"]) return @"00008140";
+    if ([pt hasPrefix:@"iPad"]) return @"00008110";
+    return @"";
 }
 
 + (NSArray<NSString *> *)wifiSSIDs {

@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 198: stream tar extract; async busy=409; delete/setParam afterSwitch; daemon rebind.
+Description: 199: align authenticity (US geo/carrier; model colors; mainstream iOS; modern UDID).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
