@@ -8,6 +8,7 @@
 #import "NDAMGParamClient.h"
 #import "NDDeviceProfile.h"
 #import "NDPaths.h"
+#import "ExportPickerViewController.h"
 #import <spawn.h>
 #import <sys/wait.h>
 
@@ -71,8 +72,8 @@ extern char **environ;
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"导出本机数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@".tar → %@", [NDPaths mediaExportDir]];
+            cell.textLabel.text = @"导出 NewDevice 环境";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"可多选 · .tar → %@", [NDPaths mediaExportDir]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
         } else {
             cell.textLabel.text = @"导入本机数据";
@@ -156,14 +157,43 @@ extern char **environ;
 }
 
 - (void)exportOwnData {
+    NSMutableArray *available = [NSMutableArray array];
+    for (NSString *n in [[NDRecordStore shared] allRecordNames]) {
+        if (![n isEqualToString:@"原始机器"]) [available addObject:n];
+    }
+    if (!available.count) {
+        [self alert:@"无法导出" message:@"没有可导出的环境（请先一键新机或导入 AMG）"];
+        return;
+    }
+    ExportPickerViewController *picker = [ExportPickerViewController new];
+    __weak typeof(self) weakSelf = self;
+    picker.onExport = ^(NSArray<NSString *> *names) {
+        [weakSelf exportSelectedRecords:names];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)exportSelectedRecords:(NSArray<NSString *> *)names {
+    if (!names.count) return;
     [NDPaths ensureDirectories];
-    NSError *err = nil;
-    BOOL slim = [NDConfig shared].slimExportStripMedia;
-    NSString *outDir = [NDPaths mediaExportDir];
-    NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:slim error:&err];
-    [self alert:n ? @"导出完成" : @"导出结果"
-        message:n ? [NSString stringWithFormat:@"已导出 %lu 条本机数据（.tar）\n\n爱思可见路径：\n%@\n\n另有副本：\n%@", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath]]
-                 : (err.localizedDescription ?: @"没有可导出的记录（请先一键新机生成记录）")];
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导出" message:@"打包 NewDevice 环境…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *err = nil;
+            BOOL slim = [NDConfig shared].slimExportStripMedia;
+            NSString *outDir = [NDPaths mediaExportDir];
+            NSUInteger n = [[NDRecordStore shared] exportRecordsNamed:names toDirectory:outDir slim:slim error:&err];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    [self alert:n ? @"导出完成" : @"导出结果"
+                        message:n ? [NSString stringWithFormat:@"已导出 %lu 个 NewDevice 环境（含 App 沙盒）\n\n爱思路径：\n%@\n\n另有副本：\n%@", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath]]
+                                 : (err.localizedDescription ?: @"导出失败")];
+                }];
+            });
+        });
+    }];
 }
 
 - (void)respring {

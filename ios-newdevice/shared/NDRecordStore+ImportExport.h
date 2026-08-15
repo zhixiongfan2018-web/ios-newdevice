@@ -27,10 +27,18 @@ NS_ASSUME_NONNULL_BEGIN
                                   importKeychain:(BOOL)importKeychain
                                            error:(NSError * _Nullable * _Nullable)error;
 
-/// Export records into AMG_tar (plaintext faker — no AMG runtime key needed to re-import).
+/// Export records into AMG_tar / Media export (plaintext faker — no AMG runtime key needed to re-import).
+/// Exports all records when `names` is nil/empty.
 - (NSUInteger)exportAMGRecordsToDirectory:(NSString *)dir
                                      slim:(BOOL)slim
                                     error:(NSError * _Nullable * _Nullable)error;
+
+/// Export selected NewDevice environments (after AMG import these are native records with apps/).
+/// Pass nil/empty `names` to export every record.
+- (NSUInteger)exportRecordsNamed:(NSArray<NSString *> * _Nullable)names
+                     toDirectory:(NSString *)dir
+                            slim:(BOOL)slim
+                           error:(NSError * _Nullable * _Nullable)error;
 
 /// Strip images/videos from a record's holographic apps backup.
 - (BOOL)slimRecord:(NSString *)name error:(NSError * _Nullable * _Nullable)error;

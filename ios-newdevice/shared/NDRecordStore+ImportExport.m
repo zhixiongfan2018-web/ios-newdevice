@@ -627,6 +627,33 @@
 - (NSUInteger)exportAMGRecordsToDirectory:(NSString *)dir
                                      slim:(BOOL)slim
                                     error:(NSError **)error {
+    return [self exportRecordsNamed:nil toDirectory:dir slim:slim error:error];
+}
+
+- (NSArray<NSString *> *)NDExportAppBundleIdsForRecord:(NSString *)name {
+    NSMutableOrderedSet *bids = [NSMutableOrderedSet orderedSet];
+    for (NSString *b in [self appBundleIdsForRecord:name] ?: @[]) {
+        if (b.length) [bids addObject:b];
+    }
+    for (NSString *b in [NDConfig shared].targetApps ?: @[]) {
+        if (b.length) [bids addObject:b];
+    }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+    for (NSString *e in ([fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[])) {
+        if ([e hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:[appsRoot stringByAppendingPathComponent:e] isDirectory:&isDir] && isDir) {
+            [bids addObject:e];
+        }
+    }
+    return bids.array;
+}
+
+- (NSUInteger)exportRecordsNamed:(NSArray<NSString *> *)names
+                     toDirectory:(NSString *)dir
+                            slim:(BOOL)slim
+                           error:(NSError **)error {
     // Default to Aisi-visible NewDevice export folder
     if (!dir.length) dir = [NDPaths mediaExportDir];
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -638,10 +665,28 @@
     [fm removeItemAtPath:stageRoot error:nil];
     [fm createDirectoryAtPath:stageRoot withIntermediateDirectories:YES attributes:nil error:nil];
 
-    NSUInteger exported = 0;
-    NSArray *names = [self allRecordNames];
-    NSArray *apps = [NDConfig shared].targetApps ?: @[];
-    // Mirror destinations (Aisi can see Media/*)
+    NSMutableArray *exportNames = [NSMutableArray array];
+    if (names.count) {
+        for (NSString *n in names) {
+            if (![n isKindOfClass:[NSString class]] || !n.length) continue;
+            if ([n isEqualToString:@"原始机器"]) continue;
+            [exportNames addObject:n];
+        }
+    } else {
+        for (NSString *n in [self allRecordNames]) {
+            if ([n isEqualToString:@"原始机器"]) continue;
+            [exportNames addObject:n];
+        }
+    }
+    if (!exportNames.count) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"NDRecordStore" code:40
+                                     userInfo:@{NSLocalizedDescriptionKey: @"没有可导出的环境"}];
+        }
+        return 0;
+    }
+
+    NSString *current = [self currentRecordName] ?: @"";
     NSArray *mirrorDirs = @[
         dir,
         [NDPaths mediaExportDir],
@@ -655,29 +700,47 @@
         [uniqueMirrors addObject:d];
     }
 
-    for (NSString *name in names) {
-        if ([name isEqualToString:@"原始机器"]) continue;
+    NSUInteger exported = 0;
+    for (NSString *name in exportNames) {
         NDDeviceProfile *p = [self profileNamed:name];
         if (!p) continue;
-        // Sanitize filename for tar
+
+        NSArray *bids = [self NDExportAppBundleIdsForRecord:name];
+        // Refresh live sandboxes into this NewDevice record before packing (esp. current env).
+        if ([name isEqualToString:current] && bids.count) {
+            [[NDAppDataManager shared] backupApps:bids toRecord:name error:nil];
+            [[NDAppDataManager shared] backupPasteboardToRecord:name];
+        }
+
+        // Prefer remark in filename when unique enough; keep record id in package.
         NSString *safe = [[name componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:"]] componentsJoinedByString:@"_"];
         if (!safe.length) safe = @"record";
+        if (p.remark.length) {
+            NSString *rSafe = [[p.remark componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"]] componentsJoinedByString:@"_"];
+            rSafe = [rSafe stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (rSafe.length) safe = [NSString stringWithFormat:@"%@__%@", rSafe, safe];
+        }
+
         NSString *out = [stageRoot stringByAppendingPathComponent:safe];
         [fm removeItemAtPath:out error:nil];
         if (![p writeAMGFakerToDirectory:out error:nil]) continue;
 
-        // Also copy NewDevice native profile.plist for round-trip
+        // NewDevice native profile (keeps remark + full identity for re-import)
         NSString *profileSrc = [NDPaths profilePathForRecord:name];
         if ([fm fileExistsAtPath:profileSrc]) {
             [fm copyItemAtPath:profileSrc toPath:[out stringByAppendingPathComponent:@"profile.plist"] error:nil];
+        } else {
+            [p writeToPath:[out stringByAppendingPathComponent:@"profile.plist"] error:nil];
         }
 
         NSDictionary *desc = @{
             @"title": name,
-            @"appName": apps ?: @[],
+            @"remark": p.remark ?: @"",
+            @"format": @"NewDevice",
+            @"appName": bids ?: @[],
         };
         [desc writeToFile:[out stringByAppendingPathComponent:@"description.plist"] atomically:YES];
-        [apps writeToFile:[out stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
+        [bids writeToFile:[out stringByAppendingPathComponent:@"selectApp.plist"] atomically:YES];
 
         NSString *ifa = [NDPaths ifaddrsPathForRecord:name];
         if ([fm fileExistsAtPath:ifa]) {
@@ -692,7 +755,12 @@
             [self NDCopyTree:ag to:[out stringByAppendingPathComponent:@"AppGroup"]];
         }
 
-        for (NSString *bid in apps) {
+        // Native NewDevice apps tree + AMG flat layout (same content)
+        NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+        if ([fm fileExistsAtPath:appsRoot]) {
+            [self NDCopyTree:appsRoot to:[out stringByAppendingPathComponent:@"apps"]];
+        }
+        for (NSString *bid in bids) {
             NSString *src = [NDPaths appsBackupDirForRecord:name bundleId:bid];
             if (![fm fileExistsAtPath:src]) continue;
             NSString *dst = [out stringByAppendingPathComponent:bid];
@@ -703,7 +771,6 @@
             [[NDAppDataManager shared] slimMediaInDirectory:out];
         }
 
-        // Pack as uncompressed .tar
         NSString *tarName = [safe stringByAppendingPathExtension:@"tar"];
         NSString *primaryTar = [dir stringByAppendingPathComponent:tarName];
         [fm removeItemAtPath:primaryTar error:nil];

@@ -670,10 +670,21 @@
         }
 
         if ([fun isEqualToString:@"exportAMGMedia"]) {
-            NSString *dir = query[@"dir"] ?: [NDRecordStore amgTarPath];
+            NSString *dir = query[@"dir"] ?: [NDPaths mediaExportDir];
             BOOL slim = query[@"slim"] ? [query[@"slim"] boolValue] : [NDConfig shared].slimExportStripMedia;
             NSError *err = nil;
-            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];
+            NSUInteger n = 0;
+            NSString *namesCSV = query[@"recordNames"] ?: query[@"names"] ?: @"";
+            if (namesCSV.length) {
+                NSMutableArray *picked = [NSMutableArray array];
+                for (NSString *part in [namesCSV componentsSeparatedByString:@","]) {
+                    NSString *n = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                    if (n.length) [picked addObject:n];
+                }
+                n = [[NDRecordStore shared] exportRecordsNamed:picked toDirectory:dir slim:slim error:&err];
+            } else {
+                n = [[NDRecordStore shared] exportAMGRecordsToDirectory:dir slim:slim error:&err];
+            }
             body = [NSString stringWithFormat:@"%lu\n%@", (unsigned long)n, dir];
             [[NDRecordStore shared] writeResultCode:(n > 0 || !err) ? 1 : 0];
             done(body, (n > 0 || !err) ? 200 : 500);

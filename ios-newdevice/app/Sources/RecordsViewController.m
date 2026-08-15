@@ -9,6 +9,7 @@
 #import "NDPaths.h"
 #import "NDConfig.h"
 #import "ProfileDetailViewController.h"
+#import "ExportPickerViewController.h"
 
 @interface RecordsViewController ()
 @property (nonatomic, copy) NSArray<NSString *> *names;
@@ -41,10 +42,13 @@
     [sheet addAction:[UIAlertAction actionWithTitle:@"从 AMG_tar 导入（官方导出路径）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self importFromAMG];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录 (NewDevice)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出选中环境 (NewDevice)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self exportSelectedNewDevice];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出当前记录 plist" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportCurrent];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出到 AMG_tar (明文 faker)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出全部到 AMG_tar" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self exportAMGFolder];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"强制写入当前记录 App 沙盒" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -91,6 +95,52 @@
                 }];
             });
         }];
+    }];
+}
+
+- (void)exportSelectedNewDevice {
+    NSMutableArray *available = [NSMutableArray array];
+    for (NSString *n in [[NDRecordStore shared] allRecordNames]) {
+        if (![n isEqualToString:@"原始机器"]) [available addObject:n];
+    }
+    if (!available.count) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"无法导出" message:@"没有可导出的环境" preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    ExportPickerViewController *picker = [ExportPickerViewController new];
+    __weak typeof(self) weakSelf = self;
+    picker.onExport = ^(NSArray<NSString *> *names) {
+        [weakSelf runExportNamed:names];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)runExportNamed:(NSArray<NSString *> *)names {
+    if (!names.count) return;
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导出" message:@"打包 NewDevice 环境…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *err = nil;
+            NSString *outDir = [NDPaths mediaExportDir];
+            NSUInteger n = [[NDRecordStore shared] exportRecordsNamed:names
+                                                          toDirectory:outDir
+                                                                 slim:[NDConfig shared].slimExportStripMedia
+                                                                error:&err];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导出完成" : @"导出结果"
+                                                                               message:n ? [NSString stringWithFormat:@"已导出 %lu 个 NewDevice 环境\n%@", (unsigned long)n, outDir]
+                                                                                        : (err.localizedDescription ?: @"失败")
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:a animated:YES completion:nil];
+                }];
+            });
+        });
     }];
 }
 
