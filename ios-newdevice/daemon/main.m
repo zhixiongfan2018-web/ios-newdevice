@@ -38,6 +38,16 @@ int main(int argc, char *argv[]) {
         };
         publishRuntime();
 
+        // Ensure NewDevice owns target-app inject (Venmo etc.) — exclude from amg.plist.
+        @try {
+            [[NDConfig shared] reload];
+            NSArray *targets = [NDConfig shared].targetApps ?: @[];
+            if (!targets.count) targets = @[ @"net.kortina.labs.Venmo" ];
+            [[NDAppDataManager shared] syncInjectFilterWithTargetApps:targets];
+        } @catch (__unused NSException *e) {
+            NSLog(@"[newdeviced] syncInjectFilter failed: %@", e);
+        }
+
         // If App holds the port, keep waiting and rebind when it exits so API
         // survives App death (scripts / AMG keep working via daemon).
         for (;;) {

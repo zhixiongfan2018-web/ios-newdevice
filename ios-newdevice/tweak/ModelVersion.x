@@ -194,16 +194,13 @@ static int hooked_uname(struct utsname *buf) {
 }
 
 %ctor {
-    // Venmo: never hook UIDevice systemVersion/model/CTCarrier.
-    // Crash reports (Aug 14-15) repeatedly fault on -[UIDevice systemVersion] /
-    // systemName with NewDevice+amg both injected (PAC / SIGBUS / SIGSEGV).
-    // Sys version for Venmo comes from MG ProductVersion whitelist in DeviceIdentity.x.
-    if (!NDIsVenmoHost()) {
-        NDRunAfterUIKitReady(^{
-            [[NDTweakState shared] reload];
-            %init(NDModelVersionObjC);
-        });
-    }
+    // AMG-style: ObjC model/carrier/systemVersion in Venmo when NewDevice is sole owner.
+    // If amg.dylib is co-injected, skip (AMG already hooks the same UIDevice→MG chain).
+    NDRunVenmoSafeObjCHooksAfterReady(^{
+        if (NDIsVenmoHost() && NDAmgDylibLoaded()) return;
+        [[NDTweakState shared] reload];
+        %init(NDModelVersionObjC);
+    });
     // sysctl/uname — never inside Venmo (SIGILL on iOS 18 + ElleKit).
     NDRunRiskyCHooksAfterUIKitReady(^{
         MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);

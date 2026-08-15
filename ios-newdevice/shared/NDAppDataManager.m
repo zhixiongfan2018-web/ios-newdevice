@@ -954,10 +954,12 @@ extern char **environ;
 
 - (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds {
     NSMutableOrderedSet *bundles = [NSMutableOrderedSet orderedSetWithObject:@"com.apple.springboard"];
+    NSMutableOrderedSet *targets = [NSMutableOrderedSet orderedSet];
     for (NSString *b in bundleIds ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
         if ([b isEqualToString:@"com.local.newdevice"]) continue;
         [bundles addObject:b];
+        [targets addObject:b];
     }
     NSDictionary *plist = @{
         @"Filter": @{
@@ -994,6 +996,51 @@ extern char **environ;
         [lines addObject:[NSString stringWithFormat:@"%@ %@", ok ? @"ok" : @"fail", writePath]];
         if (ok) [NDPaths makePathWorldReadable:writePath];
     }
+
+    // Sole-owner inject: NewDevice target apps must not also load amg.dylib
+    // (crash corpus: every Venmo IPS had NewDevice+amg; UIDevice.systemVersion→MG PAC).
+    NSArray *amgPaths = @[
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/amg.plist",
+        @"/var/jb/usr/lib/TweakInject/amg.plist",
+    ];
+    for (NSString *amgPath in amgPaths) {
+        if (![fm fileExistsAtPath:amgPath]) {
+            [lines addObject:[NSString stringWithFormat:@"amg-miss %@", amgPath]];
+            continue;
+        }
+        NSMutableDictionary *amg = [[NSDictionary dictionaryWithContentsOfFile:amgPath] mutableCopy];
+        if (![amg isKindOfClass:[NSMutableDictionary class]]) {
+            [lines addObject:[NSString stringWithFormat:@"amg-bad %@", amgPath]];
+            continue;
+        }
+        NSMutableDictionary *filter = [amg[@"Filter"] isKindOfClass:[NSDictionary class]]
+            ? [amg[@"Filter"] mutableCopy]
+            : [NSMutableDictionary dictionary];
+        NSMutableArray *amgBundles = [filter[@"Bundles"] isKindOfClass:[NSArray class]]
+            ? [filter[@"Bundles"] mutableCopy]
+            : [NSMutableArray array];
+        NSMutableOrderedSet *reject = [NSMutableOrderedSet orderedSet];
+        if ([filter[@"RejectList"] isKindOfClass:[NSArray class]]) {
+            [reject addObjectsFromArray:filter[@"RejectList"]];
+        }
+        NSUInteger removed = 0;
+        for (NSString *bid in targets.array) {
+            while ([amgBundles containsObject:bid]) {
+                [amgBundles removeObject:bid];
+                removed++;
+            }
+            [reject addObject:bid];
+        }
+        filter[@"Bundles"] = amgBundles;
+        filter[@"RejectList"] = reject.array;
+        amg[@"Filter"] = filter;
+        BOOL ok = [amg writeToFile:amgPath atomically:YES];
+        if (ok) [NDPaths makePathWorldReadable:amgPath];
+        [lines addObject:[NSString stringWithFormat:@"amg-%@ %@ removed=%lu reject=%lu",
+                          ok ? @"ok" : @"fail", amgPath,
+                          (unsigned long)removed, (unsigned long)reject.count]];
+    }
+
     NSString *report = [lines componentsJoinedByString:@"\n"];
     [report writeToFile:@"/var/mobile/Media/NewDevice/last-inject-filter.txt"
              atomically:YES encoding:NSUTF8StringEncoding error:nil];

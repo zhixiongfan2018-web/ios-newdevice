@@ -185,6 +185,10 @@
                 [adm restorePasteboardFromRecord:current];
             }
         }
+
+        // Keep NewDevice sole inject owner for targets (exclude from amg.plist).
+        [[NDAppDataManager shared] syncInjectFilterWithTargetApps:apps ?: (cfg.targetApps ?: @[])];
+
         // Airplane is not isolation — run async so switch ACK is not blocked.
         // After IP may change, realign GPS/timezone to the new egress IP.
         if (cfg.smartAirplane) {
@@ -474,6 +478,16 @@
             body = [targets componentsJoinedByString:@"\n"];
             [[NDRecordStore shared] writeResultCode:1];
             done(body ?: @"", 200);
+            return;
+        }
+
+        if ([fun isEqualToString:@"syncInjectFilter"] || [fun isEqualToString:@"syncAmgFilter"]) {
+            [[NDConfig shared] reload];
+            NSArray *targets = [NDConfig shared].targetApps ?: @[];
+            if (!targets.count) targets = @[ @"net.kortina.labs.Venmo" ];
+            body = [[NDAppDataManager shared] syncInjectFilterWithTargetApps:targets] ?: @"";
+            [[NDRecordStore shared] writeResultCode:body.length ? 1 : 0];
+            done(body, body.length ? 200 : 500);
             return;
         }
 

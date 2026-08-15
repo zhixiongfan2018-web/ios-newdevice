@@ -2,6 +2,8 @@
 #define NDSafeLoad_h
 
 #import <Foundation/Foundation.h>
+#import <mach-o/dyld.h>
+#import <string.h>
 
 /// Return YES if NewDevice tweak must NOT load in this process.
 /// Keeps Sileo / Dopamine / package managers stable so jailbreak tooling is not disrupted.
@@ -51,6 +53,19 @@ static inline BOOL NDIsVenmoHost(void) {
     if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) return YES;
     NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
     if ([proc isEqualToString:@"Venmo"]) return YES;
+    return NO;
+}
+
+/// AMG already owns MG/UIDevice in the same process — double-hook = Venmo SIGBUS/PAC.
+/// Prefer excluding targets from amg.plist (syncInjectFilter); this is the runtime safety net.
+static inline BOOL NDAmgDylibLoaded(void) {
+    uint32_t n = _dyld_image_count();
+    for (uint32_t i = 0; i < n; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) continue;
+        // Match rootless + classic paths: .../amg.dylib
+        if (strstr(name, "amg.dylib") != NULL) return YES;
+    }
     return NO;
 }
 

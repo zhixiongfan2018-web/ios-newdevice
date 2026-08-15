@@ -245,22 +245,28 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         [[NDTweakState shared] reload];
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
-        %init(NDDeviceIdentity);
+        BOOL amgOwns = NDIsVenmoHost() && NDAmgDylibLoaded();
+        // Co-inject with amg: do NOT re-hook MG/UIDevice (PAC/SIGBUS). AMG serves identity;
+        // NewDevice still owns holographic akc via KeychainRestore. Prefer excluding targets
+        // from amg.plist so this branch is rare and NewDevice owns the full AMG-style surface.
+        if (!amgOwns) {
+            %init(NDDeviceIdentity);
 
-        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-        if (gestalt) {
-            void *sym = dlsym(gestalt, "MGCopyAnswer");
-            if (sym) {
-                MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
-            }
-            void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
-            if (symErr) {
-                MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+            void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+            if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+            if (gestalt) {
+                void *sym = dlsym(gestalt, "MGCopyAnswer");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+                }
+                void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+                if (symErr) {
+                    MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+                }
             }
         }
 
-        // Marker so probeVenmo can confirm identity hooks installed.
+        // Marker so probeVenmo can confirm identity path.
         @try {
             NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
             if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
@@ -268,11 +274,12 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
                 [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
                 NDDeviceProfile *p = [NDTweakState shared].profile;
                 NSString *line = [NSString stringWithFormat:
-                                  @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\ntime=%@\n",
+                                  @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\namgOwns=%@\ntime=%@\n",
                                   bid,
                                   p.IDFA ?: @"",
                                   p.ProductType ?: @"",
                                   p.SystemVer ?: @"",
+                                  amgOwns ? @"1" : @"0",
                                   [NSDate date]];
                 [line writeToFile:[docs stringByAppendingPathComponent:@"nd-identity-ok.txt"]
                        atomically:YES encoding:NSUTF8StringEncoding error:nil];

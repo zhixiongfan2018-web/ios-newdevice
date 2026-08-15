@@ -27,6 +27,7 @@ NS_ASSUME_NONNULL_BEGIN
                                 error:(NSError * _Nullable * _Nullable)error;
 
 /// Rewrite NewDevice.plist Filter.Bundles = SpringBoard + targetApps so selected apps get inject.
+/// Also moves those targets onto amg.plist RejectList so NewDevice alone owns identity+akc (AMG-style, no double-hook crash).
 - (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds;
 
 /// Human-readable report from the last restore (also written to Media/NewDevice/last-restore.txt).
