@@ -1186,6 +1186,98 @@ extern char **environ;
     return [self purgeVenmoSessionInApp];
 }
 
+- (void)NDStageVenmoPendingClearFlag {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    for (NSString *dir in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-clear-kc"],
+             @"/var/mobile/Media/NewDevice/pending-clear-kc",
+         ]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *flag = [dir stringByAppendingPathComponent:vbid];
+        [@"1" writeToFile:flag atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [NDPaths makePathWorldReadable:flag];
+        [NDPaths makePathWorldReadable:dir];
+    }
+}
+
+- (NSString *)bindVenmoKeychainToCurrentRecord {
+    // Environment isolation: drop previous Venmo session tokens, then apply this record's akc.
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    NSMutableArray *lines = [NSMutableArray array];
+    NSString *rec = [[NDRecordStore shared] currentRecordName] ?: @"";
+    [lines addObject:[NSString stringWithFormat:@"record=%@", rec.length ? rec : @"(none)"]];
+
+    [self terminateApps:@[vbid]];
+    [self NDStageVenmoPendingClearFlag];
+    [lines addObject:@"pending-clear-kc=staged"];
+
+    // Ensure live Documents has akc + pending-akc for this record.
+    if (rec.length && ![rec isEqualToString:@"原始机器"]) {
+        NSString *kc = [self restoreKeychainHintsForApps:@[vbid] fromRecord:rec];
+        [lines addObject:kc ?: @"akc=missing"];
+    }
+
+    for (NSString *p in @[
+             @"/var/jb/Library/NewDevice/last-venmo-kc-clear.txt",
+             @"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt",
+         ]) {
+        [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+    }
+    NSString *live = [self containerPathForBundleId:vbid];
+    NSString *akcOk = live.length
+        ? [[live stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"nd-akc-ok.txt"]
+        : nil;
+    if (akcOk.length) [[NSFileManager defaultManager] removeItemAtPath:akcOk error:nil];
+
+    @try {
+        Class WS = NSClassFromString(@"LSApplicationWorkspace");
+        if (WS && [WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) {
+            id (*msg0)(Class, SEL) = (void *)objc_msgSend;
+            id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
+            SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
+            if (ws && [ws respondsToSelector:openSel]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, vbid);
+                [lines addObject:@"launched=Venmo"];
+            }
+        }
+    } @catch (__unused NSException *ex) {
+        [lines addObject:@"launch=failed"];
+    }
+
+    BOOL cleared = NO, restored = NO;
+    for (NSInteger i = 0; i < 50; i++) { // ~25s
+        [NSThread sleepForTimeInterval:0.5];
+        NSString *clr = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt"
+                                                  encoding:NSUTF8StringEncoding error:nil];
+        if (!clr.length) {
+            clr = [NSString stringWithContentsOfFile:@"/var/jb/Library/NewDevice/last-venmo-kc-clear.txt"
+                                            encoding:NSUTF8StringEncoding error:nil];
+        }
+        if (!cleared && clr.length && [clr containsString:@"in-app-clear"]) {
+            cleared = YES;
+            [lines addObject:[NSString stringWithFormat:@"clear OK t=%.1fs", (i + 1) * 0.5]];
+        }
+        if (akcOk.length) {
+            NSString *ok = [NSString stringWithContentsOfFile:akcOk encoding:NSUTF8StringEncoding error:nil];
+            if (ok.length && [ok containsString:@"ok="] && ![ok containsString:@"ok=0"]) {
+                restored = YES;
+                [lines addObject:[NSString stringWithFormat:@"akc OK t=%.1fs", (i + 1) * 0.5]];
+                break;
+            }
+        }
+        if (cleared && i >= 20 && !akcOk.length) break;
+    }
+    if (!cleared) [lines addObject:@"clear TIMEOUT"];
+    if (!restored) [lines addObject:@"akc TIMEOUT — open Venmo once"];
+
+    [self terminateApps:@[vbid]];
+    NSString *report = [lines componentsJoinedByString:@"\n"];
+    [report writeToFile:@"/var/mobile/Media/NewDevice/last-venmo-bind.txt"
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return report;
+}
+
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *pairs = @[

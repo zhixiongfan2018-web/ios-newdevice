@@ -274,18 +274,16 @@ static void NDApplyPendingKeychainClear(void) {
     [fm createDirectoryAtPath:homeDocs withIntermediateDirectories:YES attributes:nil error:nil];
     [report writeToFile:[homeDocs stringByAppendingPathComponent:@"nd-kc-cleared.txt"]
              atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    // Remove pending flags so next launch is idle
+    // Remove pending-clear only. Do NOT delete pending-akc here — switch isolation
+    // stages clear+akc together and restores in the same Venmo launch after clear.
     for (NSString *p in @[
              @"/var/jb/Library/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
              @"/var/mobile/Media/NewDevice/pending-clear-kc/net.kortina.labs.Venmo",
-             @"/var/jb/Library/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
-             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
          ]) {
         [fm removeItemAtPath:p error:nil];
     }
-    for (NSString *name in @[@"akc.plist", @"nd-akc-ok.txt"]) {
-        [fm removeItemAtPath:[homeDocs stringByAppendingPathComponent:name] error:nil];
-    }
+    // Drop stale success marker so a following restore in this pass can rewrite it.
+    [fm removeItemAtPath:[homeDocs stringByAppendingPathComponent:@"nd-akc-ok.txt"] error:nil];
     NSLog(@"[NewDevice] in-app Venmo keychain clear waves=%lu", (unsigned long)waves);
 }
 
@@ -392,23 +390,25 @@ static void NDApplyPendingKeychainRestore(void) {
 
                 if (wantClear) {
                     NDApplyPendingKeychainClear();
-                    return; // never restore in the same pass
+                    // Fall through: switching environments stages clear+akc together so
+                    // one Venmo launch drops the previous session then applies this record.
                 }
 
-                // If a prior successful restore exists, don't re-hit SecItem (races / SIGBUS).
-                NSString *marker = [homeDocs stringByAppendingPathComponent:@"nd-akc-ok.txt"];
-                NSString *prev = [NSString stringWithContentsOfFile:marker encoding:NSUTF8StringEncoding error:nil];
-                BOOL alreadyOK = (prev.length && [prev rangeOfString:@"ok="].location != NSNotFound &&
-                                  ![prev containsString:@"ok=0"]);
-                if (alreadyOK) {
-                    NSRange r = [prev rangeOfString:@"ok="];
-                    if (r.location != NSNotFound) {
-                        NSInteger n = [[prev substringFromIndex:r.location + 3] integerValue];
-                        if (n > 0) return;
+                if (wantRestore) {
+                    // If a prior successful restore exists, don't re-hit SecItem (races / SIGBUS).
+                    NSString *marker = [homeDocs stringByAppendingPathComponent:@"nd-akc-ok.txt"];
+                    NSString *prev = [NSString stringWithContentsOfFile:marker encoding:NSUTF8StringEncoding error:nil];
+                    BOOL alreadyOK = (prev.length && [prev rangeOfString:@"ok="].location != NSNotFound &&
+                                      ![prev containsString:@"ok=0"]);
+                    if (alreadyOK) {
+                        NSRange r = [prev rangeOfString:@"ok="];
+                        if (r.location != NSNotFound) {
+                            NSInteger n = [[prev substringFromIndex:r.location + 3] integerValue];
+                            if (n > 0 && !wantClear) return;
+                        }
                     }
+                    NDApplyPendingKeychainRestore();
                 }
-
-                NDApplyPendingKeychainRestore();
             } @catch (__unused NSException *ex) {
             }
         };

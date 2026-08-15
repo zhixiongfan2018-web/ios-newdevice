@@ -125,6 +125,11 @@
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
                 [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
+                // Strict isolation: previous Venmo Keychain must not leak into this record.
+                if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+                    NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord];
+                    NSLog(@"[NewDevice] bindVenmo %@", bind);
+                }
             } else if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
                 // Empty 一键新机 / 原始机器: must clear Venmo Keychain in-app or the
                 // old account survives uninstall+redownload.

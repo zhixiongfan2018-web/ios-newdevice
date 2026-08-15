@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 178: in-app Venmo keychain purge (uninstall-proof session clear).
+Description: 179: Venmo no MG hooks (crash fix); bind keychain per record on switch.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -65,6 +65,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Stage pending-clear-kc, launch Venmo briefly, wait for in-app clear marker, wipe sandbox again.
 - (NSString *)purgeVenmoSessionInApp;
 
+/// After restoring a record's Venmo files: wipe previous Keychain session then apply this record's akc.
+- (NSString *)bindVenmoKeychainToCurrentRecord;
+
 /// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled;
 
