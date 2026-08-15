@@ -194,10 +194,13 @@ static int hooked_uname(struct utsname *buf) {
 }
 
 %ctor {
-    // AMG-style: ObjC model/carrier/systemVersion in Venmo when NewDevice is sole owner.
-    // If amg.dylib is co-injected, skip (AMG already hooks the same UIDevice→MG chain).
-    NDRunVenmoSafeObjCHooksAfterReady(^{
-        if (NDIsVenmoHost() && NDAmgDylibLoaded()) return;
+    // AMG config on this phone: fakeDeviceModel=0, fakeSystemVer=1.
+    // Venmo: do NOT install UIDevice model/systemVersion ObjC hooks (crash surface).
+    // System/model identity for Venmo comes from DeviceIdentity MG whitelist (ProductType/ProductVersion).
+    if (NDIsVenmoHost()) {
+        return;
+    }
+    NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
         %init(NDModelVersionObjC);
     });

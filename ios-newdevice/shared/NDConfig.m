@@ -24,7 +24,7 @@
     self.randomLocation = YES;
     self.locationFromIP = YES;
     self.smartLocationOffset = YES;
-    self.smartAirplane = YES;
+    self.smartAirplane = NO; // match AMG machineNewAirplaneMode=0 on this device
     // Default OFF so install/respring never hides JB paths from tooling
     self.jailbreakHideBasic = NO;
     self.jailbreakHideDeep = NO;

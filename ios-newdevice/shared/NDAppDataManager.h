@@ -26,8 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
                         onlyBundleIds:(NSArray<NSString *> * _Nullable)only
                                 error:(NSError * _Nullable * _Nullable)error;
 
-/// Rewrite NewDevice.plist Filter.Bundles = SpringBoard + targetApps so selected apps get inject.
-/// Also moves those targets onto amg.plist RejectList so NewDevice alone owns identity+akc (AMG-style, no double-hook crash).
+/// Rewrite NewDevice.plist Filter.Bundles = SpringBoard + targetApps.
+/// Coexist with AMG: scope amg.plist Bundles from AMG selectApp minus ND targets (never disable amg.dylib).
 - (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds;
 
 /// Human-readable report from the last restore (also written to Media/NewDevice/last-restore.txt).
