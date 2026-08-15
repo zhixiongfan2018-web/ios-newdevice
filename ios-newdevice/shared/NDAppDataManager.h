@@ -90,6 +90,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// killall SpringBoard (userspace respring).
 - (NSString *)respringSpringBoard;
 
+/// Install a local .deb (Media/CrashReporter path). Tries dpkg / apt / jbctl as available.
+- (NSString *)installDebAtPath:(NSString *)path;
+
 /// Best-effort: open app once so iOS creates its data container (restoreHolo only).
 - (void)tryLaunchAppToCreateContainer:(NSString *)bundleId;
 

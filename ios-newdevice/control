@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 205: root daemon sync-inject excludes Venmo from amg.plist; keep AMG-style identity + holographic akc.
+Description: 206: remote installDeb API + root sync-inject; AMG-style Venmo identity + holographic akc.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

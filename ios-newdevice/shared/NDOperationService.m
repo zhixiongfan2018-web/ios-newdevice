@@ -473,6 +473,15 @@
             return;
         }
 
+        if ([fun isEqualToString:@"installDeb"] || [fun isEqualToString:@"upgradeDeb"] || [fun isEqualToString:@"installNewDeviceDeb"]) {
+            NSString *path = query[@"path"] ?: query[@"filePath"] ?: @"";
+            body = [[NDAppDataManager shared] installDebAtPath:path] ?: @"";
+            BOOL ok = [body containsString:@"OK installed"];
+            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
+            done(body, ok ? 200 : 500);
+            return;
+        }
+
         if ([fun isEqualToString:@"getTargetApps"]) {
             NSArray *targets = [NDConfig shared].targetApps ?: [NSArray array];
             body = [targets componentsJoinedByString:@"\n"];

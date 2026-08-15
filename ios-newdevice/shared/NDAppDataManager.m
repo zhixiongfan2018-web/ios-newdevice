@@ -1562,6 +1562,82 @@ extern char **environ;
     return @"respring scheduled";
 }
 
+- (NSString *)installDebAtPath:(NSString *)path {
+    NSMutableArray *lines = [NSMutableArray array];
+    if (!path.length) {
+        // Prefer staged upgrade packages under Media/NewDevice
+        NSArray *cands = @[
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-205.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-205.deb",
+            @"/var/mobile/Library/Logs/CrashReporter/NewDevice-1.0.0-205.deb",
+            @"/var/mobile/Media/NewDevice/NewDevice.deb",
+            @"/var/mobile/Media/Downloads/NewDevice.deb",
+        ];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        for (NSString *c in cands) {
+            if ([fm fileExistsAtPath:c]) { path = c; break; }
+        }
+    }
+    if (!path.length || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        return @"FAIL missing deb (place NewDevice-*.deb under /var/mobile/Media/NewDevice/)";
+    }
+    [lines addObject:[NSString stringWithFormat:@"deb=%@", path]];
+
+    // Prefer absolute dpkg; fall back to apt-get install.
+    NSArray *attempts = @[
+        @[ @"/var/jb/usr/bin/dpkg", @"-i", path ],
+        @[ @"/usr/bin/dpkg", @"-i", path ],
+        @[ @"/var/jb/usr/bin/apt-get", @"install", @"-y", path ],
+        @[ @"/var/jb/basebin/jbctl", @"internal", @"launch_daemons" ], // touch only; real install above
+    ];
+    BOOL anySpawn = NO;
+    for (NSArray *args in attempts) {
+        if (args.count < 2) continue;
+        NSString *bin = args[0];
+        if (![[NSFileManager defaultManager] isExecutableFileAtPath:bin]) {
+            [lines addObject:[NSString stringWithFormat:@"skip missing %@", bin]];
+            continue;
+        }
+        // Skip jbctl placeholder
+        if ([bin containsString:@"jbctl"]) continue;
+
+        pid_t pid = 0;
+        char **argv = calloc(args.count + 1, sizeof(char *));
+        for (NSUInteger i = 0; i < args.count; i++) {
+            argv[i] = (char *)[args[i] UTF8String];
+        }
+        argv[args.count] = NULL;
+        int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
+        free(argv);
+        [lines addObject:[NSString stringWithFormat:@"spawn %@ rc=%d pid=%d", bin, rc, (int)pid]];
+        if (rc == 0) {
+            anySpawn = YES;
+            int status = 0;
+            waitpid(pid, &status, 0);
+            [lines addObject:[NSString stringWithFormat:@"wait status=%d", status]];
+            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                [lines addObject:@"OK installed"];
+                break;
+            }
+        }
+    }
+    if (!anySpawn) [lines addObject:@"FAIL no dpkg/apt executable spawned (need root daemon)"];
+
+    // After success, sync inject filter (exclude Venmo from amg).
+    @try {
+        [[NDConfig shared] reload];
+        NSArray *targets = [NDConfig shared].targetApps ?: @[ @"net.kortina.labs.Venmo" ];
+        NSString *sync = [self syncInjectFilterWithTargetApps:targets];
+        if (sync.length) [lines addObject:sync];
+    } @catch (__unused NSException *ex) {
+    }
+
+    NSString *body = [lines componentsJoinedByString:@"\n"];
+    [body writeToFile:@"/var/mobile/Media/NewDevice/last-deb-install.txt"
+           atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return body;
+}
+
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {
     if (!groupId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
