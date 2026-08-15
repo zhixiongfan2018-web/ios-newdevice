@@ -129,6 +129,76 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     }
 }
 
+- (NSDate *)sortDateForRecordName:(NSString *)name {
+    if (!name.length) return [NSDate distantPast];
+    // Prefer profile createdAt (written as en_US_POSIX string).
+    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:[NDPaths profilePathForRecord:name]];
+    id created = dict[@"createdAt"];
+    if ([created isKindOfClass:[NSDate class]]) return (NSDate *)created;
+    if ([created isKindOfClass:[NSString class]] && [(NSString *)created length]) {
+        static NSDateFormatter *f;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            f = [NSDateFormatter new];
+            f.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+            f.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+            f.dateFormat = @"yyyy-MM-dd'T'HH:mm:ssZ";
+        });
+        NSDate *d = [f dateFromString:created];
+        if (!d) {
+            static NSDateFormatter *f2;
+            static dispatch_once_t once2;
+            dispatch_once(&once2, ^{
+                f2 = [NSDateFormatter new];
+                f2.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+                f2.dateFormat = @"yyyy-MM-dd HH:mm:ss ZZZZ";
+            });
+            d = [f2 dateFromString:created];
+        }
+        // NDDeviceProfile write uses: yyyy-MM-dd HH:mm:ss ZZZZ or similar — also try common forms
+        if (!d) {
+            static NSDateFormatter *f3;
+            static dispatch_once_t once3;
+            dispatch_once(&once3, ^{
+                f3 = [NSDateFormatter new];
+                f3.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+                f3.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+            });
+            d = [f3 dateFromString:created];
+        }
+        if (d) return d;
+    }
+
+    // Parse embedded yyyy-MM-dd-HH-mm-ss from folder name (一键新机 / AMG).
+    static NSRegularExpression *re;
+    static dispatch_once_t reOnce;
+    dispatch_once(&reOnce, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"(\\d{4}-\\d{2}-\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})"
+                                                       options:0 error:nil];
+    });
+    NSTextCheckingResult *m = [re firstMatchInString:name options:0 range:NSMakeRange(0, name.length)];
+    if (m) {
+        NSString *stamp = [NSString stringWithFormat:@"%@-%@-%@-%@",
+                           [name substringWithRange:[m rangeAtIndex:1]],
+                           [name substringWithRange:[m rangeAtIndex:2]],
+                           [name substringWithRange:[m rangeAtIndex:3]],
+                           [name substringWithRange:[m rangeAtIndex:4]]];
+        static NSDateFormatter *nf;
+        static dispatch_once_t nfOnce;
+        dispatch_once(&nfOnce, ^{
+            nf = [NSDateFormatter new];
+            nf.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+            nf.timeZone = [NSTimeZone localTimeZone];
+            nf.dateFormat = @"yyyy-MM-dd-HH-mm-ss";
+        });
+        NSDate *parsed = [nf dateFromString:stamp];
+        if (parsed) return parsed;
+    }
+
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[NDPaths profilePathForRecord:name] error:nil];
+    return attrs.fileModificationDate ?: [NSDate distantPast];
+}
+
 - (NSArray<NSString *> *)allRecordNames {
     [self purgeAccidentalImportExportRecords];
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -141,13 +211,25 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
             [names addObject:name];
         }
     }
-    [names sortUsingSelector:@selector(localizedCompare:)];
-    // Keep 原始机器 first if present
-    NSUInteger idx = [names indexOfObject:@"原始机器"];
-    if (idx != NSNotFound && idx != 0) {
-        [names removeObjectAtIndex:idx];
-        [names insertObject:@"原始机器" atIndex:0];
+
+    // Stable UX order: 原始机器 first, then newest → oldest (not alphabetic chaos).
+    NSMutableDictionary<NSString *, NSDate *> *dates = [NSMutableDictionary dictionary];
+    for (NSString *n in names) {
+        if ([n isEqualToString:@"原始机器"]) continue;
+        dates[n] = [self sortDateForRecordName:n] ?: [NSDate distantPast];
     }
+    [names sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        BOOL aOrig = [a isEqualToString:@"原始机器"];
+        BOOL bOrig = [b isEqualToString:@"原始机器"];
+        if (aOrig && !bOrig) return NSOrderedAscending;
+        if (!aOrig && bOrig) return NSOrderedDescending;
+        if (aOrig && bOrig) return NSOrderedSame;
+        NSDate *da = dates[a] ?: [NSDate distantPast];
+        NSDate *db = dates[b] ?: [NSDate distantPast];
+        NSComparisonResult byDate = [db compare:da]; // newest first
+        if (byDate != NSOrderedSame) return byDate;
+        return [a localizedStandardCompare:b];
+    }];
     return names;
 }
 

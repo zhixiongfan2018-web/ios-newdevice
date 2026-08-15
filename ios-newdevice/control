@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 195: pick env before new-device; renew selected; async result body; iOS18+; export tar fix.
+Description: 196: record list newest-first; fix createdAt reshuffle; getRecordParam current fallback.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

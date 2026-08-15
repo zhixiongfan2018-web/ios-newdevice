@@ -245,12 +245,17 @@
     if (![name isEqualToString:@"原始机器"]) {
         NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
         NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+        NSUInteger appN = 0;
+        for (NSString *e in apps) {
+            if ([e hasPrefix:@"."]) continue;
+            appN++;
+        }
         NSString *venmo = [appsRoot stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
         NSString *docsAkc = [[venmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"];
         BOOL akc = [[NSFileManager defaultManager] fileExistsAtPath:docsAkc]
             || [[NSFileManager defaultManager] fileExistsAtPath:[venmo stringByAppendingPathComponent:@"akc.plist"]];
         appsHint = [NSString stringWithFormat:@" · apps:%lu%@%@",
-                    (unsigned long)apps.count, akc ? @" akc" : @"", apps.count ? @"" : @" (空)"];
+                    (unsigned long)appN, akc ? @" akc" : @"", appN ? @"" : @" (空)"];
     }
     NSString *meta = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
     NSString *udidShort = p.UDID.length > 6 ? [p.UDID substringFromIndex:p.UDID.length - 6] : (p.UDID ?: @"");
@@ -261,12 +266,13 @@
         cell.detailTextLabel.text = meta;
     }
 
+    UIImageSymbolConfiguration *sym = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightRegular];
     if (current) {
-        cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
+        cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.circle.fill"] imageWithConfiguration:sym];
         cell.imageView.tintColor = [NDTheme accent];
         cell.textLabel.textColor = [NDTheme accent];
     } else {
-        cell.imageView.image = [UIImage systemImageNamed:@"circle"];
+        cell.imageView.image = [[UIImage systemImageNamed:@"circle"] imageWithConfiguration:sym];
         cell.imageView.tintColor = [UIColor tertiaryLabelColor];
         cell.textLabel.textColor = [UIColor labelColor];
     }

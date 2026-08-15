@@ -598,10 +598,16 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         p.createdAt = created;
     } else if ([created isKindOfClass:[NSString class]]) {
         NSDateFormatter *f = [NSDateFormatter new];
+        f.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
         f.dateFormat = @"yyyy-MM-dd'T'HH:mm:ssZ";
-        p.createdAt = [f dateFromString:created] ?: [NSDate date];
+        p.createdAt = [f dateFromString:created];
+        if (!p.createdAt) {
+            // Do NOT use [NSDate date] — that reshuffles the list on every reload.
+            f.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+            p.createdAt = [f dateFromString:created];
+        }
     } else {
-        p.createdAt = [NSDate date];
+        p.createdAt = nil;
     }
 
     p.IDFA = dict[@"IDFA"] ?: @"";

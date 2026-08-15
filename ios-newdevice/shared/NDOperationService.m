@@ -586,12 +586,13 @@
 
         if ([fun isEqualToString:@"getRecordParam"]) {
             NSString *name = query[@"recordName"] ?: @"";
-            NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
+            if (!name.length) name = [[NDRecordStore shared] currentRecordName] ?: @"";
+            NDDeviceProfile *p = name.length ? [[NDRecordStore shared] profileNamed:name] : nil;
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) [p writeToPath:savePath error:&error];
             body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
             [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
-            done(body ?: @"", p ? 200 : 500);
+            done(body.length ? body : (p ? @"" : @"no record"), p ? 200 : 500);
             return;
         }
 
