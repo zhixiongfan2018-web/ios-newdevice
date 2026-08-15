@@ -54,7 +54,7 @@ extern char **environ;
     if (section == 0) return 3;
     if (section == 1) return 3;
     if (section == 2) return 3;
-    return 4;
+    return 5;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -125,14 +125,18 @@ extern char **environ;
         }
     } else {
         if (indexPath.row == 0) {
+            cell.textLabel.text = @"对齐当前环境参数";
+            cell.detailTextLabel.text = @"补全 Model/设备名/内存磁盘/运营商，修正 Build";
+            cell.imageView.image = [UIImage systemImageNamed:@"slider.horizontal.3"];
+        } else if (indexPath.row == 1) {
             cell.textLabel.text = @"修复不能输入中文";
             cell.detailTextLabel.text = @"清理键盘缓存后注销桌面";
             cell.imageView.image = [UIImage systemImageNamed:@"keyboard"];
-        } else if (indexPath.row == 1) {
+        } else if (indexPath.row == 2) {
             cell.textLabel.text = @"修复国行机源不能联网";
             cell.detailTextLabel.text = @"Dopamine/Sileo：无线局域网与蜂窝数据 / 还原网络设置";
             cell.imageView.image = [UIImage systemImageNamed:@"wifi.exclamationmark"];
-        } else if (indexPath.row == 2) {
+        } else if (indexPath.row == 3) {
             cell.textLabel.text = @"注销（重启桌面）";
             cell.detailTextLabel.text = @"killall SpringBoard";
             cell.imageView.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
@@ -354,9 +358,25 @@ extern char **environ;
         return;
     }
 
-    if (indexPath.row == 0) [self fixChineseInput];
-    else if (indexPath.row == 1) [self fixRepoNetwork];
-    else if (indexPath.row == 2) {
+    if (indexPath.row == 0) {
+        NSString *name = [[NDRecordStore shared] currentRecordName];
+        if (!name.length || [name isEqualToString:@"原始机器"]) {
+            [self alert:@"无法对齐" message:@"请先切换到非「原始机器」记录"];
+            return;
+        }
+        UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"对齐参数" message:@"请稍候…" preferredStyle:UIAlertControllerStyleAlert];
+        [self presentViewController:wait animated:YES completion:^{
+            [[NDOperationService shared] runAsync:@"alignParams" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [wait dismissViewControllerAnimated:YES completion:^{
+                        [self alert:(code == 200) ? @"对齐完成" : @"对齐失败" message:body.length ? body : @"无结果"];
+                    }];
+                });
+            }];
+        }];
+    } else if (indexPath.row == 1) [self fixChineseInput];
+    else if (indexPath.row == 2) [self fixRepoNetwork];
+    else if (indexPath.row == 3) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"注销桌面" message:@"将重启 SpringBoard，是否继续？" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
         [alert addAction:[UIAlertAction actionWithTitle:@"注销" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {

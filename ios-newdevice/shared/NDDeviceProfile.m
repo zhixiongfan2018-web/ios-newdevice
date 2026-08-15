@@ -3,6 +3,7 @@
 #import "NDDeviceCatalog+Metrics.h"
 #import "NDConfig.h"
 #import <stdlib.h>
+#import <float.h>
 
 static NSString *NDRandomHex(NSUInteger length) {
     static const char *hex = "0123456789abcdef";
@@ -134,69 +135,40 @@ static NSTimeInterval NDRandomBootTime(void) {
     return now - ago;
 }
 
-static NSString *NDRandomBuild(NSString *systemVer) {
+static NSDictionary<NSString *, NSString *> *NDKnownBuilds(void) {
     static NSDictionary<NSString *, NSString *> *known;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         known = @{
-            // iOS 16
-            @"16.0": @"20A362",
-            @"16.0.2": @"20A380",
-            @"16.1": @"20B82",
-            @"16.1.1": @"20B101",
-            @"16.1.2": @"20B110",
-            @"16.2": @"20C65",
-            @"16.3": @"20D47",
-            @"16.3.1": @"20D67",
-            @"16.4": @"20E247",
-            @"16.4.1": @"20E252",
-            @"16.5": @"20F66",
-            @"16.5.1": @"20F75",
-            @"16.6": @"20G75",
-            @"16.6.1": @"20G81",
-            @"16.7": @"20H19",
-            @"16.7.1": @"20H30",
-            @"16.7.2": @"20H115",
-            @"16.7.5": @"20H307",
-            @"16.7.8": @"20H343",
-            @"16.7.10": @"20H350",
-            // iOS 17
-            @"17.0": @"21A329",
-            @"17.0.1": @"21A340",
-            @"17.0.2": @"21A351",
-            @"17.0.3": @"21A360",
-            @"17.1": @"21B74",
-            @"17.1.1": @"21B91",
-            @"17.1.2": @"21B101",
-            @"17.2": @"21C62",
-            @"17.2.1": @"21C66",
-            @"17.3": @"21D50",
-            @"17.3.1": @"21D61",
-            @"17.4": @"21E219",
-            @"17.4.1": @"21E236",
-            @"17.5": @"21F79",
-            @"17.5.1": @"21F90",
-            @"17.6": @"21G80",
-            @"17.6.1": @"21G93",
-            @"17.7": @"21H16",
-            @"17.7.1": @"21H216",
-            @"17.7.2": @"21H221",
-            // iOS 18
-            @"18.0": @"22A3354",
-            @"18.0.1": @"22A3370",
-            @"18.1": @"22B83",
-            @"18.1.1": @"22B91",
-            @"18.2": @"22C152",
-            @"18.2.1": @"22C161",
-            @"18.3": @"22D63",
-            @"18.3.1": @"22D72",
-            @"18.3.2": @"22D82",
-            @"18.4": @"22E240",
-            @"18.4.1": @"22E252",
+            @"16.0": @"20A362", @"16.0.2": @"20A380",
+            @"16.1": @"20B82", @"16.1.1": @"20B101", @"16.1.2": @"20B110",
+            @"16.2": @"20C65", @"16.3": @"20D47", @"16.3.1": @"20D67",
+            @"16.4": @"20E247", @"16.4.1": @"20E252",
+            @"16.5": @"20F66", @"16.5.1": @"20F75",
+            @"16.6": @"20G75", @"16.6.1": @"20G81",
+            @"16.7": @"20H19", @"16.7.1": @"20H30", @"16.7.2": @"20H115",
+            @"16.7.5": @"20H307", @"16.7.8": @"20H343", @"16.7.10": @"20H350",
+            @"17.0": @"21A329", @"17.0.1": @"21A340", @"17.0.2": @"21A351", @"17.0.3": @"21A360",
+            @"17.1": @"21B74", @"17.1.1": @"21B91", @"17.1.2": @"21B101",
+            @"17.2": @"21C62", @"17.2.1": @"21C66",
+            @"17.3": @"21D50", @"17.3.1": @"21D61",
+            @"17.4": @"21E219", @"17.4.1": @"21E236",
+            @"17.5": @"21F79", @"17.5.1": @"21F90",
+            @"17.6": @"21G80", @"17.6.1": @"21G93",
+            @"17.7": @"21H16", @"17.7.1": @"21H216", @"17.7.2": @"21H221",
+            @"18.0": @"22A3354", @"18.0.1": @"22A3370",
+            @"18.1": @"22B83", @"18.1.1": @"22B91",
+            @"18.2": @"22C152", @"18.2.1": @"22C161",
+            @"18.3": @"22D63", @"18.3.1": @"22D72", @"18.3.2": @"22D82",
+            @"18.4": @"22E240", @"18.4.1": @"22E252",
             @"18.5": @"22F76",
         };
     });
-    NSString *hit = known[systemVer ?: @""];
+    return known;
+}
+
+static NSString *NDRandomBuild(NSString *systemVer) {
+    NSString *hit = NDKnownBuilds()[systemVer ?: @""];
     if (hit.length) return hit;
 
     NSArray *parts = [systemVer componentsSeparatedByString:@"."];
@@ -205,6 +177,12 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     NSInteger train = major + 4;
     if (train < 19) train = 19;
     return [NSString stringWithFormat:@"%ldA%u", (long)train, 100u + arc4random_uniform(800)];
+}
+
+static BOOL NDLooksLikeProductType(NSString *s) {
+    if (s.length < 5) return NO;
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"^(iPhone|iPad)\\d+,\\d+$" options:0 error:nil];
+    return [re numberOfMatchesInString:s options:0 range:NSMakeRange(0, s.length)] == 1;
 }
 
 @implementation NDDeviceProfile
@@ -640,12 +618,15 @@ static NSString *NDRandomBuild(NSString *systemVer) {
     if (!p.HardwareMachine.length && p.ProductType.length) {
         p.HardwareMachine = p.ProductType;
     }
-    if (!p.DeviceName.length && p.Model.length) {
+    if (!p.DeviceName.length && p.Model.length && !NDLooksLikeProductType(p.Model)) {
         p.DeviceName = p.Model;
     }
     // Brightness already normalized in import dict; clamp
     if (p.Brightness > 1.0f) p.Brightness = p.Brightness / 100.0f;
     if (p.Brightness > 1.0f) p.Brightness = 1.0f;
+    if (![p.name isEqualToString:@"原始机器"]) {
+        [p alignConsistency];
+    }
     return p;
 }
 
@@ -736,6 +717,153 @@ static NSString *NDRandomBuild(NSString *systemVer) {
         @"MNC": self.MNC ?: @"",
     } mutableCopy];
     return d;
+}
+
+- (NSString *)alignConsistency {
+    if ([self.name isEqualToString:@"原始机器"]) return @"";
+    NSMutableArray<NSString *> *fixes = [NSMutableArray array];
+
+    // Deterministic fills from UDID/name so reloads do not reshuffle empty fields.
+    NSString *seedStr = self.UDID.length ? self.UDID : (self.name ?: @"nd");
+    uint32_t seed = 2166136261u;
+    const char *cs = seedStr.UTF8String ?: "nd";
+    while (*cs) { seed ^= (uint8_t)(*cs++); seed *= 16777619u; }
+
+    if (!self.ProductType.length && NDLooksLikeProductType(self.HardwareMachine)) {
+        self.ProductType = self.HardwareMachine;
+        [fixes addObject:@"ProductType←HardwareMachine"];
+    }
+    if (!self.ProductType.length && NDLooksLikeProductType(self.Model)) {
+        self.ProductType = self.Model;
+        [fixes addObject:@"ProductType←Model"];
+    }
+    if (!self.HardwareMachine.length && self.ProductType.length) {
+        self.HardwareMachine = self.ProductType;
+        [fixes addObject:@"HardwareMachine←ProductType"];
+    }
+
+    if (NDLooksLikeProductType(self.Model) || !self.Model.length) {
+        NSString *marketing = [NDDeviceCatalog marketingNameForProductType:self.ProductType];
+        if (marketing.length && ![self.Model isEqualToString:marketing]) {
+            self.Model = marketing;
+            [fixes addObject:[NSString stringWithFormat:@"Model=%@", marketing]];
+        }
+    }
+
+    BOOL nameIsMachine = NDLooksLikeProductType(self.DeviceName)
+        || (self.ProductType.length && [self.DeviceName isEqualToString:self.ProductType])
+        || (self.HardwareMachine.length && [self.DeviceName isEqualToString:self.HardwareMachine]);
+    if (!self.DeviceName.length || nameIsMachine) {
+        static NSArray<NSString *> *prefixes;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            prefixes = @[@"Alex", @"Jordan", @"Sam", @"Taylor", @"Chris", @"Jamie", @"Casey", @"Morgan", @"Riley", @"Avery"];
+        });
+        NSString *who = prefixes[seed % prefixes.count];
+        BOOL isPad = [self.ProductType hasPrefix:@"iPad"];
+        self.DeviceName = [NSString stringWithFormat:@"%@'s %@", who, isPad ? @"iPad" : @"iPhone"];
+        [fixes addObject:[NSString stringWithFormat:@"DeviceName=%@", self.DeviceName]];
+    }
+
+    if (self.PhysicalMemory == 0 && self.ProductType.length) {
+        self.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:self.ProductType];
+        [fixes addObject:[NSString stringWithFormat:@"PhysicalMemory=%llu", (unsigned long long)self.PhysicalMemory]];
+    }
+    if (self.DiskCapacity == 0 && self.ProductType.length) {
+        static uint64_t options[] = {
+            128ULL * 1000 * 1000 * 1000,
+            256ULL * 1000 * 1000 * 1000,
+            256ULL * 1000 * 1000 * 1000,
+            512ULL * 1000 * 1000 * 1000,
+        };
+        self.DiskCapacity = options[seed % 4];
+        [fixes addObject:[NSString stringWithFormat:@"DiskCapacity=%llu", (unsigned long long)self.DiskCapacity]];
+    }
+
+    if (self.SystemVer.length) {
+        NSString *known = NDKnownBuilds()[self.SystemVer];
+        if (known.length && (![self.Build isEqualToString:known] || !self.Build.length)) {
+            self.Build = known;
+            [fixes addObject:[NSString stringWithFormat:@"Build=%@↔%@", known, self.SystemVer]];
+        } else if (!self.Build.length) {
+            self.Build = NDRandomBuild(self.SystemVer);
+            [fixes addObject:[NSString stringWithFormat:@"Build=%@", self.Build]];
+        }
+    }
+
+    if (!self.Carrier.length || !self.MCC.length || !self.MNC.length) {
+        NSArray *carriers = [NDDeviceCatalog carriers];
+        NSDictionary *c = carriers[(seed / 7) % carriers.count];
+        if (!self.Carrier.length) self.Carrier = c[@"Carrier"] ?: @"";
+        if (!self.MCC.length) self.MCC = c[@"MCC"] ?: @"";
+        if (!self.MNC.length) self.MNC = c[@"MNC"] ?: @"";
+        [fixes addObject:[NSString stringWithFormat:@"Carrier=%@ %@/%@", self.Carrier, self.MCC, self.MNC]];
+    }
+    if (!self.RadioAccess.length) {
+        NSArray *rats = [NDDeviceCatalog radioAccessTypes];
+        self.RadioAccess = rats[(seed / 11) % rats.count];
+        [fixes addObject:[NSString stringWithFormat:@"RadioAccess=%@", self.RadioAccess]];
+    }
+    if (!self.SSID.length || !self.BSSID.length) {
+        NSArray *ssids = [NDDeviceCatalog wifiSSIDs];
+        if (!self.SSID.length) {
+            self.SSID = ssids.count ? ssids[(seed / 13) % ssids.count] : @"HomeWiFi";
+        }
+        if (!self.BSSID.length) {
+            self.BSSID = [NSString stringWithFormat:@"%02x:%02x:%02x:%02x:%02x:%02x",
+                          (seed >> 16) & 0xfe, (seed >> 8) & 0xff, seed & 0xff,
+                          (seed >> 24) & 0xff, (seed >> 4) & 0xff, (seed >> 12) & 0xff];
+        }
+        [fixes addObject:[NSString stringWithFormat:@"WiFi=%@", self.SSID]];
+    }
+    if (!self.TimeZone.length) {
+        if (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01) {
+            NSDictionary *best = nil;
+            double bestD = DBL_MAX;
+            for (NSDictionary *c in [NDDeviceCatalog usCityCoordinates]) {
+                double dlat = [c[@"lat"] doubleValue] - self.Latitude;
+                double dlon = [c[@"lon"] doubleValue] - self.Longitude;
+                double d = dlat * dlat + dlon * dlon;
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            self.TimeZone = best[@"timezone"] ?: @"America/New_York";
+        } else {
+            NSArray *cities = [NDDeviceCatalog usCityCoordinates];
+            NSDictionary *coord = cities[(seed / 17) % cities.count];
+            self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
+            if (fabs(self.Latitude) < 0.01 && fabs(self.Longitude) < 0.01) {
+                self.Latitude = [coord[@"lat"] doubleValue];
+                self.Longitude = [coord[@"lon"] doubleValue];
+            }
+        }
+        [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@", self.TimeZone]];
+    }
+    if (!self.OpenUDID.length) {
+        // Stable 40-hex from seed (not cryptographically random — fingerprint filler only)
+        self.OpenUDID = [NSString stringWithFormat:@"%08x%08x%08x%08x%08x",
+                         seed, seed ^ 0x9e3779b9u, seed * 2654435761u, ~seed, seed ^ 0x85ebca6bu];
+        [fixes addObject:@"OpenUDID=filled"];
+    }
+    if (self.BootTime <= 0) {
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        self.BootTime = now - (3600.0 + (seed % (10 * 24 * 3600)));
+        [fixes addObject:@"BootTime=filled"];
+    }
+    if (!self.DeviceColor.length) {
+        NSArray *colors = @[@"Black", @"White", @"Blue", @"Pink", @"Starlight", @"Midnight"];
+        self.DeviceColor = colors[(seed / 19) % colors.count];
+        [fixes addObject:[NSString stringWithFormat:@"DeviceColor=%@", self.DeviceColor]];
+    }
+    if (self.Brightness < 0) {
+        self.Brightness = 0.35f + ((seed % 50) / 100.0f);
+        [fixes addObject:@"Brightness=filled"];
+    }
+    if (self.BatteryLevel < 0) {
+        self.BatteryLevel = 0.25f + ((seed % 70) / 100.0f);
+        [fixes addObject:@"BatteryLevel=filled"];
+    }
+
+    return fixes.count ? [fixes componentsJoinedByString:@"; "] : @"";
 }
 
 - (BOOL)writeToPath:(NSString *)path error:(NSError **)error {

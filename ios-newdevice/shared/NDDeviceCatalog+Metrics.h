@@ -9,6 +9,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (uint64_t)memoryBytesForProductType:(NSString *)productType;
 /// Approximate total disk capacity bytes.
 + (uint64_t)diskBytesForProductType:(NSString *)productType;
+/// Board id for MobileGestalt HardwareModel (e.g. D79AP). Nil if unknown.
++ (nullable NSString *)boardIdForProductType:(NSString *)productType;
+/// Marketing model name for a ProductType (e.g. iPhone 14). Nil if unknown.
++ (nullable NSString *)marketingNameForProductType:(NSString *)productType;
 @end
 
 NS_ASSUME_NONNULL_END

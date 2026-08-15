@@ -84,4 +84,38 @@
     return options[arc4random_uniform(4)];
 }
 
++ (NSString *)boardIdForProductType:(NSString *)productType {
+    if (!productType.length) return nil;
+    static NSDictionary *map;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = @{
+            @"iPhone12,1": @"N104AP", @"iPhone12,3": @"D421AP", @"iPhone12,5": @"D421AP",
+            @"iPhone12,8": @"D79AP",
+            @"iPhone13,1": @"D52gAP", @"iPhone13,2": @"D53gAP", @"iPhone13,3": @"D53pAP", @"iPhone13,4": @"D54pAP",
+            @"iPhone14,4": @"D16AP", @"iPhone14,5": @"D17AP",
+            @"iPhone14,2": @"D63AP", @"iPhone14,3": @"D64AP",
+            @"iPhone14,6": @"D49AP",
+            @"iPhone14,7": @"D27AP", @"iPhone14,8": @"D28AP",
+            @"iPhone15,2": @"D73AP", @"iPhone15,3": @"D74AP",
+            @"iPhone15,4": @"D37AP", @"iPhone15,5": @"D38AP",
+            @"iPhone16,1": @"D83AP", @"iPhone16,2": @"D84AP",
+            @"iPhone17,1": @"D93AP", @"iPhone17,2": @"D94AP",
+            @"iPhone17,3": @"D47AP", @"iPhone17,4": @"D48AP", @"iPhone17,5": @"D14AP",
+        };
+    });
+    return map[productType];
+}
+
++ (NSString *)marketingNameForProductType:(NSString *)productType {
+    if (!productType.length) return nil;
+    for (NSDictionary *m in [NDDeviceCatalog deviceModels]) {
+        if ([m[@"ProductType"] isEqualToString:productType]) {
+            NSString *name = m[@"Model"];
+            if (name.length) return name;
+        }
+    }
+    return nil;
+}
+
 @end

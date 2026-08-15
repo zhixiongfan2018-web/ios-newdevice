@@ -88,8 +88,9 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
                 uint64_t mem = p.PhysicalMemory > 0 ? p.PhysicalMemory : [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
                 if (mem > 0) return CFBridgingRetain(@(mem));
             }
-            if (([k isEqualToString:@"TotalDiskCapacity"] || [k isEqualToString:@"DiskCapacity"]) && p.DiskCapacity > 0) {
-                return CFBridgingRetain(@(p.DiskCapacity));
+            if ([k isEqualToString:@"TotalDiskCapacity"] || [k isEqualToString:@"DiskCapacity"]) {
+                uint64_t disk = p.DiskCapacity > 0 ? p.DiskCapacity : [NDDeviceCatalog diskBytesForProductType:p.ProductType];
+                if (disk > 0) return CFBridgingRetain(@(disk));
             }
             if ([k isEqualToString:@"DeviceClassNumber"]) {
                 BOOL isPad = [p.ProductType hasPrefix:@"iPad"];
@@ -120,20 +121,24 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         if (modelGate) {
             if (p.ProductType.length) {
                 map[@"ProductType"] = p.ProductType;
-                map[@"HardwarePlatform"] = p.ProductType;
                 map[@"CompatibleProductType"] = p.ProductType;
             }
-            if (p.HardwareMachine.length) {
-                map[@"HardwareModel"] = p.HardwareMachine;
-                map[@"HWModelStr"] = p.HardwareMachine;
+            // HardwareModel / HWModelStr are board ids (D79AP), NOT ProductType (iPhone12,8).
+            NSString *board = [NDDeviceCatalog boardIdForProductType:p.ProductType];
+            if (board.length) {
+                map[@"HardwareModel"] = board;
+                map[@"HWModelStr"] = board;
             }
             if (p.Model.length) {
                 map[@"MarketingProductName"] = p.Model;
             }
             NSString *deviceName = p.DeviceName.length ? p.DeviceName : p.Model;
-            if (deviceName.length) {
+            if (deviceName.length && ![[deviceName lowercaseString] hasPrefix:@"iphone1"] && ![deviceName containsString:@","]) {
                 map[@"DeviceName"] = deviceName;
                 map[@"UserAssignedDeviceName"] = deviceName;
+            } else if (p.Model.length && ![p.Model containsString:@","]) {
+                map[@"DeviceName"] = p.Model;
+                map[@"UserAssignedDeviceName"] = p.Model;
             }
             BOOL isPad = [p.ProductType hasPrefix:@"iPad"];
             map[@"DeviceClass"] = isPad ? @"iPad" : @"iPhone";
@@ -187,10 +192,8 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
             map[@"IntegratedCircuitCardIdentifier"] = p.ICCID;
             map[@"ICCID"] = p.ICCID;
         }
-        if (p.ProductType.length) {
-            map[@"RegulatoryModelNumber"] = p.ProductType;
-            map[@"ModelNumber"] = p.ProductType;
-        }
+        // Do NOT set ModelNumber/RegulatoryModelNumber to ProductType — those are
+        // regulatory SKUs (e.g. MHGP3), not machine ids (iPhone12,8).
 
         NSString *val = map[k];
         if (val.length) {

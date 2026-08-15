@@ -68,6 +68,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)writeAMGFakerToDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
 
+/// Fill/normalize inconsistent fields (Model vs ProductType, RAM/disk, Build↔SystemVer, empty carrier/Wi‑Fi…).
+/// Returns a short human-readable fix report (empty if nothing changed).
+- (NSString *)alignConsistency;
+
 @end
 
 NS_ASSUME_NONNULL_END

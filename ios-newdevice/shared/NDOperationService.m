@@ -478,6 +478,12 @@
 
         if ([fun isEqualToString:@"getCurrentRecordParam"]) {
             NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+            if (p && ![p.name isEqualToString:@"原始机器"]) {
+                NSString *fix = [p alignConsistency];
+                if (fix.length) {
+                    [[NDRecordStore shared] saveProfile:p error:nil];
+                }
+            }
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) {
                 [p writeToPath:savePath error:&error];
@@ -485,6 +491,23 @@
             body = p ? [[NSString alloc] initWithData:[NSPropertyListSerialization dataWithPropertyList:[p toDictionary] format:NSPropertyListXMLFormat_v1_0 options:0 error:nil] encoding:NSUTF8StringEncoding] : @"";
             [[NDRecordStore shared] writeResultCode:p ? 1 : 0];
             done(body ?: @"", p ? 200 : 500);
+            return;
+        }
+
+        if ([fun isEqualToString:@"alignParams"] || [fun isEqualToString:@"alignRecordParam"]) {
+            NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName];
+            NDDeviceProfile *p = name.length ? [[NDRecordStore shared] profileNamed:name] : [[NDRecordStore shared] currentProfile];
+            if (!p) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"no profile", 500);
+                return;
+            }
+            NSString *fix = [p alignConsistency] ?: @"";
+            ok = [[NDRecordStore shared] saveProfile:p error:&error];
+            [[NDRecordStore shared] notifyReload];
+            body = [NSString stringWithFormat:@"record=%@\nfixes=%@\n", p.name ?: @"?", fix.length ? fix : @"(already aligned)"];
+            [[NDRecordStore shared] writeResultCode:ok ? 1 : 0];
+            done(body, ok ? 200 : 500);
             return;
         }
 

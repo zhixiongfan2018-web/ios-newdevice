@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 181: switch env — bind Venmo in background, bounce to NewDevice, no old-account flash.
+Description: 182: new app icon + param align (Model/DeviceName/RAM/Build/board id).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
