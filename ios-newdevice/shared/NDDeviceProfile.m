@@ -77,20 +77,6 @@ static NSString *NDRandomMAC(void) {
     return [NSString stringWithFormat:@"%@:%02X:%02X:%02X", oui, b3, b4, b5];
 }
 
-/// Modern iPhone serials are typically 10 chars (newer) or 12 chars (legacy).
-static NSString *NDRandomSerial(void) {
-    static NSString *alpha = @"CDEFGHJKLMNPQRSTUVWXYZ";
-    static NSString *alnum = @"CDEFGHJKLMNPQRSTUVWXYZ0123456789";
-    NSUInteger len = (arc4random_uniform(100) < 65) ? 10 : 12;
-    NSMutableString *s = [NSMutableString stringWithCapacity:len];
-    // First char often a letter plant/code hint
-    [s appendFormat:@"%C", [alpha characterAtIndex:arc4random_uniform((uint32_t)alpha.length)]];
-    for (NSUInteger i = 1; i < len; i++) {
-        [s appendFormat:@"%C", [alnum characterAtIndex:arc4random_uniform((uint32_t)alnum.length)]];
-    }
-    return s;
-}
-
 static NSString *NDLuhnCheckDigit(NSString *digits) {
     NSInteger sum = 0;
     BOOL dbl = YES;
@@ -104,6 +90,80 @@ static NSString *NDLuhnCheckDigit(NSString *digits) {
         dbl = !dbl;
     }
     return [NSString stringWithFormat:@"%ld", (long)((10 - (sum % 10)) % 10)];
+}
+
+/// Same OUI family as Wi‑Fi, different NIC — how real iPhones expose Wifi/BT addresses.
+static NSString *NDPairedBTMAC(NSString *wifiMAC, uint32_t seed) {
+    NSString *oui = @"A4:83:E7";
+    if (wifiMAC.length >= 8) oui = [[wifiMAC substringToIndex:8] uppercaseString];
+    uint8_t b3 = (uint8_t)((seed >> 8) & 0xff);
+    uint8_t b4 = (uint8_t)((seed >> 16) & 0xff);
+    uint8_t b5 = (uint8_t)(((seed >> 24) ^ 0x5A) & 0xff);
+    return [NSString stringWithFormat:@"%@:%02X:%02X:%02X", oui, b3, b4, b5];
+}
+
+static BOOL NDAppleOUIKnown(NSString *mac) {
+    if (mac.length < 8) return NO;
+    NSString *oui = [[mac substringToIndex:8] uppercaseString];
+    for (NSString *o in NDAppleOUIs()) {
+        if ([o isEqualToString:oui]) return YES;
+    }
+    return NO;
+}
+
+static BOOL NDLooksLikeAppleSerial(NSString *s) {
+    if (s.length < 10 || s.length > 12) return NO;
+    NSCharacterSet *ok = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHJKLMNPQRSTUVWXYZ0123456789"];
+    if ([s.uppercaseString rangeOfCharacterFromSet:ok.invertedSet].location != NSNotFound) return NO;
+    // Reject pure hex blobs (common bad imports) — real serials mix letters beyond A-F.
+    NSCharacterSet *hexOnly = [NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEF"];
+    BOOL allHex = [s.uppercaseString rangeOfCharacterFromSet:hexOnly.invertedSet].location == NSNotFound;
+    if (allHex) return NO;
+    NSCharacterSet *letters = [NSCharacterSet letterCharacterSet];
+    NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+    BOOL hasLetter = [s rangeOfCharacterFromSet:letters].location != NSNotFound;
+    BOOL hasDigit = [s rangeOfCharacterFromSet:digits].location != NSNotFound;
+    return hasLetter && hasDigit;
+}
+
+static NSString *NDSeededSerial(uint32_t seed) {
+    static NSString *alpha = @"CDEFGHJKLMNPQRSTUVWXYZ";
+    static NSString *alnum = @"CDEFGHJKLMNPQRSTUVWXYZ0123456789";
+    NSUInteger len = ((seed % 100) < 65) ? 10 : 12;
+    NSMutableString *s = [NSMutableString stringWithCapacity:len];
+    uint32_t x = seed ? seed : 1;
+    [s appendFormat:@"%C", [alpha characterAtIndex:x % alpha.length]];
+    for (NSUInteger i = 1; i < len; i++) {
+        x = x * 1664525u + 1013904223u;
+        [s appendFormat:@"%C", [alnum characterAtIndex:x % alnum.length]];
+    }
+    // Guarantee not pure-hex
+    if (!NDLooksLikeAppleSerial(s)) {
+        [s replaceCharactersInRange:NSMakeRange(MIN(3, s.length - 1), 1) withString:@"K"];
+        [s replaceCharactersInRange:NSMakeRange(MIN(5, s.length - 1), 1) withString:@"7"];
+    }
+    return s;
+}
+
+static NSString *NDSeededIMEI(uint32_t seed) {
+    static NSArray<NSString *> *tacs;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        tacs = @[
+            @"35391808", @"35433810", @"35693803", @"35326005", @"35929806",
+            @"35328509", @"35407110", @"35838708", @"35332210", @"35728009",
+            @"35316711", @"35499910", @"35875508", @"35307909", @"35940508",
+        ];
+    });
+    NSString *tac = tacs[seed % tacs.count];
+    NSString *snr = [NSString stringWithFormat:@"%06u", (seed / 17) % 1000000];
+    NSString *body = [tac stringByAppendingString:snr];
+    return [body stringByAppendingString:NDLuhnCheckDigit(body)];
+}
+
+/// Modern iPhone serials are typically 10 chars (newer) or 12 chars (legacy).
+static NSString *NDRandomSerial(void) {
+    return NDSeededSerial(arc4random());
 }
 
 /// Userland IMEI string (15 digits). Not baseband-level; for apps reading Gestalt / CT.
@@ -301,7 +361,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.Serial = NDRandomSerial();
     p.UDID = NDRandomHex(40); // lowercase 40-hex, matches Apple UDID style
     p.WiFiMAC = NDRandomMAC();
-    p.BTMAC = NDRandomMAC();
+    p.BTMAC = NDPairedBTMAC(p.WiFiMAC, arc4random());
     p.DeviceToken = NDRandomHex(64);
     p.IMEI = NDRandomIMEI();
     p.IMEI2 = NDRandomIMEI();
@@ -729,6 +789,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     const char *cs = seedStr.UTF8String ?: "nd";
     while (*cs) { seed ^= (uint8_t)(*cs++); seed *= 16777619u; }
 
+    // --- Machine identity triad: ProductType / HardwareMachine / marketing Model ---
     if (!self.ProductType.length && NDLooksLikeProductType(self.HardwareMachine)) {
         self.ProductType = self.HardwareMachine;
         [fixes addObject:@"ProductType←HardwareMachine"];
@@ -740,20 +801,23 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     if (!self.HardwareMachine.length && self.ProductType.length) {
         self.HardwareMachine = self.ProductType;
         [fixes addObject:@"HardwareMachine←ProductType"];
+    } else if (self.ProductType.length && NDLooksLikeProductType(self.HardwareMachine) == NO) {
+        self.HardwareMachine = self.ProductType;
+        [fixes addObject:@"HardwareMachine=ProductType"];
     }
 
-    if (NDLooksLikeProductType(self.Model) || !self.Model.length) {
-        NSString *marketing = [NDDeviceCatalog marketingNameForProductType:self.ProductType];
-        if (marketing.length && ![self.Model isEqualToString:marketing]) {
-            self.Model = marketing;
-            [fixes addObject:[NSString stringWithFormat:@"Model=%@", marketing]];
-        }
+    NSString *marketing = [NDDeviceCatalog marketingNameForProductType:self.ProductType];
+    if (marketing.length && (![self.Model isEqualToString:marketing] || NDLooksLikeProductType(self.Model))) {
+        self.Model = marketing;
+        [fixes addObject:[NSString stringWithFormat:@"Model=%@", marketing]];
     }
 
     BOOL nameIsMachine = NDLooksLikeProductType(self.DeviceName)
         || (self.ProductType.length && [self.DeviceName isEqualToString:self.ProductType])
-        || (self.HardwareMachine.length && [self.DeviceName isEqualToString:self.HardwareMachine]);
-    if (!self.DeviceName.length || nameIsMachine) {
+        || (self.HardwareMachine.length && [self.DeviceName isEqualToString:self.HardwareMachine])
+        || (self.Model.length && [self.DeviceName isEqualToString:self.Model] && [self.Model hasPrefix:@"iPhone"]);
+    // "iPhone" alone is OK as DeviceName on real units; prefer personalized like AMG.
+    if (!self.DeviceName.length || nameIsMachine || [self.DeviceName isEqualToString:@"iPhone"] || [self.DeviceName isEqualToString:@"iPad"]) {
         static NSArray<NSString *> *prefixes;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
@@ -765,21 +829,26 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:[NSString stringWithFormat:@"DeviceName=%@", self.DeviceName]];
     }
 
-    if (self.PhysicalMemory == 0 && self.ProductType.length) {
-        self.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:self.ProductType];
-        [fixes addObject:[NSString stringWithFormat:@"PhysicalMemory=%llu", (unsigned long long)self.PhysicalMemory]];
-    }
-    if (self.DiskCapacity == 0 && self.ProductType.length) {
-        static uint64_t options[] = {
-            128ULL * 1000 * 1000 * 1000,
-            256ULL * 1000 * 1000 * 1000,
-            256ULL * 1000 * 1000 * 1000,
-            512ULL * 1000 * 1000 * 1000,
-        };
-        self.DiskCapacity = options[seed % 4];
-        [fixes addObject:[NSString stringWithFormat:@"DiskCapacity=%llu", (unsigned long long)self.DiskCapacity]];
+    // --- Capacity matches ProductType (real Gestalt values) ---
+    if (self.ProductType.length) {
+        uint64_t expectMem = [NDDeviceCatalog memoryBytesForProductType:self.ProductType];
+        if (expectMem > 0 && self.PhysicalMemory != expectMem) {
+            self.PhysicalMemory = expectMem;
+            [fixes addObject:[NSString stringWithFormat:@"PhysicalMemory=%llu", (unsigned long long)expectMem]];
+        }
+        if (self.DiskCapacity == 0) {
+            static uint64_t options[] = {
+                128ULL * 1000 * 1000 * 1000,
+                256ULL * 1000 * 1000 * 1000,
+                256ULL * 1000 * 1000 * 1000,
+                512ULL * 1000 * 1000 * 1000,
+            };
+            self.DiskCapacity = options[seed % 4];
+            [fixes addObject:[NSString stringWithFormat:@"DiskCapacity=%llu", (unsigned long long)self.DiskCapacity]];
+        }
     }
 
+    // --- SystemVer ↔ Build (known public release pairs) ---
     if (self.SystemVer.length) {
         NSString *known = NDKnownBuilds()[self.SystemVer];
         if (known.length && (![self.Build isEqualToString:known] || !self.Build.length)) {
@@ -791,6 +860,46 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
     }
 
+    // --- Serial / IMEI look like Apple equipment ---
+    if (!NDLooksLikeAppleSerial(self.Serial)) {
+        self.Serial = NDSeededSerial(seed ^ 0xA5A5A5A5u);
+        [fixes addObject:[NSString stringWithFormat:@"Serial=%@", self.Serial]];
+    }
+    if (self.IMEI.length != 15) {
+        self.IMEI = NDSeededIMEI(seed);
+        [fixes addObject:@"IMEI=filled"];
+    }
+    if (self.IMEI2.length != 15) {
+        self.IMEI2 = NDSeededIMEI(seed ^ 0x11111111u);
+        [fixes addObject:@"IMEI2=filled"];
+    }
+    if (self.ICCID.length < 18) {
+        self.ICCID = [NSString stringWithFormat:@"8901%016llu", ((unsigned long long)seed << 16) | (seed ^ 0xABCDEF)];
+        if (self.ICCID.length > 20) self.ICCID = [self.ICCID substringToIndex:20];
+        [fixes addObject:@"ICCID=filled"];
+    }
+
+    // --- Wi‑Fi / BT: Apple OUI + same family (real phones share OUI) ---
+    if (!self.WiFiMAC.length || !NDAppleOUIKnown(self.WiFiMAC)) {
+        NSArray *ouis = NDAppleOUIs();
+        NSString *oui = ouis[seed % ouis.count];
+        self.WiFiMAC = [NSString stringWithFormat:@"%@:%02X:%02X:%02X",
+                        oui, (seed >> 8) & 0xff, (seed >> 16) & 0xff, (seed >> 24) & 0xff];
+        [fixes addObject:[NSString stringWithFormat:@"WiFiMAC=%@", self.WiFiMAC]];
+    }
+    NSString *wantBT = NDPairedBTMAC(self.WiFiMAC, seed ^ 0x5a5a5a5au);
+    BOOL btOUIMatch = NO;
+    if (self.BTMAC.length >= 8 && self.WiFiMAC.length >= 8) {
+        btOUIMatch = [[[self.BTMAC substringToIndex:8] uppercaseString]
+                      isEqualToString:[[self.WiFiMAC substringToIndex:8] uppercaseString]];
+    }
+    BOOL btBad = !self.BTMAC.length || !NDAppleOUIKnown(self.BTMAC) || !btOUIMatch;
+    if (btBad) {
+        self.BTMAC = wantBT;
+        [fixes addObject:[NSString stringWithFormat:@"BTMAC=%@", self.BTMAC]];
+    }
+
+    // --- US carrier + radio ---
     if (!self.Carrier.length || !self.MCC.length || !self.MNC.length) {
         NSArray *carriers = [NDDeviceCatalog carriers];
         NSDictionary *c = carriers[(seed / 7) % carriers.count];
@@ -810,36 +919,39 @@ static BOOL NDLooksLikeProductType(NSString *s) {
             self.SSID = ssids.count ? ssids[(seed / 13) % ssids.count] : @"HomeWiFi";
         }
         if (!self.BSSID.length) {
+            // Router BSSID — not Apple OUI; private locally administered
             self.BSSID = [NSString stringWithFormat:@"%02x:%02x:%02x:%02x:%02x:%02x",
-                          (seed >> 16) & 0xfe, (seed >> 8) & 0xff, seed & 0xff,
+                          ((seed >> 16) & 0xfe) | 0x02, (seed >> 8) & 0xff, seed & 0xff,
                           (seed >> 24) & 0xff, (seed >> 4) & 0xff, (seed >> 12) & 0xff];
         }
-        [fixes addObject:[NSString stringWithFormat:@"WiFi=%@", self.SSID]];
+        [fixes addObject:[NSString stringWithFormat:@"SSID=%@", self.SSID]];
     }
-    if (!self.TimeZone.length) {
-        if (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01) {
-            NSDictionary *best = nil;
-            double bestD = DBL_MAX;
-            for (NSDictionary *c in [NDDeviceCatalog usCityCoordinates]) {
-                double dlat = [c[@"lat"] doubleValue] - self.Latitude;
-                double dlon = [c[@"lon"] doubleValue] - self.Longitude;
-                double d = dlat * dlat + dlon * dlon;
-                if (d < bestD) { bestD = d; best = c; }
-            }
-            self.TimeZone = best[@"timezone"] ?: @"America/New_York";
-        } else {
-            NSArray *cities = [NDDeviceCatalog usCityCoordinates];
-            NSDictionary *coord = cities[(seed / 17) % cities.count];
-            self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
-            if (fabs(self.Latitude) < 0.01 && fabs(self.Longitude) < 0.01) {
-                self.Latitude = [coord[@"lat"] doubleValue];
-                self.Longitude = [coord[@"lon"] doubleValue];
-            }
+
+    // --- TimeZone must match GPS (真机一致) ---
+    if (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01) {
+        NSDictionary *best = nil;
+        double bestD = DBL_MAX;
+        for (NSDictionary *c in [NDDeviceCatalog usCityCoordinates]) {
+            double dlat = [c[@"lat"] doubleValue] - self.Latitude;
+            double dlon = [c[@"lon"] doubleValue] - self.Longitude;
+            double d = dlat * dlat + dlon * dlon;
+            if (d < bestD) { bestD = d; best = c; }
         }
+        NSString *tz = best[@"timezone"] ?: @"America/New_York";
+        if (![self.TimeZone isEqualToString:tz]) {
+            self.TimeZone = tz;
+            [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@ (GPS)", tz]];
+        }
+    } else if (!self.TimeZone.length) {
+        NSArray *cities = [NDDeviceCatalog usCityCoordinates];
+        NSDictionary *coord = cities[(seed / 17) % cities.count];
+        self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
+        self.Latitude = [coord[@"lat"] doubleValue];
+        self.Longitude = [coord[@"lon"] doubleValue];
         [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@", self.TimeZone]];
     }
+
     if (!self.OpenUDID.length) {
-        // Stable 40-hex from seed (not cryptographically random — fingerprint filler only)
         self.OpenUDID = [NSString stringWithFormat:@"%08x%08x%08x%08x%08x",
                          seed, seed ^ 0x9e3779b9u, seed * 2654435761u, ~seed, seed ^ 0x85ebca6bu];
         [fixes addObject:@"OpenUDID=filled"];
@@ -850,7 +962,8 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:@"BootTime=filled"];
     }
     if (!self.DeviceColor.length) {
-        NSArray *colors = @[@"Black", @"White", @"Blue", @"Pink", @"Starlight", @"Midnight"];
+        // Colors plausible for the generation (avoid Titanium on iPhone 14)
+        NSArray *colors = @[@"Black", @"White", @"Blue", @"Purple", @"Yellow", @"Starlight", @"Midnight"];
         self.DeviceColor = colors[(seed / 19) % colors.count];
         [fixes addObject:[NSString stringWithFormat:@"DeviceColor=%@", self.DeviceColor]];
     }
@@ -861,6 +974,10 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     if (self.BatteryLevel < 0) {
         self.BatteryLevel = 0.25f + ((seed % 70) / 100.0f);
         [fixes addObject:@"BatteryLevel=filled"];
+    }
+    if (self.Altitude < 1.0) {
+        self.Altitude = 8.0 + (seed % 120);
+        [fixes addObject:@"Altitude=filled"];
     }
 
     return fixes.count ? [fixes componentsJoinedByString:@"; "] : @"";

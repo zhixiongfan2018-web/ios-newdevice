@@ -94,6 +94,18 @@
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
     NDConfig *cfg = [NDConfig shared];
     @try {
+        // Make spoofed identity look like a coherent real device before sandbox work.
+        if (current.length && ![current isEqualToString:@"原始机器"]) {
+            NDDeviceProfile *curP = [[NDRecordStore shared] profileNamed:current];
+            if (curP) {
+                NSString *fix = [curP alignConsistency];
+                if (fix.length) {
+                    [[NDRecordStore shared] saveProfile:curP error:nil];
+                    NSLog(@"[NewDevice] alignParams %@", fix);
+                }
+            }
+        }
+
         // Destination record apps only — do NOT permanently union every historical import
         // into global targetApps (that bloated lists and broke 一键新机 with huge backups).
         NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
