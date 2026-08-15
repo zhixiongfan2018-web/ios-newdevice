@@ -46,7 +46,7 @@
     self.randomLocation = dict[@"randomLocation"] ? [dict[@"randomLocation"] boolValue] : YES;
     self.locationFromIP = dict[@"locationFromIP"] ? [dict[@"locationFromIP"] boolValue] : YES;
     self.smartLocationOffset = [dict[@"smartLocationOffset"] boolValue];
-    self.smartAirplane = dict[@"smartAirplane"] ? [dict[@"smartAirplane"] boolValue] : YES;
+    self.smartAirplane = dict[@"smartAirplane"] ? [dict[@"smartAirplane"] boolValue] : NO;
     self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : NO;
     self.jailbreakHideDeep = dict[@"jailbreakHideDeep"] ? [dict[@"jailbreakHideDeep"] boolValue] : NO;
     self.holographicBackup = dict[@"holographicBackup"] ? [dict[@"holographicBackup"] boolValue] : YES;
