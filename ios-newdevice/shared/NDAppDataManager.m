@@ -1313,6 +1313,24 @@ extern char **environ;
     }
 }
 
+/// Wipe Venmo sandbox + stage in-app clear for next open — do NOT launch Venmo (no flash).
+- (NSString *)stageVenmoSessionClearOnly {
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    [self terminateApps:@[vbid]];
+    [self clearDataForApps:@[vbid] error:nil];
+    for (NSString *p in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
+             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+         ]) {
+        [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+    }
+    [self NDStageVenmoPendingClearFlag];
+    NSString *report = @"venmo=staged-clear-no-launch";
+    [report writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return report;
+}
+
 - (NSString *)bindVenmoKeychainToCurrentRecord {
     // Environment isolation: drop previous Venmo session tokens, then apply this record's akc.
     NSString *vbid = @"net.kortina.labs.Venmo";

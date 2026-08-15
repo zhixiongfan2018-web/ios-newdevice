@@ -73,6 +73,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Stage pending-clear-kc, launch Venmo briefly, wait for in-app clear marker, wipe sandbox again.
 - (NSString *)purgeVenmoSessionInApp;
 
+/// Stage pending-clear-kc without launching Venmo (for 一键新机 — no open/close flash).
+- (NSString *)stageVenmoSessionClearOnly;
+
 /// After restoring a record's Venmo files: wipe previous Keychain session then apply this record's akc.
 /// Launches Venmo suspended (or briefly then returns to NewDevice) so the old account UI is not shown.
 - (NSString *)bindVenmoKeychainToCurrentRecord;

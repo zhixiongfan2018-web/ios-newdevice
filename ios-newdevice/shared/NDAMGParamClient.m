@@ -134,36 +134,37 @@
     NSString *encName = [recordName.length ? recordName : @"" stringByAddingPercentEncodingWithAllowedCharacters:qset] ?: @"";
     NSString *encPath = [saveFilePath stringByAddingPercentEncodingWithAllowedCharacters:qset] ?: saveFilePath;
 
-    NSMutableArray<NSString *> *urls = [NSMutableArray array];
-    if (recordName.length) {
-        [urls addObject:[NSString stringWithFormat:
-                         @"http://127.0.0.1:8080/cmd?fun=getRecordParam&recordName=%@&saveFilePath=%@",
-                         encName, encPath]];
-    }
-    [urls addObject:[NSString stringWithFormat:
-                     @"http://127.0.0.1:8080/cmd?fun=getCurrentRecordParam&saveFilePath=%@",
-                     encPath]];
-
-    NSError *last = nil;
-    for (NSString *url in urls) {
-        NSInteger st = 0;
-        NSData *body = [self NDHTTPGet:url timeout:8.0 status:&st];
-        NSDictionary *fromFile = [self NDLoadParamFile:saveFilePath];
-        if (fromFile) return fromFile;
-        if (body.length > 8) {
-            id obj = [NSPropertyListSerialization propertyListWithData:body options:0 format:NULL error:nil];
-            if ([self NDDictUsablePlaintext:obj]) {
-                [(NSDictionary *)obj writeToFile:saveFilePath atomically:YES];
-                return (NSDictionary *)obj;
-            }
+    // Never fall back to getCurrentRecordParam here — that stamps the same identity
+    // onto every imported AMG pack when AMG/NewDevice only exposes "current".
+    if (!recordName.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"NDAMGParamClient" code:4
+                                     userInfo:@{NSLocalizedDescriptionKey: @"recordName required (no current-param fallback)"}];
         }
-        fromFile = [NSDictionary dictionaryWithContentsOfFile:saveFilePath];
-        if ([self NDDictUsablePlaintext:fromFile]) return fromFile;
-        last = [NSError errorWithDomain:@"NDAMGParamClient" code:(st ?: 1) userInfo:@{
-            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"getRecordParam failed (%@)", recordName.length ? recordName : @"current"]
+        return nil;
+    }
+
+    NSString *url = [NSString stringWithFormat:
+                     @"http://127.0.0.1:8080/cmd?fun=getRecordParam&recordName=%@&saveFilePath=%@",
+                     encName, encPath];
+    NSInteger st = 0;
+    NSData *body = [self NDHTTPGet:url timeout:8.0 status:&st];
+    NSDictionary *fromFile = [self NDLoadParamFile:saveFilePath];
+    if (fromFile) return fromFile;
+    if (body.length > 8) {
+        id obj = [NSPropertyListSerialization propertyListWithData:body options:0 format:NULL error:nil];
+        if ([self NDDictUsablePlaintext:obj]) {
+            [(NSDictionary *)obj writeToFile:saveFilePath atomically:YES];
+            return (NSDictionary *)obj;
+        }
+    }
+    fromFile = [NSDictionary dictionaryWithContentsOfFile:saveFilePath];
+    if ([self NDDictUsablePlaintext:fromFile]) return fromFile;
+    if (error) {
+        *error = [NSError errorWithDomain:@"NDAMGParamClient" code:(st ?: 1) userInfo:@{
+            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"getRecordParam failed (%@)", recordName]
         }];
     }
-    if (error && last) *error = last;
     return nil;
 }
 
@@ -181,6 +182,15 @@
     NSString *outPlist = [recordDir stringByAppendingPathComponent:@"faker_plaintext.plist"];
     NSError *err = nil;
 
+    // NewDevice owns 8080 — calling getRecordParam would return THIS app's current
+    // profile and make every AMG import look identical. Skip HTTP in that case.
+    if ([self localAPIIsNewDevice]) {
+        if (outNote) {
+            *outNote = @"8080 is NewDevice (skip API). Use faker_plaintext.plist or unique random identity.";
+        }
+        return nil;
+    }
+
     NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSet];
     if (recordTitle.length) [names addObject:recordTitle];
     NSString *folder = recordDir.lastPathComponent;
@@ -190,7 +200,6 @@
         [names addObject:desc[@"title"]];
     }
 
-    BOOL isND = [self localAPIIsNewDevice];
     for (NSString *name in names) {
         NSDictionary *d = [self fetchPlaintextParamForRecordName:name saveFilePath:outPlist error:&err];
         if ([self NDDictUsablePlaintext:d]) {
@@ -202,21 +211,11 @@
         }
     }
 
-    NSDictionary *cur = [self fetchPlaintextParamForRecordName:@"" saveFilePath:outPlist error:&err];
-    if ([self NDDictUsablePlaintext:cur]) {
-        [cur writeToFile:outPlist atomically:YES];
-        if (outNote) *outNote = @"getCurrentRecordParam";
-        return cur;
-    }
-
     if (outNote) {
-        if (isND) {
-            *outNote = @"8080 is NewDevice (no AMG runtime decrypt). Save AMG Get_Param / getRecordParam output as faker_plaintext.plist beside faker.plist, then re-import.";
-        } else {
-            *outNote = @"getRecordParam returned no usable plaintext (start AMG, select the record, retry).";
-        }
+        *outNote = @"getRecordParam returned no usable plaintext (put faker_plaintext.plist beside faker, or start AMG and select that record).";
     }
     (void)fm;
+    (void)err;
     return nil;
 }
 

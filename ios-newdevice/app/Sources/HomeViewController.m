@@ -261,30 +261,8 @@
         [self refreshIP:YES expectedChangeFrom:prevIP];
         if (!ok) {
             [self alert:error.localizedDescription ?: @"执行失败"];
-            return;
         }
-        [self promptRemarkForCurrentRecord];
     }];
-}
-
-- (void)promptRemarkForCurrentRecord {
-    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
-    if (!p || !p.name.length || [p.name isEqualToString:@"原始机器"]) return;
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"添加备注"
-                                                               message:[NSString stringWithFormat:@"给「%@」起个好记的名字（可跳过）", p.name]
-                                                        preferredStyle:UIAlertControllerStyleAlert];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = p.remark ?: @"";
-        tf.placeholder = @"例如：主号 / 测试号";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeSentences;
-    }];
-    [a addAction:[UIAlertAction actionWithTitle:@"跳过" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        p.remark = a.textFields.firstObject.text ?: @"";
-        [[NDRecordStore shared] saveProfile:p error:nil];
-        [self refresh];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)original { [self run:@"originRecord"]; }

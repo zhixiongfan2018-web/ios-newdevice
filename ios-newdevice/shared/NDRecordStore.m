@@ -44,6 +44,37 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
 
 @implementation NDRecordStore
 
+/// If UDID/IDFA/Serial collide with another record, replace with a fresh unique identity.
+- (NDDeviceProfile *)NDEnsureUniqueImportedProfile:(NDDeviceProfile *)p {
+    if (!p || !p.name.length) return p;
+    BOOL clash = NO;
+    for (NSString *otherName in [self allRecordNames]) {
+        if ([otherName isEqualToString:p.name] || [otherName isEqualToString:@"原始机器"]) continue;
+        NDDeviceProfile *o = [self profileNamed:otherName];
+        if (!o) continue;
+        if (p.UDID.length && o.UDID.length && [p.UDID.lowercaseString isEqualToString:o.UDID.lowercaseString]) { clash = YES; break; }
+        if (p.IDFA.length && o.IDFA.length && [p.IDFA.lowercaseString isEqualToString:o.IDFA.lowercaseString]) { clash = YES; break; }
+        if (p.Serial.length && o.Serial.length && [p.Serial isEqualToString:o.Serial]) { clash = YES; break; }
+    }
+    if (!clash) return p;
+    NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:p.name preferredModel:nil preferredSystem:nil];
+    fresh.enabled = p.enabled;
+    fresh.remark = p.remark ?: @"";
+    fresh.spoofDeviceIdentity = YES;
+    if ([NDConfig shared].locationFromIP) {
+        [fresh applyGeolocation:[NDAirplane fetchIPGeolocationSync] jitter:YES];
+    }
+    [fresh alignConsistency];
+    if ([self saveProfile:fresh error:nil]) {
+        NSString *note = @"Identity collided with another record; regenerated UNIQUE spoof profile (App data kept).";
+        NSString *path = [[NDPaths recordDir:fresh.name] stringByAppendingPathComponent:@"amg-import-note.txt"];
+        NSString *prev = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        [[prev stringByAppendingFormat:@"\n%@", note] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return fresh;
+    }
+    return p;
+}
+
 + (instancetype)shared {
     static NDRecordStore *store;
     static dispatch_once_t onceToken;
@@ -865,10 +896,14 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
         }
     }
     if (!saved) {
-        // Still create a stub ONLY after live AMG verified — spoof off if ciphertext
+        // Still create a stub ONLY after live AMG verified — unique random identity
         NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
         fresh.enabled = YES;
-        fresh.spoofDeviceIdentity = NO;
+        fresh.spoofDeviceIdentity = YES;
+        if ([NDConfig shared].locationFromIP) {
+            [fresh applyGeolocation:[NDAirplane fetchIPGeolocationSync] jitter:YES];
+        }
+        [fresh alignConsistency];
         if ([self saveProfile:fresh error:&impErr]) saved = fresh;
     }
     if (!saved) {
@@ -1075,7 +1110,11 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     if (!saved) {
         NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
         fresh.enabled = YES;
-        fresh.spoofDeviceIdentity = NO;
+        fresh.spoofDeviceIdentity = YES;
+        if ([NDConfig shared].locationFromIP) {
+            [fresh applyGeolocation:[NDAirplane fetchIPGeolocationSync] jitter:YES];
+        }
+        [fresh alignConsistency];
         if ([self saveProfile:fresh error:&impErr]) saved = fresh;
     }
     if (!saved) {
@@ -1535,28 +1574,36 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
             }
             NDDeviceProfile *fresh = [NDDeviceProfile randomProfileWithName:recordName preferredModel:nil preferredSystem:nil];
             fresh.enabled = YES;
-            // Ciphertext faker: do NOT spoof random IDFA/UDID — that breaks Venmo session
-            // even when akc Keychain restore succeeds. Passthrough real device identity.
-            if (fakerEncrypted) {
-                fresh.spoofDeviceIdentity = NO;
-            }
-            // Best-effort: seed Wi‑Fi MAC from ifaddrs.plist when faker is ciphertext
+            // Always unique spoofed identity per import. Venmo session is isolated via
+            // sandbox + akc / pending-clear-kc — do NOT leave spoof off (that made every
+            // env show the same physical device params).
+            fresh.spoofDeviceIdentity = YES;
+            // Best-effort: seed Wi‑Fi MAC from ifaddrs.plist when present
             NSDictionary *ifa = [NSDictionary dictionaryWithContentsOfFile:[full stringByAppendingPathComponent:@"ifaddrs.plist"]];
             NSDictionary *en0 = [ifa[@"en0"] isKindOfClass:[NSDictionary class]] ? ifa[@"en0"] : nil;
             NSString *mac = [en0[@"mac"] isKindOfClass:[NSString class]] ? en0[@"mac"] : nil;
             if (mac.length && ![mac isEqualToString:@"02:00:00:00:00:00"]) {
                 fresh.WiFiMAC = mac;
+                fresh.BTMAC = mac; // aligned later by alignConsistency if needed
             }
+            if ([NDConfig shared].locationFromIP) {
+                NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
+                [fresh applyGeolocation:geo jitter:YES];
+            }
+            [fresh alignConsistency];
             if ([self saveProfile:fresh error:nil]) {
                 saved = fresh;
                 NSString *note = fakerEncrypted
-                    ? [NSString stringWithFormat:@"faker.plist is AMG at-rest ciphertext; no plaintext from getRecordParam/sidecar (%@). App data + akc imported; device spoof DISABLED. Put Get_Param output as faker_plaintext.plist and re-import.", paramSourceNote ?: @"-"]
-                    : @"No plaintext AMG identity plist found; generated a new random identity. App holographic data was imported when present.";
+                    ? [NSString stringWithFormat:@"faker ciphertext; no per-record plaintext (%@). Generated UNIQUE random identity + imported App/akc. Optional: add faker_plaintext.plist and re-import for AMG's original MG.", paramSourceNote ?: @"-"]
+                    : @"No plaintext AMG identity; generated a unique random identity. App holographic data imported when present.";
                 [note writeToFile:[[NDPaths recordDir:saved.name] stringByAppendingPathComponent:@"amg-import-note.txt"]
                       atomically:YES encoding:NSUTF8StringEncoding error:nil];
             }
         }
         if (!saved) continue;
+        // If this identity collides with another record (common when a shared
+        // plaintext/current-param was applied), regenerate a unique spoof profile.
+        saved = [self NDEnsureUniqueImportedProfile:saved] ?: saved;
         // Always enable imported records so they can be selected
         if (!saved.enabled) {
             saved.enabled = YES;

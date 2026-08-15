@@ -138,14 +138,14 @@
                     NSLog(@"[NewDevice] bindVenmo %@", bind);
                 }
             } else if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
-                // Empty 一键新机 / 原始机器: must clear Venmo Keychain in-app or the
-                // old account survives uninstall+redownload.
-                [[NDAppDataManager shared] purgeVenmoSessionInApp];
+                // Empty 一键新机 / 原始机器: stage in-app clear for next Venmo open —
+                // do not launch/bounce Venmo during the switch.
+                [[NDAppDataManager shared] stageVenmoSessionClearOnly];
             }
         } else if (apps.count) {
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
             if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
-                [[NDAppDataManager shared] purgeVenmoSessionInApp];
+                [[NDAppDataManager shared] stageVenmoSessionClearOnly];
             }
         }
 

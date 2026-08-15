@@ -21,9 +21,9 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSDictionary *)plaintextParamFromSidecarsInDirectory:(NSString *)recordDir
                                                      sourcePath:(NSString * _Nullable * _Nullable)outPath;
 
-/// GET /cmd?fun=getRecordParam (fallback getCurrentRecordParam).
+/// GET /cmd?fun=getRecordParam for a specific AMG record title (no current-param fallback).
 /// Writes saveFilePath when provided by server; also returns parsed dict.
-/// `recordName` should be AMG's original title (may contain + / spaces).
+/// `recordName` is required (may contain + / spaces).
 + (nullable NSDictionary *)fetchPlaintextParamForRecordName:(NSString *)recordName
                                               saveFilePath:(nullable NSString *)saveFilePath
                                                      error:(NSError * _Nullable * _Nullable)error;
