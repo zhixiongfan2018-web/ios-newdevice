@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface NDDeviceProfile : NSObject <NSCopying>
 
 @property (nonatomic, copy) NSString *name;
+/// User-facing note / alias (does not change record folder name).
+@property (nonatomic, copy) NSString *remark;
 @property (nonatomic, assign) BOOL enabled;
 /// When NO, tweak will not spoof IDFA/UDID/etc (used when AMG faker is ciphertext).
 @property (nonatomic, assign) BOOL spoofDeviceIdentity;

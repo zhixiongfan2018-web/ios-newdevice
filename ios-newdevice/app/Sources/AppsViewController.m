@@ -1,4 +1,5 @@
 #import "AppsViewController.h"
+#import "NDAppDataManager.h"
 #import "NDConfig.h"
 #import "NDRecordStore.h"
 #import "NDTheme.h"
@@ -124,13 +125,16 @@
 }
 
 - (void)save {
-    [NDConfig shared].targetApps = self.selected.allObjects;
+    NSArray *selected = self.selected.allObjects;
+    [NDConfig shared].targetApps = selected;
     [[NDConfig shared] save];
+    // Keep inject filter aligned with selection (SpringBoard + targets).
+    [[NDAppDataManager shared] syncInjectFilterWithTargetApps:selected];
     // Force publish + notify even if config unchanged on disk semantics
     [[NDRecordStore shared] notifyReload];
     [self updateTitleBadge];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"已保存"
-                                                               message:[NSString stringWithFormat:@"已选择 %lu 个应用\n请强杀并重开这些 App 后生效", (unsigned long)self.selected.count]
+                                                               message:[NSString stringWithFormat:@"已选择 %lu 个应用\n注入过滤已同步\n请强杀并重开这些 App 后生效", (unsigned long)selected.count]
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
@@ -141,7 +145,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"勾选后点右上角保存，再强杀并重开目标 App。仅勾选不重开不会生效。";
+    return @"勾选后点右上角保存（会同步注入列表）。切换环境只处理勾选的应用。强杀并重开后生效。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

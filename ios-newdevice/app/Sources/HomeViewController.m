@@ -214,8 +214,17 @@
 
 - (void)refresh {
     NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
-    self.recordNameLabel.text = p.name.length ? p.name : @"--";
-    self.modelLabel.text = [NSString stringWithFormat:@"%@ · iOS %@", p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
+    if (p.remark.length) {
+        self.recordNameLabel.text = p.remark;
+        self.modelLabel.text = [NSString stringWithFormat:@"%@\n%@ · iOS %@",
+                                p.name.length ? p.name : @"--",
+                                p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
+        self.modelLabel.numberOfLines = 2;
+    } else {
+        self.recordNameLabel.text = p.name.length ? p.name : @"--";
+        self.modelLabel.text = [NSString stringWithFormat:@"%@ · iOS %@", p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
+        self.modelLabel.numberOfLines = 1;
+    }
 }
 
 - (void)setBusy:(BOOL)busy {
@@ -241,7 +250,43 @@
     }];
 }
 
-- (void)newDevice { [self run:@"newRecord"]; }
+- (void)newDevice {
+    if (self.busy) return;
+    self.busy = YES;
+    NSString *prevIP = self.lastIP;
+    [[NDAPIClient shared] call:@"newRecord" completion:^(BOOL ok, NSString *body, NSError *error) {
+        self.busy = NO;
+        [self refresh];
+        [self refreshAPIStatus];
+        [self refreshIP:YES expectedChangeFrom:prevIP];
+        if (!ok) {
+            [self alert:error.localizedDescription ?: @"执行失败"];
+            return;
+        }
+        [self promptRemarkForCurrentRecord];
+    }];
+}
+
+- (void)promptRemarkForCurrentRecord {
+    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+    if (!p || !p.name.length || [p.name isEqualToString:@"原始机器"]) return;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"添加备注"
+                                                               message:[NSString stringWithFormat:@"给「%@」起个好记的名字（可跳过）", p.name]
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = p.remark ?: @"";
+        tf.placeholder = @"例如：主号 / 测试号";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"跳过" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        p.remark = a.textFields.firstObject.text ?: @"";
+        [[NDRecordStore shared] saveProfile:p error:nil];
+        [self refresh];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
 - (void)original { [self run:@"originRecord"]; }
 - (void)nextRecord { [self run:@"nextRecord"]; }
 

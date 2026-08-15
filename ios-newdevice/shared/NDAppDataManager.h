@@ -21,6 +21,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// Restore every staged app under Records/<name>/apps/ (source of truth after AMG import).
 - (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName error:(NSError * _Nullable * _Nullable)error;
 
+/// Same as restoreAll, but only bundles in `only` (nil/empty = all staged). Speeds multi-target switches.
+- (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName
+                        onlyBundleIds:(NSArray<NSString *> * _Nullable)only
+                                error:(NSError * _Nullable * _Nullable)error;
+
+/// Rewrite NewDevice.plist Filter.Bundles = SpringBoard + targetApps so selected apps get inject.
+- (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds;
+
 /// Human-readable report from the last restore (also written to Media/NewDevice/last-restore.txt).
 @property (nonatomic, copy, readonly, nullable) NSString *lastRestoreReport;
 

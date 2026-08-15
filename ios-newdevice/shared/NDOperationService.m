@@ -49,14 +49,20 @@
 
 - (NSArray<NSString *> *)appsForSwitchTo:(NSString *)current previous:(NSString *)previous {
     [[NDConfig shared] reload];
-    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[NDConfig shared].targetApps ?: @[]];
-    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
-    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [set addObject:b];
-    // Keep global targetApps in sync so「目标应用」页能看到导入的 App 环境
-    if (set.count && set.count != ([NDConfig shared].targetApps.count ?: 0)) {
-        [NDConfig shared].targetApps = set.array;
-        [[NDConfig shared] save];
+    // User-selected targets only — never permanently union every record's apps into targetApps
+    // (that bloated switch/backup and slowed 一键新机).
+    NSArray *targets = [NDConfig shared].targetApps ?: @[];
+    if (targets.count) return targets;
+
+    // Fallback when「目标应用」尚未配置：union of the two records (do not save).
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) {
+        if (b.length) [set addObject:b];
     }
+    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) {
+        if (b.length) [set addObject:b];
+    }
+    if (!set.count) [set addObject:@"net.kortina.labs.Venmo"];
     return set.array;
 }
 
@@ -67,12 +73,8 @@
 - (void)prepareTargetsForDestination:(NSString *)destination
                                block:(void (^)(NSArray<NSString *> *apps, NSString *previousRecord))block {
     NSString *prev = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
-    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self appsForSwitchTo:prev previous:prev]];
-    // Include destination App env BEFORE kill/restore (imported Venmo etc.)
-    if (destination.length) {
-        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:destination]) [set addObject:b];
-    }
-    NSArray *apps = set.array;
+    NSString *dest = destination.length ? destination : prev;
+    NSArray *apps = [self appsForSwitchTo:dest previous:prev];
     [[NDAppDataManager shared] terminateApps:apps];
     block(apps, prev);
 }
@@ -106,18 +108,9 @@
             }
         }
 
-        // Destination record apps only — do NOT permanently union every historical import
-        // into global targetApps (that bloated lists and broke 一键新机 with huge backups).
-        NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
-        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [set addObject:b];
-        // Working set for this switch: configured targets + both records' apps
-        NSMutableOrderedSet *work = [NSMutableOrderedSet orderedSetWithArray:apps ?: @[]];
-        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:current]) [work addObject:b];
-        for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:previous]) [work addObject:b];
-        apps = work.array;
-        if (set.count) {
-            cfg.targetApps = set.array;
-            [cfg save];
+        // Work set = user targetApps (from prepareTargets). Do not grow targetApps here.
+        if (!apps.count) {
+            apps = [self appsForSwitchTo:current previous:previous];
         }
 
         BOOL hasStaged = [self recordHasStagedApps:current];
@@ -125,20 +118,18 @@
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
             BOOL leavingReal = !sameRecord && previous.length && ![previous isEqualToString:@"原始机器"];
 
-            // Snapshot outgoing live data when leaving a real record.
-            // Keep fat AMG stages (fat-guard in backupApps); never skip backup just
-            // because destination is empty — otherwise live divergence is lost.
+            // Snapshot only work-set apps when leaving a real record (fat-guard in backupApps).
             if (leavingReal) {
-                NSArray *prevApps = [[NDRecordStore shared] appBundleIdsForRecord:previous];
-                if (!prevApps.count) prevApps = apps;
-                [[NDAppDataManager shared] backupApps:prevApps toRecord:previous error:nil];
+                [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
             }
 
-            // Always wipe live sandboxes so the new identity cannot inherit files.
+            // Wipe only selected targets so other apps stay untouched.
             [[NDAppDataManager shared] clearDataForApps:apps error:nil];
             if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
-                [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current error:&restoreErr];
+                [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current
+                                                          onlyBundleIds:apps
+                                                                  error:&restoreErr];
                 [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
                 // Strict isolation: previous Venmo Keychain must not leak into this record.
@@ -169,8 +160,11 @@
                 [adm restorePasteboardFromRecord:current];
             }
         }
+        // Airplane is not isolation — run async so switch ACK is not blocked (~5s before).
         if (cfg.smartAirplane) {
-            [NDAirplane toggleAirplaneWithDelay:3.0 error:nil];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
+            });
         }
     } @catch (NSException *ex) {
         NSLog(@"[NewDevice] afterSwitch exception: %@", ex);
@@ -290,21 +284,16 @@
                 done(@"无当前记录", 500);
                 return;
             }
-            // Ensure Venmo is a target so identity spoof + tweak paths stay armed
+            // Restore only configured target apps (do not grow targetApps from record).
             NDConfig *cfg = [NDConfig shared];
-            NSMutableOrderedSet *apps = [NSMutableOrderedSet orderedSetWithArray:cfg.targetApps ?: @[]];
-            [apps addObject:@"net.kortina.labs.Venmo"];
-            for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:name]) [apps addObject:b];
-            if (apps.count != (cfg.targetApps.count ?: 0)) {
-                cfg.targetApps = apps.array;
-                [cfg save];
+            NSArray *bids = cfg.targetApps ?: @[];
+            if (!bids.count) {
+                bids = [[NDRecordStore shared] appBundleIdsForRecord:name] ?: @[];
+                if (!bids.count) bids = @[ @"net.kortina.labs.Venmo" ];
             }
-            NSArray *bids = apps.array;
             [[NDAppDataManager shared] terminateApps:bids];
             NSMutableArray *lines = [NSMutableArray array];
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
-            for (NSString *bid in ([fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[])) {
+            for (NSString *bid in bids) {
                 if ([bid hasPrefix:@"."]) continue;
                 if (![[NDAppDataManager shared] containerPathForBundleId:bid]) {
                     [[NDAppDataManager shared] tryLaunchAppToCreateContainer:bid];
@@ -312,10 +301,12 @@
                 }
             }
             NSError *err = nil;
-            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
+            [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name onlyBundleIds:bids error:&err];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
-            // Clear previous Venmo session then apply this record's akc (in-app).
-            NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
+            NSString *bind = @"";
+            if ([bids containsObject:@"net.kortina.labs.Venmo"]) {
+                bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
+            }
             NSString *probe = [[NDAppDataManager shared] probeLiveContainerForBundleId:@"net.kortina.labs.Venmo"];
             NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
             if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
@@ -624,11 +615,12 @@
                     @try {
                         // Set current + restore staged Venmo/etc. into live sandboxes
                         [[NDRecordStore shared] setCurrentRecordName:applyName];
-                        NSArray *bids = [[NDRecordStore shared] appBundleIdsForRecord:applyName];
+                        NSArray *targets = [NDConfig shared].targetApps ?: @[];
+                        NSArray *bids = targets.count ? targets : [[NDRecordStore shared] appBundleIdsForRecord:applyName];
                         if (!bids.count) bids = @[@"net.kortina.labs.Venmo"];
                         [[NDAppDataManager shared] terminateApps:bids];
                         NSError *rErr = nil;
-                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:&rErr];
+                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName onlyBundleIds:bids error:&rErr];
                         [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
                         NSString *bind = @"";
                         if ([bids containsObject:@"net.kortina.labs.Venmo"]) {

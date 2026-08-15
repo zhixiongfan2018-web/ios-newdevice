@@ -511,6 +511,11 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     if (!d[@"name"] && d[@"RecordName"]) d[@"name"] = d[@"RecordName"];
     if (!d[@"name"] && d[@"RecordID"]) d[@"name"] = d[@"RecordID"];
     if (!d[@"name"] && d[@"title"]) d[@"name"] = d[@"title"];
+    if (!d[@"remark"] && d[@"Remark"]) d[@"remark"] = d[@"Remark"];
+    if (!d[@"remark"] && d[@"note"]) d[@"remark"] = d[@"note"];
+    if (!d[@"remark"] && d[@"Note"]) d[@"remark"] = d[@"Note"];
+    if (!d[@"remark"] && d[@"comment"]) d[@"remark"] = d[@"comment"];
+    if (!d[@"remark"] && d[@"memo"]) d[@"remark"] = d[@"memo"];
 
     // AMG faker "Name" is the user-assigned device name (UIDevice.name), not record title
     if (!d[@"DeviceName"] && d[@"Name"] && [self NDStringLooksPlaintextIdentity:d[@"Name"] forKey:@"Name"]) {
@@ -605,6 +610,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     dict = [self normalizedImportDictionary:dict];
     NDDeviceProfile *p = [NDDeviceProfile new];
     p.name = dict[@"name"] ?: @"unnamed";
+    p.remark = dict[@"remark"] ?: dict[@"Remark"] ?: dict[@"note"] ?: dict[@"Note"] ?: @"";
     p.enabled = dict[@"enabled"] ? [dict[@"enabled"] boolValue] : YES;
     p.spoofDeviceIdentity = dict[@"spoofDeviceIdentity"] ? [dict[@"spoofDeviceIdentity"] boolValue] : YES;
     id created = dict[@"createdAt"];
@@ -701,6 +707,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     f.dateFormat = @"yyyy-MM-dd'T'HH:mm:ssZ";
     return @{
         @"name": self.name ?: @"",
+        @"remark": self.remark ?: @"",
         @"enabled": @(self.enabled),
         @"spoofDeviceIdentity": @(self.spoofDeviceIdentity),
         @"createdAt": [f stringFromDate:self.createdAt ?: [NSDate date]],

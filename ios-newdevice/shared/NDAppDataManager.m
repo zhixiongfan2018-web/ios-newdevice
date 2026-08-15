@@ -882,6 +882,12 @@ extern char **environ;
 }
 
 - (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName error:(NSError **)error {
+    return [self restoreAllStagedAppsFromRecord:recordName onlyBundleIds:nil error:error];
+}
+
+- (BOOL)restoreAllStagedAppsFromRecord:(NSString *)recordName
+                        onlyBundleIds:(NSArray<NSString *> *)only
+                                error:(NSError **)error {
     if (!recordName.length || [recordName isEqualToString:@"原始机器"]) return YES;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *appsRoot = [[NDPaths recordDir:recordName] stringByAppendingPathComponent:@"apps"];
@@ -923,8 +929,70 @@ extern char **environ;
             if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) [bids addObject:e];
         }
     }
-    if (!bids.count) [bids addObject:@"net.kortina.labs.Venmo"];
+    if (only.count) {
+        NSSet *filter = [NSSet setWithArray:only];
+        NSMutableOrderedSet *filtered = [NSMutableOrderedSet orderedSet];
+        for (NSString *b in bids) {
+            if ([filter containsObject:b]) [filtered addObject:b];
+        }
+        // Still try selected targets even if discovery missed them (restoreApps no-ops if empty).
+        for (NSString *b in only) {
+            if ([b isKindOfClass:[NSString class]] && b.length) [filtered addObject:b];
+        }
+        bids = filtered;
+    } else if (!bids.count) {
+        [bids addObject:@"net.kortina.labs.Venmo"];
+    }
     return [self restoreApps:bids.array fromRecord:recordName error:error];
+}
+
+- (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds {
+    NSMutableOrderedSet *bundles = [NSMutableOrderedSet orderedSetWithObject:@"com.apple.springboard"];
+    for (NSString *b in bundleIds ?: @[]) {
+        if (![b isKindOfClass:[NSString class]] || !b.length) continue;
+        if ([b isEqualToString:@"com.local.newdevice"]) continue;
+        [bundles addObject:b];
+    }
+    NSDictionary *plist = @{
+        @"Filter": @{
+            @"Bundles": bundles.array,
+            @"Executables": @[ @"CommCenter", @"CommCenterRootHelper" ],
+            @"RejectList": @[
+                @"com.local.newdevice",
+                @"xyz.willy.Sileo",
+                @"org.coolstar.SileoStore",
+                @"com.saurik.Cydia",
+                @"xyz.willy.Zebra",
+                @"com.opa334.Dopamine",
+                @"com.opa334.TrollStore",
+            ],
+        },
+    };
+    NSArray *paths = @[
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/NewDevice.plist",
+        @"/var/jb/usr/lib/TweakInject/NewDevice.plist",
+    ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray *lines = [NSMutableArray array];
+    [lines addObject:[NSString stringWithFormat:@"bundles=%lu %@", (unsigned long)bundles.count,
+                      [bundles.array componentsJoinedByString:@","]]];
+    for (NSString *path in paths) {
+        NSString *off = [path stringByAppendingString:@".off"];
+        NSString *writePath = path;
+        if (![fm fileExistsAtPath:path] && [fm fileExistsAtPath:off]) writePath = off;
+        if (![fm fileExistsAtPath:writePath] && ![fm fileExistsAtPath:[writePath stringByDeletingLastPathComponent]]) {
+            [lines addObject:[NSString stringWithFormat:@"skip %@", writePath]];
+            continue;
+        }
+        BOOL ok = [plist writeToFile:writePath atomically:YES];
+        [lines addObject:[NSString stringWithFormat:@"%@ %@", ok ? @"ok" : @"fail", writePath]];
+        if (ok) [NDPaths makePathWorldReadable:writePath];
+    }
+    NSString *report = [lines componentsJoinedByString:@"\n"];
+    [report writeToFile:@"/var/mobile/Media/NewDevice/last-inject-filter.txt"
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[NewDevice] syncInjectFilter %@", report);
+    return report;
 }
 
 - (BOOL)backupKeychainHintsForApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName {
@@ -1195,8 +1263,8 @@ extern char **environ;
     [lines addObject:[self NDLaunchVenmoForKeychainWork] ?: @"launch=failed"];
 
     BOOL cleared = NO;
-    for (NSInteger i = 0; i < 40; i++) { // ~20s
-        [NSThread sleepForTimeInterval:0.5];
+    for (NSInteger i = 0; i < 14; i++) { // ~3.5s (was ~20s)
+        [NSThread sleepForTimeInterval:0.25];
         NSString *body = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt"
                                                    encoding:NSUTF8StringEncoding error:nil];
         if (!body.length) {
@@ -1205,7 +1273,7 @@ extern char **environ;
         }
         if (body.length && [body containsString:@"in-app-clear"]) {
             cleared = YES;
-            [lines addObject:[NSString stringWithFormat:@"in-app-clear OK t=%.1fs", (i + 1) * 0.5]];
+            [lines addObject:[NSString stringWithFormat:@"in-app-clear OK t=%.2fs", (i + 1) * 0.25]];
             [lines addObject:body];
             break;
         }
@@ -1277,8 +1345,8 @@ extern char **environ;
     [lines addObject:[self NDLaunchVenmoForKeychainWork] ?: @"launch=failed"];
 
     BOOL cleared = NO, restored = NO;
-    for (NSInteger i = 0; i < 50; i++) { // ~25s
-        [NSThread sleepForTimeInterval:0.5];
+    for (NSInteger i = 0; i < 16; i++) { // ~4s (was ~25s)
+        [NSThread sleepForTimeInterval:0.25];
         NSString *clr = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-venmo-kc-clear.txt"
                                                   encoding:NSUTF8StringEncoding error:nil];
         if (!clr.length) {
@@ -1287,45 +1355,38 @@ extern char **environ;
         }
         if (!cleared && clr.length && [clr containsString:@"in-app-clear"]) {
             cleared = YES;
-            [lines addObject:[NSString stringWithFormat:@"clear OK t=%.1fs", (i + 1) * 0.5]];
+            [lines addObject:[NSString stringWithFormat:@"clear OK t=%.2fs", (i + 1) * 0.25]];
         }
         if (akcOk.length) {
             NSString *ok = [NSString stringWithContentsOfFile:akcOk encoding:NSUTF8StringEncoding error:nil];
             if (ok.length && [ok containsString:@"ok="] && ![ok containsString:@"ok=0"]) {
                 restored = YES;
-                [lines addObject:[NSString stringWithFormat:@"akc OK t=%.1fs", (i + 1) * 0.5]];
+                [lines addObject:[NSString stringWithFormat:@"akc OK t=%.2fs", (i + 1) * 0.25]];
                 break;
             }
         }
-        if (cleared && i >= 20 && !akcOk.length) break;
+        if (cleared && restored) break;
+        if (cleared && !akcOk.length && i >= 4) break;
+        if (cleared && i >= 10) break; // leave pending-akc for next manual open
     }
     if (!cleared) [lines addObject:@"clear TIMEOUT"];
-    if (!restored) [lines addObject:@"akc TIMEOUT — open Venmo once"];
+    if (!restored) [lines addObject:@"akc TIMEOUT — pending-akc kept for next open"];
 
     [self terminateApps:@[vbid]];
-    // Re-apply staged sandbox after the silent Venmo pass so the first manual open
-    // is the target env (not caches written while old tokens were still briefly live).
-    if (rec.length && ![rec isEqualToString:@"原始机器"] && (cleared || restored)) {
-        NSMutableArray *rLines = [NSMutableArray array];
-        NSMutableArray *missing = [NSMutableArray array];
-        BOOL ok = [self restoreOneApp:vbid fromRecord:rec lines:rLines missing:missing];
-        [lines addObject:ok ? @"sandbox=reapplied" : @"sandbox=reapply-warn"];
-        // Drop pending-akc again: keychain already bound in this pass; avoid another
-        // auto-driven restore flash on the user's first open.
-        for (NSString *p in @[
-                 [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
-                 @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
-             ]) {
-            [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
-        }
-        for (NSString *dir in @[
-                 [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-clear-kc"],
-                 @"/var/mobile/Media/NewDevice/pending-clear-kc",
-             ]) {
-            [[NSFileManager defaultManager] removeItemAtPath:[dir stringByAppendingPathComponent:vbid] error:nil];
-        }
-        [self terminateApps:@[vbid]];
+    // Skip full sandbox reapply (slow). Files already restored before bind.
+    for (NSString *p in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
+             @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+         ]) {
+        if (restored) [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
     }
+    for (NSString *dir in @[
+             [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-clear-kc"],
+             @"/var/mobile/Media/NewDevice/pending-clear-kc",
+         ]) {
+        [[NSFileManager defaultManager] removeItemAtPath:[dir stringByAppendingPathComponent:vbid] error:nil];
+    }
+    if (cleared || restored) [lines addObject:@"sandbox=keep-prebind"];
     [self NDOpenBundleId:NDBundleID];
     NSString *report = [lines componentsJoinedByString:@"\n"];
     [report writeToFile:@"/var/mobile/Media/NewDevice/last-venmo-bind.txt"

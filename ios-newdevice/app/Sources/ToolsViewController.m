@@ -8,7 +8,6 @@
 #import "NDAMGParamClient.h"
 #import "NDDeviceProfile.h"
 #import "NDPaths.h"
-#import "ProbeViewController.h"
 #import <spawn.h>
 #import <sys/wait.h>
 
@@ -32,46 +31,36 @@ extern char **environ;
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.tableView addGestureRecognizer:lp];
     [NDPaths ensureDirectories];
+
+    // Keychain always imports with holographic data — no UI toggle.
+    NDConfig *c = [NDConfig shared];
+    if (!c.importKeychainWithData) {
+        c.importKeychainWithData = YES;
+        [c save];
+    }
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == 0) return @"本机数据（爱思可见）";
-    if (section == 1) return @"其他数据导入";
-    if (section == 2) return @"AMG 兼容";
-    return @"实用工具";
+    if (section == 0) return @"本机数据（爱思）";
+    if (section == 1) return @"导入";
+    return @"维护";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1) return @"导入时自动带上 Keychain。";
     return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3;
+    if (section == 0) return 2;
     if (section == 1) return 3;
-    if (section == 2) return 3;
-    return 5;
+    return 3;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     NDConfig *c = [NDConfig shared];
-    if (indexPath.section == 1 && indexPath.row == 2) {
-        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-        cell.textLabel.font = [NDTheme headlineFont];
-        cell.textLabel.text = @"同时导入 Keychain";
-        cell.detailTextLabel.font = [NDTheme captionFont];
-        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        cell.detailTextLabel.text = @"导入时暂存钥匙串；切换记录时再写入";
-        UISwitch *sw = [UISwitch new];
-        sw.onTintColor = [NDTheme accent];
-        sw.on = c.importKeychainWithData;
-        [sw addTarget:self action:@selector(toggleKeychain:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        return cell;
-    }
-
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
     cell.textLabel.font = [NDTheme headlineFont];
     cell.detailTextLabel.font = [NDTheme captionFont];
@@ -85,77 +74,50 @@ extern char **environ;
             cell.textLabel.text = @"导出本机数据";
             cell.detailTextLabel.text = [NSString stringWithFormat:@".tar → %@", [NDPaths mediaExportDir]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
-        } else if (indexPath.row == 1) {
+        } else {
             cell.textLabel.text = @"导入本机数据";
             cell.detailTextLabel.text = [NSString stringWithFormat:@"从 %@ 读 .tar", [NDPaths mediaImportDir]];
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
-        } else {
-            cell.textLabel.text = @"创建/打开用户文件夹";
-            cell.detailTextLabel.text = @"爱思文件管理里应看到 NewDevice";
-            cell.imageView.image = [UIImage systemImageNamed:@"folder.badge.plus"];
         }
     } else if (indexPath.section == 1) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"导入其他数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore iGrimaceImportPath]];
-            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down"];
-        } else {
-            cell.textLabel.text = @"导入 AWZ 数据";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"路径: %@", [NDRecordStore awzImportPath]];
-            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
-        }
-    } else if (indexPath.section == 2) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"导入 AMG 数据";
-            cell.detailTextLabel.text = @"经典包→/var/mobile/AMG/<记录名>（勿用 resolved 分析包）";
+            cell.textLabel.text = @"导入 AMG";
+            cell.detailTextLabel.text = @"经典包 → /var/mobile/AMG";
             cell.imageView.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];
         } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"拉取 AMG 明文参数";
-            cell.detailTextLabel.text = @"getRecordParam → faker_plaintext.plist（密文 faker 用）";
-            cell.imageView.image = [UIImage systemImageNamed:@"key.horizontal"];
+            cell.textLabel.text = @"导入其他数据";
+            cell.detailTextLabel.text = [NDRecordStore iGrimaceImportPath];
+            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down"];
         } else {
+            cell.textLabel.text = @"导入 AWZ";
+            cell.detailTextLabel.text = [NDRecordStore awzImportPath];
+            cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.down.on.square"];
+        }
+    } else {
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"拉取 AMG 明文参数";
+            cell.detailTextLabel.text = @"密文 faker 时用：getRecordParam → faker_plaintext.plist";
+            cell.imageView.image = [UIImage systemImageNamed:@"key.horizontal"];
+        } else if (indexPath.row == 1) {
             cell.textLabel.text = @"瘦身（清除图片、视频）";
             cell.detailTextLabel.text = c.slimExportStripMedia
                 ? @"导出时自动瘦身：开（点击立刻瘦身，长按关闭）"
                 : @"点击立刻瘦身当前记录；长按开启导出自动清除";
             cell.imageView.image = [UIImage systemImageNamed:@"internaldrive"];
-        }
-    } else {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"对齐当前环境参数";
-            cell.detailTextLabel.text = @"补全 Model/设备名/内存磁盘/运营商，修正 Build";
-            cell.imageView.image = [UIImage systemImageNamed:@"slider.horizontal.3"];
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"修复不能输入中文";
-            cell.detailTextLabel.text = @"清理键盘缓存后注销桌面";
-            cell.imageView.image = [UIImage systemImageNamed:@"keyboard"];
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"修复国行机源不能联网";
-            cell.detailTextLabel.text = @"Dopamine/Sileo：无线局域网与蜂窝数据 / 还原网络设置";
-            cell.imageView.image = [UIImage systemImageNamed:@"wifi.exclamationmark"];
-        } else if (indexPath.row == 3) {
-            cell.textLabel.text = @"注销（重启桌面）";
+        } else {
+            cell.textLabel.text = @"注销桌面";
             cell.detailTextLabel.text = @"killall SpringBoard";
             cell.imageView.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
-        } else {
-            cell.textLabel.text = @"脚本和使用说明";
-            cell.detailTextLabel.text = @"打开探针 / API 说明";
-            cell.imageView.image = [UIImage systemImageNamed:@"doc.text"];
         }
     }
     return cell;
-}
-
-- (void)toggleKeychain:(UISwitch *)sw {
-    [NDConfig shared].importKeychainWithData = sw.on;
-    [[NDConfig shared] save];
 }
 
 - (void)onLongPress:(UILongPressGestureRecognizer *)gr {
     if (gr.state != UIGestureRecognizerStateBegan) return;
     CGPoint p = [gr locationInView:self.tableView];
     NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:p];
-    if (!ip || ip.section != 2 || ip.row != 2) return;
+    if (!ip || ip.section != 2 || ip.row != 1) return;
     NDConfig *c = [NDConfig shared];
     c.slimExportStripMedia = !c.slimExportStripMedia;
     [c save];
@@ -170,12 +132,12 @@ extern char **environ;
 }
 
 - (void)runImportKind:(NSString *)kind path:(NSString *)path {
-    BOOL kc = [NDConfig shared].importKeychainWithData;
+    // Always import Keychain with holographic data.
     BOOL isAMG = [kind.lowercaseString containsString:@"amg"] || [kind.lowercaseString containsString:@"media"];
     NSString *fun = isAMG ? @"importAMGRecords" : ([kind.lowercaseString containsString:@"awz"] ? @"importAWZ" : @"importIGrimace");
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"请稍候…" preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:wait animated:YES completion:^{
-        [[NDOperationService shared] runAsync:fun query:@{@"dir": path ?: @"", @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
+        [[NDOperationService shared] runAsync:fun query:@{@"dir": path ?: @"", @"keychain": @"1"} completion:^(NSString *body, NSInteger code) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
                     NSUInteger okN = [NDRecordStore shared].lastImportSuccessCount;
@@ -204,14 +166,6 @@ extern char **environ;
                  : (err.localizedDescription ?: @"没有可导出的记录（请先一键新机生成记录）")];
 }
 
-- (void)ensureUserFolder {
-    [NDPaths ensureDirectories];
-    BOOL ok = [[NSFileManager defaultManager] fileExistsAtPath:[NDPaths mediaHomeDir]];
-    [self alert:ok ? @"已创建" : @"创建失败"
-        message:ok ? [NSString stringWithFormat:@"请用爱思打开：\n文件管理 → 刷新 → NewDevice\n\n%@", [NDPaths mediaHomeDir]]
-                  : @"无法在 /var/mobile/Media 下创建 NewDevice"];
-}
-
 - (void)respring {
     pid_t pid = 0;
     char *argv[] = { "/var/jb/usr/bin/killall", "-9", "SpringBoard", NULL };
@@ -220,26 +174,6 @@ extern char **environ;
         posix_spawn(&pid, argv2[0], NULL, NULL, argv2, environ);
     }
     if (pid > 0) waitpid(pid, NULL, 0);
-}
-
-- (void)fixChineseInput {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = @[
-        @"/var/mobile/Library/Keyboard",
-        @"/var/mobile/Library/Preferences/com.apple.keyboard.plist",
-        @"/var/mobile/Library/Preferences/com.apple.TextInput.plist",
-    ];
-    for (NSString *p in paths) {
-        if ([fm fileExistsAtPath:p]) [fm removeItemAtPath:p error:nil];
-    }
-    [self alert:@"已清理键盘缓存" message:@"即将注销桌面，请稍后重试中文输入"];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self respring];
-    });
-}
-
-- (void)fixRepoNetwork {
-    [self alert:@"国行联网提示" message:@"1. 设置 → 蜂窝网络 → 打开 Sileo/NewDevice 的无线局域网与蜂窝数据\n2. 若仍失败：设置 → 通用 → 传输或还原 iPhone → 还原 → 还原网络设置\n3. 本环境为 Dopamine，无需 Cydia 专项补丁"];
 }
 
 - (void)NDFinishPullWait:(UIAlertController *)wait title:(NSString *)title message:(NSString *)msg {
@@ -286,7 +220,7 @@ extern char **environ;
                 p.enabled = YES;
                 [[NDRecordStore shared] saveProfile:p error:nil];
             }
-            NSString *msg = [NSString stringWithFormat:@"已写入明文：\n%@\n来源：%@\n键数：%lu\n\n请再执行「导入 AMG 数据」。",
+            NSString *msg = [NSString stringWithFormat:@"已写入明文：\n%@\n来源：%@\n键数：%lu\n\n请再执行「导入 AMG」。",
                              outPath, note ?: @"-", (unsigned long)plain.count];
             [self NDFinishPullWait:wait title:@"拉取完成" message:msg];
         } else {
@@ -299,7 +233,7 @@ extern char **environ;
 
 - (void)pullAMGPlaintextParam {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"拉取 AMG 明文参数"
-                                                               message:@"调用本机 8080 getRecordParam。需 AMG 前台解密；若 8080 已被 NewDevice 占用，请先写出 faker_plaintext.plist。记录名与 AMG 一致，可含 + 与空格。"
+                                                               message:@"调用本机 8080 getRecordParam。需 AMG 前台解密；记录名与 AMG 一致。"
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = @"recordName";
@@ -324,66 +258,36 @@ extern char **environ;
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 1 && indexPath.row == 2) return;
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) [self exportOwnData];
-        else if (indexPath.row == 1) [self runImportKind:@"AMG" path:[NDPaths mediaImportDir]];
-        else [self ensureUserFolder];
+        else [self runImportKind:@"AMG" path:[NDPaths mediaImportDir]];
         return;
     }
     if (indexPath.section == 1) {
-        if (indexPath.row == 0) {
-            [self runImportKind:@"iGrimace" path:[NDRecordStore iGrimaceImportPath]];
-        } else {
-            [self runImportKind:@"AWZ" path:[NDRecordStore awzImportPath]];
-        }
-        return;
-    }
-    if (indexPath.section == 2) {
-        if (indexPath.row == 0) {
-            [self runImportKind:@"AMG" path:[NDRecordStore resolvedAMGImportPath]];
-        } else if (indexPath.row == 1) {
-            [self pullAMGPlaintextParam];
-        } else {
-            NSString *name = [[NDRecordStore shared] currentRecordName];
-            if (!name.length || [name isEqualToString:@"原始机器"]) {
-                [self alert:@"无法瘦身" message:@"请先切换到非「原始机器」记录"];
-                return;
-            }
-            NSUInteger n = [[NDAppDataManager shared] slimMediaInRecord:name];
-            [self alert:@"瘦身完成" message:[NSString stringWithFormat:@"已从「%@」清除 %lu 个图片/视频文件", name, (unsigned long)n]];
-        }
+        if (indexPath.row == 0) [self runImportKind:@"AMG" path:[NDRecordStore resolvedAMGImportPath]];
+        else if (indexPath.row == 1) [self runImportKind:@"iGrimace" path:[NDRecordStore iGrimaceImportPath]];
+        else [self runImportKind:@"AWZ" path:[NDRecordStore awzImportPath]];
         return;
     }
 
     if (indexPath.row == 0) {
+        [self pullAMGPlaintextParam];
+    } else if (indexPath.row == 1) {
         NSString *name = [[NDRecordStore shared] currentRecordName];
         if (!name.length || [name isEqualToString:@"原始机器"]) {
-            [self alert:@"无法对齐" message:@"请先切换到非「原始机器」记录"];
+            [self alert:@"无法瘦身" message:@"请先切换到非「原始机器」记录"];
             return;
         }
-        UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"对齐参数" message:@"请稍候…" preferredStyle:UIAlertControllerStyleAlert];
-        [self presentViewController:wait animated:YES completion:^{
-            [[NDOperationService shared] runAsync:@"alignParams" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [wait dismissViewControllerAnimated:YES completion:^{
-                        [self alert:(code == 200) ? @"对齐完成" : @"对齐失败" message:body.length ? body : @"无结果"];
-                    }];
-                });
-            }];
-        }];
-    } else if (indexPath.row == 1) [self fixChineseInput];
-    else if (indexPath.row == 2) [self fixRepoNetwork];
-    else if (indexPath.row == 3) {
+        NSUInteger n = [[NDAppDataManager shared] slimMediaInRecord:name];
+        [self alert:@"瘦身完成" message:[NSString stringWithFormat:@"已从「%@」清除 %lu 个图片/视频文件", name, (unsigned long)n]];
+    } else {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"注销桌面" message:@"将重启 SpringBoard，是否继续？" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
         [alert addAction:[UIAlertAction actionWithTitle:@"注销" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
             [self respring];
         }]];
         [self presentViewController:alert animated:YES completion:nil];
-    } else {
-        [self.navigationController pushViewController:[ProbeViewController new] animated:YES];
     }
 }
 

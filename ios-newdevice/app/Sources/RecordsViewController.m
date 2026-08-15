@@ -65,10 +65,9 @@
 
 - (void)importFromAMG {
     NSString *dir = [NDRecordStore resolvedAMGImportPath];
-    BOOL kc = [NDConfig shared].importKeychainWithData;
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导入" message:@"解压并写入 App 沙盒…" preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:wait animated:YES completion:^{
-        [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
+        [[NDOperationService shared] runAsync:@"importAMGRecords" query:@{@"dir": dir, @"keychain": @"1"} completion:^(NSString *body, NSInteger code) {
             // Import only stages data — restore separately to avoid jetsam/闪退.
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
@@ -185,10 +184,11 @@
     BOOL current = [name isEqualToString:[[NDRecordStore shared] currentRecordName]];
 
     cell.textLabel.font = [NDTheme headlineFont];
-    cell.textLabel.text = name;
+    // Prefer remark as display title; keep folder name in subtitle when remarked.
+    cell.textLabel.text = p.remark.length ? p.remark : name;
     cell.detailTextLabel.font = [NDTheme captionFont];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-    cell.detailTextLabel.numberOfLines = 2;
+    cell.detailTextLabel.numberOfLines = 3;
     NSString *state = p.enabled ? @"" : @" · 已禁用";
     NSString *appsHint = @"";
     if (![name isEqualToString:@"原始机器"]) {
@@ -201,7 +201,12 @@
         appsHint = [NSString stringWithFormat:@" · apps:%lu%@%@",
                     (unsigned long)apps.count, akc ? @" akc" : @"", apps.count ? @"" : @" (空)"];
     }
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
+    NSString *meta = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
+    if (p.remark.length) {
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%@", name, meta];
+    } else {
+        cell.detailTextLabel.text = meta;
+    }
 
     if (current) {
         cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
@@ -258,7 +263,32 @@
         }];
     }];
     toggle.backgroundColor = [NDTheme accent];
-    return [UISwipeActionsConfiguration configurationWithActions:@[del, toggle]];
+    UIContextualAction *remark = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"备注" handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
+        completionHandler(YES);
+        [self editRemarkForRecord:name];
+    }];
+    remark.backgroundColor = [UIColor systemOrangeColor];
+    return [UISwipeActionsConfiguration configurationWithActions:@[del, toggle, remark]];
+}
+
+- (void)editRemarkForRecord:(NSString *)name {
+    NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
+    if (!p) return;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"环境备注"
+                                                               message:name
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = p.remark ?: @"";
+        tf.placeholder = @"例如：主号 / 测试号";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        p.remark = a.textFields.firstObject.text ?: @"";
+        [[NDRecordStore shared] saveProfile:p error:nil];
+        [self reload];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 @end

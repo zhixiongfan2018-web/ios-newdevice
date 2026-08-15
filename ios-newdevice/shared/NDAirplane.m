@@ -35,10 +35,13 @@
 }
 
 + (BOOL)toggleAirplaneWithDelay:(NSTimeInterval)delay error:(NSError **)error {
+    // Keep on/off settle proportional to caller delay (switch uses ~0.6s; tools may pass longer).
+    NSTimeInterval onHold = MAX(0.4, delay);
+    NSTimeInterval offSettle = MAX(0.4, MIN(1.2, delay));
     BOOL ok1 = [self setAirplaneModeOn:YES];
-    [NSThread sleepForTimeInterval:MAX(1.0, delay)];
+    [NSThread sleepForTimeInterval:onHold];
     BOOL ok2 = [self setAirplaneModeOn:NO];
-    [NSThread sleepForTimeInterval:2.0];
+    [NSThread sleepForTimeInterval:offSettle];
     if (!ok1 || !ok2) {
         if (error) {
             *error = [NSError errorWithDomain:@"NDAirplane" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Airplane toggle unavailable; toggle manually"}];

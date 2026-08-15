@@ -28,8 +28,9 @@
 
 - (void)rebuild {
     NSDictionary *d = [self.profile toDictionary];
-    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"ICCID",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"BatteryLevel",@"AdvertisingTrackingEnabled",@"Model",@"DeviceName",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
     NSMutableArray *rows = [NSMutableArray array];
+    [rows addObject:@[ @"备注", self.profile.remark.length ? self.profile.remark : @"" ]];
+    NSArray *keys = @[@"IDFA",@"IDFV",@"UUID",@"IMEI",@"IMEI2",@"ICCID",@"Serial",@"UDID",@"OpenUDID",@"WiFiMAC",@"BTMAC",@"SSID",@"BSSID",@"DeviceToken",@"DeviceColor",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"BatteryLevel",@"AdvertisingTrackingEnabled",@"Model",@"DeviceName",@"ProductType",@"HardwareMachine",@"SystemVer",@"Build",@"Carrier",@"MCC",@"MNC",@"RadioAccess",@"TimeZone",@"BootTime",@"Latitude",@"Longitude",@"Altitude"];
     for (NSString *k in keys) {
         [rows addObject:@[k, [NSString stringWithFormat:@"%@", d[k] ?: @""]]];
     }
@@ -40,7 +41,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows.count; }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"点按任意字段可编辑，完成后点右上角保存。";
+    return @"可改「备注」方便区分账号；点按任意字段编辑，完成后点右上角保存。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -51,7 +52,11 @@
     cell.textLabel.text = self.rows[indexPath.row][0];
     cell.detailTextLabel.font = [NDTheme monoFont:14];
     cell.detailTextLabel.textColor = [UIColor labelColor];
-    cell.detailTextLabel.text = self.rows[indexPath.row][1];
+    NSString *val = self.rows[indexPath.row][1];
+    cell.detailTextLabel.text = val.length ? val : @"（未填写）";
+    if (!val.length && [self.rows[indexPath.row][0] isEqualToString:@"备注"]) {
+        cell.detailTextLabel.textColor = [UIColor tertiaryLabelColor];
+    }
     cell.detailTextLabel.numberOfLines = 0;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.tintColor = [NDTheme accent];
@@ -62,11 +67,25 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSString *key = self.rows[indexPath.row][0];
     NSString *val = self.rows[indexPath.row][1];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:key message:@"修改参数" preferredStyle:UIAlertControllerStyleAlert];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.text = val; }];
+    BOOL isRemark = [key isEqualToString:@"备注"];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:key
+                                                               message:isRemark ? @"例如：主号 / 测试号 / 客户名" : @"修改参数"
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = val;
+        if (isRemark) {
+            tf.placeholder = @"环境备注";
+            tf.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+        }
+    }];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *newVal = a.textFields.firstObject.text ?: @"";
+        if (isRemark) {
+            self.profile.remark = newVal;
+            [self rebuild];
+            return;
+        }
         NSMutableDictionary *d = [[self.profile toDictionary] mutableCopy];
         if ([@[@"Latitude",@"Longitude",@"Altitude",@"BootTime",@"DiskCapacity",@"PhysicalMemory",@"Brightness",@"BatteryLevel"] containsObject:key]) {
             d[key] = @([newVal doubleValue]);
@@ -75,7 +94,9 @@
         } else {
             d[key] = newVal;
         }
+        NSString *keptRemark = self.profile.remark ?: @"";
         self.profile = [NDDeviceProfile profileFromDictionary:d];
+        self.profile.remark = keptRemark;
         [self rebuild];
     }]];
     [self presentViewController:a animated:YES completion:nil];
