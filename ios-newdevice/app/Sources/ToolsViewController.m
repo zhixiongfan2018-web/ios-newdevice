@@ -44,9 +44,6 @@ extern char **environ;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) {
-        return [NSString stringWithFormat:@"爱思 → 文件管理 → NewDevice\n%@", [NDPaths mediaHomeDir]];
-    }
     return nil;
 }
 
@@ -181,13 +178,15 @@ extern char **environ;
         [[NDOperationService shared] runAsync:fun query:@{@"dir": path ?: @"", @"keychain": kc ? @"1" : @"0"} completion:^(NSString *body, NSInteger code) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
-                    NSUInteger appCount = [NDConfig shared].targetApps.count;
-                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
-                    NSString *msg = (code == 200)
-                        ? [NSString stringWithFormat:@"导入完成（Keychain：%@）\nApp 环境：%lu 个\n%@\n\n%@\n\n%@\n\n请确认目标 App 已安装；Venmo 需装好后再点选记录写入沙盒。",
-                           kc ? @"开" : @"关", (unsigned long)appCount, path ?: @"", holo, body ?: @""]
+                    NSUInteger okN = [NDRecordStore shared].lastImportSuccessCount;
+                    NSUInteger failN = [NDRecordStore shared].lastImportFailCount;
+                    NSUInteger skipN = [NDRecordStore shared].lastImportSkipCount;
+                    NSString *msg = (code == 200 || okN > 0 || skipN > 0)
+                        ? [NSString stringWithFormat:@"成功 %lu 个，失败 %lu 个%@",
+                           (unsigned long)okN, (unsigned long)failN,
+                           skipN ? [NSString stringWithFormat:@"，跳过 %lu 个", (unsigned long)skipN] : @""]
                         : (body.length ? body : @"未找到可导入数据");
-                    [self alert:(code == 200) ? @"导入完成" : @"导入结果" message:msg];
+                    [self alert:@"导入完成" message:msg];
                 }];
             });
         }];

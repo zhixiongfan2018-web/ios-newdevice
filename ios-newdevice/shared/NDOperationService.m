@@ -613,7 +613,10 @@
                                      userInfo:@{NSLocalizedDescriptionKey: detail}];
             }
             NSString *names = [[[NDRecordStore shared] lastImportedRecordNames] componentsJoinedByString:@", "] ?: @"";
-            NSString *holo = [[NDRecordStore shared] lastImportHoloSummary] ?: @"";
+            NSUInteger okN = [NDRecordStore shared].lastImportSuccessCount;
+            NSUInteger failN = [NDRecordStore shared].lastImportFailCount;
+            NSUInteger skipN = [NDRecordStore shared].lastImportSkipCount;
+            if (okN == 0 && n > 0) okN = n;
             NSString *applyMsg = @"";
             if (n > 0) {
                 NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
@@ -631,28 +634,26 @@
                         if ([bids containsObject:@"net.kortina.labs.Venmo"]) {
                             bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
                         }
-                        NSString *rr = [NDAppDataManager shared].lastRestoreReport ?: @"";
-                        // Append sandbox write proof into the same import log the user reads
-                        NSString *prev = [NSString stringWithContentsOfFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
-                                                                  encoding:NSUTF8StringEncoding error:nil] ?: @"";
-                        NSString *extra = [NSString stringWithFormat:@"\n--- sandbox write (Containers) ---\n%@\n--- bindVenmo ---\n%@", rr, bind];
-                        [[prev stringByAppendingString:extra] writeToFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
-                                                               atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@\n%@", applyName,
-                                    rr.length ? rr : (rErr.localizedDescription ?: @""), bind];
+                        (void)bind;
+                        (void)rErr;
+                        applyMsg = [NSString stringWithFormat:@"applied:%@", applyName];
                     } @catch (NSException *ex) {
                         applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
+                        failN += 1;
                     }
                 }
-                body = [NSString stringWithFormat:@"%lu\n%@\nstaged:%@\n%@\n%@",
-                        (unsigned long)n, holo, names, applyMsg, err.localizedDescription ?: @""];
-            } else {
-                body = err.localizedDescription.length
-                    ? err.localizedDescription
-                    : [NSString stringWithFormat:@"0\n未导入。扫描目录：%@\n见 Media/AMG/import/nd-last-import.txt", dir];
             }
-            [[NDRecordStore shared] writeResultCode:(n > 0) ? 1 : 0];
-            done(body, (n > 0) ? 200 : 500);
+            // Compact body for UI: success / fail / skip
+            body = [NSString stringWithFormat:@"ok=%lu fail=%lu skip=%lu",
+                    (unsigned long)okN, (unsigned long)failN, (unsigned long)skipN];
+            if (names.length) body = [body stringByAppendingFormat:@"\n%@", names];
+            if (applyMsg.length) body = [body stringByAppendingFormat:@"\n%@", applyMsg];
+            if (err.localizedDescription.length && n == 0 && skipN == 0) {
+                body = err.localizedDescription;
+            }
+            BOOL anyOk = (okN > 0) || (skipN > 0 && failN == 0);
+            [[NDRecordStore shared] writeResultCode:anyOk || n > 0 ? 1 : 0];
+            done(body, (okN > 0 || skipN > 0) ? 200 : 500);
             return;
         }
 

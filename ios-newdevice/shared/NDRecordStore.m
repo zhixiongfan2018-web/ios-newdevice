@@ -34,6 +34,9 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
 @interface NDRecordStore ()
 @property (nonatomic, copy, readwrite) NSArray<NSString *> *lastImportedRecordNames;
 @property (nonatomic, copy, readwrite) NSString *lastImportHoloSummary;
+@property (nonatomic, assign, readwrite) NSUInteger lastImportSuccessCount;
+@property (nonatomic, assign, readwrite) NSUInteger lastImportFailCount;
+@property (nonatomic, assign, readwrite) NSUInteger lastImportSkipCount;
 @property (nonatomic, strong) NSMutableArray<NSString *> *importingNames;
 @property (nonatomic, strong) NSMutableArray<NSString *> *importingHoloLines;
 @end
@@ -763,6 +766,13 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
         return NO;
     }
 
+    NSString *earlyName = [self sanitizeRecordName:liveName];
+    if ([self recordAlreadyImported:earlyName]) {
+        if (outNote) *outNote = [NSString stringWithFormat:@"SKIP already imported: %@", earlyName];
+        self.lastImportSkipCount += 1;
+        return YES;
+    }
+
     // Refuse empty shells before creating any NewDevice record
     NSString *srcVenmo = [recordPath stringByAppendingPathComponent:@"net.kortina.labs.Venmo"];
     BOOL srcAkc = [fm fileExistsAtPath:[[srcVenmo stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"akc.plist"]];
@@ -1041,6 +1051,11 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     }
     liveName = [[self class] preferredAMGLiveRecordNameFrom:liveName];
     NSString *recordName = [self sanitizeRecordName:liveName];
+    if ([self recordAlreadyImported:recordName]) {
+        if (outNote) *outNote = [NSString stringWithFormat:@"SKIP already imported: %@", recordName];
+        self.lastImportSkipCount += 1;
+        return YES;
+    }
 
     NDDeviceProfile *saved = nil;
     NSError *impErr = nil;
@@ -1346,6 +1361,11 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
             if ([[self class] isReservedRecordFolderName:recordName]) continue;
         }
         recordName = [self sanitizeRecordName:recordName];
+        if ([self recordAlreadyImported:recordName]) {
+            self.lastImportSkipCount += 1;
+            [self.importingHoloLines addObject:[NSString stringWithFormat:@"SKIP %@ (already)", recordName]];
+            continue;
+        }
         @try {
         // Holographic source: nested 03/.../<record> or classic AMG folder itself
         NSString *holoSrc = full;
@@ -1691,6 +1711,9 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     self.importingHoloLines = [NSMutableArray array];
     self.lastImportedRecordNames = @[];
     self.lastImportHoloSummary = nil;
+    self.lastImportSuccessCount = 0;
+    self.lastImportFailCount = 0;
+    self.lastImportSkipCount = 0;
 }
 
 - (void)endImportSession {
@@ -1702,10 +1725,20 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     } else {
         self.lastImportHoloSummary = nil;
     }
+    // Prefer explicit success list size; keep fail/skip as accumulated during pass.
+    self.lastImportSuccessCount = self.lastImportedRecordNames.count;
     NSUInteger count = self.lastImportedRecordNames.count;
     self.importingNames = nil;
     self.importingHoloLines = nil;
     if (count) [self notifyReload];
+}
+
+- (BOOL)recordAlreadyImported:(NSString *)name {
+    if (!name.length || [name isEqualToString:@"原始机器"]) return NO;
+    NSString *path = [NDPaths profilePathForRecord:name];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return NO;
+    // Prefer skip when apps already staged; bare profile also counts as present.
+    return YES;
 }
 
 - (void)writeResultCode:(NSInteger)code {

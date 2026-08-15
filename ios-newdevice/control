@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 183: spoof params align like real device (Model/RAM/serial/OUI/TZ↔GPS).
+Description: 184: simpler home UI; skip duplicate imports; compact import result.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

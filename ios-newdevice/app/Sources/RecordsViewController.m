@@ -72,18 +72,18 @@
             // Import only stages data — restore separately to avoid jetsam/闪退.
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
-                    NSString *holo = [NDRecordStore shared].lastImportHoloSummary ?: @"";
-                    NSString *names = [[NDRecordStore shared].lastImportedRecordNames componentsJoinedByString:@", "] ?: @"";
-                    NSString *msg = nil;
-                    if (code == 200 && names.length) {
-                        msg = [NSString stringWithFormat:@"已导入：%@\n\n%@\n\n%@\n\n请完全杀掉 Venmo 再打开。\n状态：Media/AMG/import/nd-import-status.txt\n日志：Media/AMG/import/nd-last-import.txt",
-                               names,
-                               holo.length ? holo : @"(无 apps 摘要)",
-                               body.length ? body : @""];
-                    } else {
-                        msg = body.length ? body : @"导入失败\n见 Media/AMG/import/nd-last-import.txt";
+                    NSUInteger okN = [NDRecordStore shared].lastImportSuccessCount;
+                    NSUInteger failN = [NDRecordStore shared].lastImportFailCount;
+                    NSUInteger skipN = [NDRecordStore shared].lastImportSkipCount;
+                    NSString *msg = [NSString stringWithFormat:@"成功 %lu 个，失败 %lu 个",
+                                     (unsigned long)okN, (unsigned long)failN];
+                    if (skipN > 0) {
+                        msg = [msg stringByAppendingFormat:@"，跳过 %lu 个", (unsigned long)skipN];
                     }
-                    UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"导入完成" : @"导入结果"
+                    if (code != 200 && okN == 0 && skipN == 0 && body.length) {
+                        msg = body;
+                    }
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"导入完成"
                                                                                message:msg
                                                                         preferredStyle:UIAlertControllerStyleAlert];
                     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
@@ -174,14 +174,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    NSUInteger imported = 0;
-    for (NSString *n in self.names) {
-        if (![n isEqualToString:@"原始机器"]) imported++;
-    }
-    if (imported == 0) {
-        return @"还没有导入记录。把桌面 +1916… 2026-….tar.gz 放到 Media/AMG/import 后导入。\n成功条件：nd-import-status.txt 含 Classic…OK / liveAkc=YES / venmoKB>0。\n若只有同名空壳=失败（146 已拒绝空壳）。";
-    }
-    return @"列表应显示 apps:N akc。点选写入沙盒后杀掉 Venmo 再开。live 路径：/var/mobile/AMG/<记录名>/";
+    return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -231,11 +224,13 @@
     [[NDOperationService shared] runAsync:@"setRecord" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self reload];
-            UIAlertController *a = [UIAlertController alertControllerWithTitle:(code == 200) ? @"已切换并写入沙盒" : @"切换失败"
-                                                                       message:body.length ? body : @"无法切换到该记录"
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-            [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:a animated:YES completion:nil];
+            if (code != 200) {
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败"
+                                                                           message:body.length ? body : @"无法切换"
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:a animated:YES completion:nil];
+            }
         });
     }];
 }

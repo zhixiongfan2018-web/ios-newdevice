@@ -51,8 +51,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, readonly) NSArray<NSString *> *lastImportedRecordNames;
 /// Human-readable holographic staging summary from last import (apps + bytes).
 @property (nonatomic, copy, readonly, nullable) NSString *lastImportHoloSummary;
+/// Counts from the most recent import pass (success / fail / skipped-already-present).
+@property (nonatomic, assign, readonly) NSUInteger lastImportSuccessCount;
+@property (nonatomic, assign, readonly) NSUInteger lastImportFailCount;
+@property (nonatomic, assign, readonly) NSUInteger lastImportSkipCount;
 - (void)beginImportSession;
 - (void)endImportSession;
+/// YES if this record name already has a NewDevice profile (import should skip).
+- (BOOL)recordAlreadyImported:(NSString *)name;
 
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;

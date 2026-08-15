@@ -6,6 +6,12 @@
 #import "NDDeviceProfile.h"
 #import "NDArchiveExtract.h"
 
+@interface NDRecordStore ()
+@property (nonatomic, assign, readwrite) NSUInteger lastImportSuccessCount;
+@property (nonatomic, assign, readwrite) NSUInteger lastImportFailCount;
+@property (nonatomic, assign, readwrite) NSUInteger lastImportSkipCount;
+@end
+
 @implementation NDRecordStore (ImportExport)
 
 + (NSString *)amgTarPath { return @"/var/mobile/AMG_tar"; }
@@ -281,6 +287,7 @@
                 if ([fm fileExistsAtPath:p isDirectory:&d] && d) collectClassic(p);
             }
             NSUInteger classicN = 0;
+            NSUInteger classicFail = 0;
             for (NSString *kp in classicRoots) {
                 NSString *note = nil;
                 NSError *oneErr = nil;
@@ -291,12 +298,21 @@
                     note = [NSString stringWithFormat:@"exception %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
                     ok = NO;
                 }
+                BOOL skipped = [note hasPrefix:@"SKIP"];
                 [log addObject:[NSString stringWithFormat:@"folderClassic=%@ ok=%@ note=%@",
-                                kp.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
-                if (ok) classicN++;
+                                kp.lastPathComponent, skipped ? @"SKIP" : (ok ? @"YES" : @"NO"), note ?: (oneErr.localizedDescription ?: @"")]];
+                if (skipped) {
+                    // lastImportSkipCount already bumped inside importer
+                } else if (ok) {
+                    classicN++;
+                } else {
+                    classicFail++;
+                }
             }
             total += classicN;
-            [log addObject:[NSString stringWithFormat:@"folderClassicImport=%lu", (unsigned long)classicN]];
+            self.lastImportFailCount += classicFail;
+            [log addObject:[NSString stringWithFormat:@"folderClassicImport=%lu fail=%lu skip=%lu",
+                            (unsigned long)classicN, (unsigned long)classicFail, (unsigned long)self.lastImportSkipCount]];
         }
 
         // 2) Remaining folder trees (resolved analysis / leftovers)
@@ -437,8 +453,16 @@
                     ok = NO;
                 }
                 [log addObject:[NSString stringWithFormat:@"classicLive=%@ ok=%@ note=%@",
-                                importPath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
-                if (ok) n++;
+                                importPath.lastPathComponent,
+                                ([note hasPrefix:@"SKIP"] ? @"SKIP" : (ok ? @"YES" : @"NO")),
+                                note ?: (oneErr.localizedDescription ?: @"")]];
+                if ([note hasPrefix:@"SKIP"]) {
+                    // counted in lastImportSkipCount
+                } else if (ok) {
+                    n++;
+                } else {
+                    self.lastImportFailCount += 1;
+                }
             }
             // Flat extract: importRoot itself is classic (no child record folders)
             if (n == 0 && [[self class] NDPathLooksLikeClassicAMGRecordDir:importRoot]
@@ -464,8 +488,15 @@
                     ok = NO;
                 }
                 [log addObject:[NSString stringWithFormat:@"classicFlat=%@ ok=%@ note=%@",
-                                flatPath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
-                if (ok) n++;
+                                flatPath.lastPathComponent,
+                                ([note hasPrefix:@"SKIP"] ? @"SKIP" : (ok ? @"YES" : @"NO")),
+                                note ?: (oneErr.localizedDescription ?: @"")]];
+                if ([note hasPrefix:@"SKIP"]) {
+                } else if (ok) {
+                    n++;
+                } else {
+                    self.lastImportFailCount += 1;
+                }
             }
 
             // 2) AMG_resolved analysis packs → NewDevice only (does NOT install into /var/mobile/AMG)
@@ -498,8 +529,15 @@
                         ok = NO;
                     }
                     [log addObject:[NSString stringWithFormat:@"directResolved=%@ ok=%@ note=%@ (analysis-only, not AMG live)",
-                                    safePath.lastPathComponent, ok ? @"YES" : @"NO", note ?: (oneErr.localizedDescription ?: @"")]];
-                    if (ok) n++;
+                                    safePath.lastPathComponent,
+                                    ([note hasPrefix:@"SKIP"] ? @"SKIP" : (ok ? @"YES" : @"NO")),
+                                    note ?: (oneErr.localizedDescription ?: @"")]];
+                    if ([note hasPrefix:@"SKIP"]) {
+                    } else if (ok) {
+                        n++;
+                    } else {
+                        self.lastImportFailCount += 1;
+                    }
                 }
             }
             if (n == 0) {

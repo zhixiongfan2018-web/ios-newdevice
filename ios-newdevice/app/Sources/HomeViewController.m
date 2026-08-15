@@ -7,15 +7,12 @@
 #import "NDPaths.h"
 #import "NDTheme.h"
 #import "ProbeViewController.h"
-#import "ProfileDetailViewController.h"
 
 @interface HomeViewController ()
 @property (nonatomic, strong) UIScrollView *scroll;
 @property (nonatomic, strong) UIStackView *content;
 @property (nonatomic, strong) UILabel *recordNameLabel;
 @property (nonatomic, strong) UILabel *modelLabel;
-@property (nonatomic, strong) UILabel *summaryLabel;
-@property (nonatomic, strong) UILabel *statusDetailLabel;
 @property (nonatomic, strong) UIView *apiChip;
 @property (nonatomic, strong) UIView *ipChip;
 @property (nonatomic, strong) UIStackView *chipRow;
@@ -61,7 +58,6 @@
 
     [self.content addArrangedSubview:[self buildHeroCard]];
     [self.content addArrangedSubview:[self buildStatusCard]];
-    [self.content addArrangedSubview:[self buildIdentityCard]];
     [self.content addArrangedSubview:[self buildActions]];
 
     self.busyOverlay = [UIView new];
@@ -144,81 +140,25 @@
     UIView *card = [UIView new];
     [NDTheme styleCard:card];
 
-    UILabel *title = [UILabel new];
-    title.text = @"运行状态";
-    title.font = [NDTheme headlineFont];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-
     self.chipRow = [UIStackView new];
     self.chipRow.axis = UILayoutConstraintAxisHorizontal;
     self.chipRow.spacing = 8;
     self.chipRow.alignment = UIStackViewAlignmentCenter;
     self.chipRow.translatesAutoresizingMaskIntoConstraints = NO;
 
-    self.apiChip = [NDTheme statusChip:@"API 检测中" color:[UIColor secondaryLabelColor]];
-    self.ipChip = [NDTheme statusChip:@"IP --" color:[UIColor secondaryLabelColor]];
+    self.apiChip = [NDTheme statusChip:@"API" color:[UIColor secondaryLabelColor]];
+    self.ipChip = [NDTheme statusChip:@"IP" color:[UIColor secondaryLabelColor]];
     [self.chipRow addArrangedSubview:self.apiChip];
     [self.chipRow addArrangedSubview:self.ipChip];
     [self.chipRow addArrangedSubview:[UIView new]];
 
-    self.statusDetailLabel = [UILabel new];
-    self.statusDetailLabel.font = [NDTheme monoFont:12.5];
-    self.statusDetailLabel.textColor = [UIColor secondaryLabelColor];
-    self.statusDetailLabel.numberOfLines = 3;
-    self.statusDetailLabel.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:title];
     [card addSubview:self.chipRow];
-    [card addSubview:self.statusDetailLabel];
 
     [NSLayoutConstraint activateConstraints:@[
-        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
-        [title.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [title.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [self.chipRow.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:12],
+        [self.chipRow.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
         [self.chipRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
         [self.chipRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [self.statusDetailLabel.topAnchor constraintEqualToAnchor:self.chipRow.bottomAnchor constant:10],
-        [self.statusDetailLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [self.statusDetailLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [self.statusDetailLabel.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
-    ]];
-    return card;
-}
-
-- (UIView *)buildIdentityCard {
-    UIView *card = [UIView new];
-    [NDTheme styleCard:card];
-
-    UILabel *title = [UILabel new];
-    title.text = @"参数摘要";
-    title.font = [NDTheme headlineFont];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-
-    self.summaryLabel = [UILabel new];
-    self.summaryLabel.font = [NDTheme monoFont:12.5];
-    self.summaryLabel.textColor = [UIColor secondaryLabelColor];
-    self.summaryLabel.numberOfLines = 0;
-    self.summaryLabel.translatesAutoresizingMaskIntoConstraints = NO;
-
-    UIButton *detail = [NDTheme secondaryButton:@"查看 / 编辑参数" target:self action:@selector(openDetail)];
-    detail.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:title];
-    [card addSubview:self.summaryLabel];
-    [card addSubview:detail];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
-        [title.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [title.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [self.summaryLabel.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:10],
-        [self.summaryLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [self.summaryLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [detail.topAnchor constraintEqualToAnchor:self.summaryLabel.bottomAnchor constant:14],
-        [detail.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [detail.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
-        [detail.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
+        [self.chipRow.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-14],
     ]];
     return card;
 }
@@ -237,11 +177,8 @@
     row.spacing = 10;
     row.distribution = UIStackViewDistributionFillEqually;
 
-    UIButton *clean = [NDTheme secondaryButton:@"强效清理" target:self action:@selector(cleanApps)];
-
     [stack addArrangedSubview:primary];
     [stack addArrangedSubview:row];
-    [stack addArrangedSubview:clean];
     return stack;
 }
 
@@ -263,36 +200,22 @@
 }
 
 - (void)refreshStatusDetail {
-    NSString *ipLine = self.lastIP.length ? [NSString stringWithFormat:@"公网 IP  %@", self.lastIP] : @"公网 IP  获取中…";
-    NSString *apiLine = ([NDHTTPServer shared].running)
-        ? @"API     http://127.0.0.1:8080/cmd（保持前台）"
-        : @"API     未启动，请重启 App";
-    self.statusDetailLabel.text = [NSString stringWithFormat:@"%@\n%@", ipLine, apiLine];
 }
 
 - (void)refreshAPIStatus {
     NSError *err = nil;
     BOOL ok = [[NDHTTPServer shared] ensureRunning:&err];
     UIColor *color = (ok || [NDHTTPServer shared].running) ? [NDTheme success] : [NDTheme danger];
-    NSString *text = (ok || [NDHTTPServer shared].running) ? @"API 已监听" : @"API 未启动";
+    NSString *text = (ok || [NDHTTPServer shared].running) ? @"API 正常" : @"API 关闭";
     UIView *chip = [NDTheme statusChip:text color:color];
     [self replaceChip:self.apiChip with:chip inRow:self.chipRow];
     self.apiChip = chip;
-    [self refreshStatusDetail];
 }
 
 - (void)refresh {
     NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
     self.recordNameLabel.text = p.name.length ? p.name : @"--";
     self.modelLabel.text = [NSString stringWithFormat:@"%@ · iOS %@", p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
-    self.summaryLabel.text = [NSString stringWithFormat:
-                              @"IDFA  %@\nIDFV  %@\nIMEI  %@\nSerial %@\nUDID  %@\nWiFi  %@\nSSID  %@\n运营商 %@ (%@/%@)\nTZ    %@\nGPS   %.5f, %.5f",
-                              p.IDFA ?: @"-", p.IDFV ?: @"-", p.IMEI ?: @"-",
-                              p.Serial ?: @"-", p.UDID ?: @"-",
-                              p.WiFiMAC ?: @"-", p.SSID ?: @"-",
-                              p.Carrier ?: @"-", p.MCC ?: @"-", p.MNC ?: @"-",
-                              p.TimeZone ?: @"-",
-                              p.Latitude, p.Longitude];
 }
 
 - (void)setBusy:(BOOL)busy {
@@ -313,7 +236,7 @@
         [self refreshAPIStatus];
         [self refreshIP:YES expectedChangeFrom:prevIP];
         if (!ok) {
-            [self alert:error.localizedDescription ?: @"执行失败（请确认 newdeviced 已运行）"];
+            [self alert:error.localizedDescription ?: @"执行失败"];
         }
     }];
 }
@@ -321,7 +244,6 @@
 - (void)newDevice { [self run:@"newRecord"]; }
 - (void)original { [self run:@"originRecord"]; }
 - (void)nextRecord { [self run:@"nextRecord"]; }
-- (void)cleanApps { [self run:@"clearAppData"]; }
 
 - (void)refreshIP:(BOOL)compare {
     [self refreshIP:compare expectedChangeFrom:self.lastIP];
@@ -331,7 +253,7 @@
     [NDAirplane fetchPublicIPWithCompletion:^(NSString *ip, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             UIColor *color = [UIColor secondaryLabelColor];
-            NSString *chipText = @"IP --";
+            NSString *chipText = @"IP";
             if (!ip) {
                 chipText = @"IP 失败";
                 color = [NDTheme warning];
@@ -340,7 +262,7 @@
                 chipText = @"IP 正常";
                 if (compare && prev.length && [prev isEqualToString:ip]) {
                     chipText = @"IP 未变";
-                    color = [NDTheme danger];
+                    color = [NDTheme warning];
                 } else {
                     color = [NDTheme success];
                 }
@@ -349,7 +271,6 @@
             UIView *chip = [NDTheme statusChip:chipText color:color];
             [self replaceChip:self.ipChip with:chip inRow:self.chipRow];
             self.ipChip = chip;
-            [self refreshStatusDetail];
         });
     }];
 }
@@ -358,15 +279,8 @@
     [self.navigationController pushViewController:[ProbeViewController new] animated:YES];
 }
 
-- (void)openDetail {
-    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
-    if (!p) return;
-    ProfileDetailViewController *vc = [[ProfileDetailViewController alloc] initWithProfile:p];
-    [self.navigationController pushViewController:vc animated:YES];
-}
-
 - (void)alert:(NSString *)msg {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"提示" message:msg preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:nil message:msg preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
 }
