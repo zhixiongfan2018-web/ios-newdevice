@@ -161,15 +161,27 @@
 }
 
 - (void)exportAMGFolder {
-    NSError *err = nil;
     NSString *outDir = [NDRecordStore amgTarPath];
-    NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:[NDConfig shared].slimExportStripMedia error:&err];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导出完成" : @"导出结果"
-                                                               message:n ? [NSString stringWithFormat:@"已导出 %lu 条明文记录到\n%@", (unsigned long)n, outDir]
-                                                                        : (err.localizedDescription ?: @"没有可导出的记录")
-                                                        preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
+    BOOL slim = [NDConfig shared].slimExportStripMedia;
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"正在导出"
+                                                                   message:@"打包到 AMG_tar…"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *err = nil;
+            NSUInteger n = [[NDRecordStore shared] exportAMGRecordsToDirectory:outDir slim:slim error:&err];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    UIAlertController *a = [UIAlertController alertControllerWithTitle:n ? @"导出完成" : @"导出结果"
+                                                                               message:n ? [NSString stringWithFormat:@"已导出 %lu 条明文记录到\n%@", (unsigned long)n, outDir]
+                                                                                        : (err.localizedDescription ?: @"没有可导出的记录")
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:a animated:YES completion:nil];
+                }];
+            });
+        });
+    }];
 }
 
 - (void)importProfile {

@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 196: record list newest-first; fix createdAt reshuffle; getRecordParam current fallback.
+Description: 197: harden switch/import (no auto-restore jetsam; holo-off no wipe; +query; sort/CI fixes).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

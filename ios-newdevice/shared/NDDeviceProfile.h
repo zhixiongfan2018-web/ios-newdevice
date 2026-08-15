@@ -10,7 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL enabled;
 /// When NO, tweak will not spoof IDFA/UDID/etc (used when AMG faker is ciphertext).
 @property (nonatomic, assign) BOOL spoofDeviceIdentity;
-@property (nonatomic, copy) NSDate *createdAt;
+@property (nonatomic, copy, nullable) NSDate *createdAt;
 
 @property (nonatomic, copy) NSString *IDFA;
 @property (nonatomic, copy) NSString *IDFV;

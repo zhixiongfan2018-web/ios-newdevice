@@ -59,14 +59,19 @@
     NSError *ensureErr = nil;
     if (![[NDHTTPServer shared] ensureRunning:&ensureErr]) {
         // Fallback: call service in-process if bind failed for unexpected reasons
-        if (![NDOperationService isAsyncAckFun:fun]) {
-            [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *body, NSInteger httpCode) {
+        [[NDOperationService shared] runAsync:fun query:query ?: @{} completion:^(NSString *body, NSInteger httpCode) {
+            if ([NDOperationService isAsyncAckFun:fun]) {
+                // Body already written; prefer direct completion over polling a raced result file.
                 dispatch_async(dispatch_get_main_queue(), ^{
                     completion(httpCode == 200, body, httpCode == 200 ? nil : ensureErr);
                 });
-            }];
-            return;
-        }
+            } else {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    completion(httpCode == 200, body, httpCode == 200 ? nil : ensureErr);
+                });
+            }
+        }];
+        return;
     }
 
     NSURLComponents *comp = [NSURLComponents new];

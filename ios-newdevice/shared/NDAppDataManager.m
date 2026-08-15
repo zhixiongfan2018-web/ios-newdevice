@@ -510,7 +510,13 @@ extern char **environ;
 
         // Outside clear is best-effort only (iOS 18: Venmo partition invisible here).
         // Real Venmo session wipe is purgeVenmoSessionInApp / pending-clear-kc in-app.
-        [self clearKeychainAccessGroupForBundleId:bid];
+        // Never clear keychain when the data container is missing — that nukes credentials
+        // without a successful sandbox wipe/restore pair.
+        if (container) {
+            [self clearKeychainAccessGroupForBundleId:bid];
+        } else if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
+            [self stageVenmoSessionClearOnly];
+        }
         if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
             NSFileManager *kfm = [NSFileManager defaultManager];
             for (NSString *p in @[

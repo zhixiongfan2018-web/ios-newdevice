@@ -143,7 +143,8 @@
                 [[NDAppDataManager shared] stageVenmoSessionClearOnly];
             }
         } else if (apps.count) {
-            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            // holographicBackup OFF = identity-only switch. Never wipe live sandboxes
+            // without a restore path (that permanently destroys target App data).
             if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
                 [[NDAppDataManager shared] stageVenmoSessionClearOnly];
             }
@@ -365,8 +366,11 @@
             report = [NSString stringWithFormat:@"%@\n--- bindVenmo ---\n%@\n--- probe ---\n%@",
                       report, bind, probe ?: @""];
             [report writeToFile:@"/var/mobile/Media/NewDevice/last-restore.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            [[NDRecordStore shared] writeResultCode:1];
-            done(report, 200);
+            BOOL failed = (err != nil)
+                || [report.lowercaseString containsString:@"fail"]
+                || [report.lowercaseString containsString:@"missing"];
+            [[NDRecordStore shared] writeResultCode:failed ? 0 : 1];
+            done(report, failed ? 500 : 200);
             return;
         }
 
@@ -663,29 +667,11 @@
             if (okN == 0 && n > 0) okN = n;
             NSString *applyMsg = @"";
             if (n > 0) {
+                // Stage only — do NOT auto-restore into live sandboxes (jetsam + UI says restore separately).
                 NSString *applyName = [[NDRecordStore shared] lastImportedRecordNames].lastObject;
                 if (applyName.length) {
-                    @try {
-                        // Set current + restore staged Venmo/etc. into live sandboxes
-                        [[NDRecordStore shared] setCurrentRecordName:applyName];
-                        NSArray *targets = [NDConfig shared].targetApps ?: @[];
-                        NSArray *bids = targets.count ? targets : [[NDRecordStore shared] appBundleIdsForRecord:applyName];
-                        if (!bids.count) bids = @[@"net.kortina.labs.Venmo"];
-                        [[NDAppDataManager shared] terminateApps:bids];
-                        NSError *rErr = nil;
-                        [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName onlyBundleIds:bids error:&rErr];
-                        [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
-                        NSString *bind = @"";
-                        if ([bids containsObject:@"net.kortina.labs.Venmo"]) {
-                            bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
-                        }
-                        (void)bind;
-                        (void)rErr;
-                        applyMsg = [NSString stringWithFormat:@"applied:%@", applyName];
-                    } @catch (NSException *ex) {
-                        applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
-                        failN += 1;
-                    }
+                    [[NDRecordStore shared] setCurrentRecordName:applyName];
+                    applyMsg = [NSString stringWithFormat:@"staged:%@ (tap record to apply)", applyName];
                 }
             }
             // Compact body for UI: success / fail / skip

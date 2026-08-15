@@ -100,7 +100,7 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
         @"ProductType / 分辨率 / 内存", @"UIDevice systemVersion", @"运营商 / ISO us", @"CLLocation + 时区",
         @"GPS/时区跟随当前出口 IP（推荐）", @"一键新机随机美国城市（IP 定位关闭时）",
         @"在基准点附近微调", @"切换身份时开关飞行并刷新定位", @"随机池包含 iPad（默认关）", @"一键新机/切换记录时清空",
-        @"隐藏路径 + URL Scheme", @"dyld / getenv / fork", @"按记录备份目标 App 数据"
+        @"隐藏路径 + URL Scheme", @"dyld / getenv / fork", @"开=切换时备份/还原目标 App；关=只换身份不清 App"
     ];
     NSArray *values = @[
         @(c.fakeDeviceModel), @(c.fakeSystemVer), @(c.fakeCarrier), @(c.spoofLocation), @(c.locationFromIP), @(c.randomLocation),

@@ -45,9 +45,8 @@
         if (kv.count >= 2) {
             NSString *key = kv[0];
             NSString *val = [[kv subarrayWithRange:NSMakeRange(1, kv.count - 1)] componentsJoinedByString:@"="];
-            // application/x-www-form-urlencoded: '+' means space (before percent-decode)
-            key = [key stringByReplacingOccurrencesOfString:@"+" withString:@" "];
-            val = [val stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+            // GET query: do NOT map '+' → space (breaks phone-style recordName=+1916…).
+            // Spaces must be %20. Keep literal '+' then percent-decode.
             key = [key stringByRemovingPercentEncoding] ?: key;
             val = [val stringByRemovingPercentEncoding] ?: val;
             dict[key] = val;

@@ -46,10 +46,9 @@
 
 - (void)reloadSelection {
     [[NDConfig shared] reload];
-    NSMutableSet *set = [NSMutableSet setWithArray:[NDConfig shared].targetApps ?: @[]];
-    NSString *cur = [[NDRecordStore shared] currentRecordName];
-    for (NSString *b in [[NDRecordStore shared] appBundleIdsForRecord:cur]) [set addObject:b];
-    self.selected = set;
+    // Only user-saved targetApps — never union record selectApp back into the set
+    // (that re-blooms the isolation work-set after every AMG import).
+    self.selected = [NSMutableSet setWithArray:[NDConfig shared].targetApps ?: @[]];
 }
 
 - (void)updateTitleBadge {

@@ -5,6 +5,7 @@
 #import "NDAppDataManager.h"
 #import "NDAMGParamClient.h"
 #import "NDDeviceProfile.h"
+#import "NDDeviceCatalog.h"
 #import "NDAirplane.h"
 #import <notify.h>
 #import <spawn.h>
@@ -367,7 +368,11 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     [[NDConfig shared] reload];
     NDConfig *cfg = [NDConfig shared];
     NSString *model = cfg.preferredModels.count ? cfg.preferredModels[arc4random_uniform((uint32_t)cfg.preferredModels.count)] : nil;
-    NSString *sys = cfg.preferredSystems.count ? cfg.preferredSystems[arc4random_uniform((uint32_t)cfg.preferredSystems.count)] : nil;
+    NSMutableArray *sysPool = [NSMutableArray array];
+    for (NSString *v in cfg.preferredSystems ?: @[]) {
+        if ([NDDeviceCatalog majorSystemVersion:v] >= 18) [sysPool addObject:v];
+    }
+    NSString *sys = sysPool.count ? sysPool[arc4random_uniform((uint32_t)sysPool.count)] : nil;
     NDDeviceProfile *p = [NDDeviceProfile randomProfileWithName:[self makeRecordName] preferredModel:model preferredSystem:sys];
 
     // Prefer GPS/timezone from current public IP (avoids US GPS + China IP mismatch).
@@ -419,7 +424,11 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     [[NDConfig shared] reload];
     NDConfig *cfg = [NDConfig shared];
     NSString *model = cfg.preferredModels.count ? cfg.preferredModels[arc4random_uniform((uint32_t)cfg.preferredModels.count)] : nil;
-    NSString *sys = cfg.preferredSystems.count ? cfg.preferredSystems[arc4random_uniform((uint32_t)cfg.preferredSystems.count)] : nil;
+    NSMutableArray *sysPool = [NSMutableArray array];
+    for (NSString *v in cfg.preferredSystems ?: @[]) {
+        if ([NDDeviceCatalog majorSystemVersion:v] >= 18) [sysPool addObject:v];
+    }
+    NSString *sys = sysPool.count ? sysPool[arc4random_uniform((uint32_t)sysPool.count)] : nil;
     NDDeviceProfile *p = [NDDeviceProfile randomProfileWithName:name preferredModel:model preferredSystem:sys];
     p.remark = old.remark ?: @"";
 
