@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 184: simpler home UI; skip duplicate imports; compact import result.
+Description: 185: show Safari in target apps; inject NewDevice into Safari.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

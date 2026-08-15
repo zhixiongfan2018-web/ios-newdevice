@@ -2,6 +2,7 @@
 	Filter = {
 		Bundles = (
 			"com.apple.springboard",
+			"com.apple.mobilesafari",
 			"net.kortina.labs.Venmo"
 		);
 		Executables = (
