@@ -1781,7 +1781,7 @@ extern char **environ;
     NSString *lib = [container stringByAppendingPathComponent:@"Library"];
     [lines addObject:[NSString stringWithFormat:@"DocsKB=%llu LibKB=%llu",
                       [self byteSizeAtPath:docs] / 1024, [self byteSizeAtPath:lib] / 1024]];
-    for (NSString *name in @[@"nd-restore-ok.txt", @"nd-akc-ok.txt", @"nd-tweak-loaded.txt", @"akc.plist", @"Model.sqlite"]) {
+    for (NSString *name in @[@"nd-restore-ok.txt", @"nd-akc-ok.txt", @"nd-identity-ok.txt", @"nd-tweak-loaded.txt", @"akc.plist", @"Model.sqlite"]) {
         NSString *p = [docs stringByAppendingPathComponent:name];
         BOOL ex = [fm fileExistsAtPath:p];
         [lines addObject:[NSString stringWithFormat:@"Documents/%@ exists=%@ size=%llu",

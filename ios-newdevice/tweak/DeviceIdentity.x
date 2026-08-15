@@ -68,11 +68,36 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 
 typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 
+static BOOL NDVenmoMGKeyAllowed(NSString *k) {
+    // Minimal AMG-like faker surface inside Venmo — avoid binary / screen / baseband edge keys.
+    static NSSet *allow;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        allow = [NSSet setWithArray:@[
+            @"ProductType", @"CompatibleProductType",
+            @"SerialNumber", @"UniqueDeviceID",
+            @"WifiAddress", @"BluetoothAddress",
+            @"ProductVersion", @"BuildVersion",
+            @"HardwareModel", @"HWModelStr",
+            @"MarketingProductName", @"DeviceName", @"UserAssignedDeviceName",
+            @"DeviceClass", @"RegionInfo", @"RegionCode",
+            @"InternationalMobileEquipmentIdentity",
+            @"InternationalMobileEquipmentIdentity1",
+            @"InternationalMobileEquipmentIdentity2",
+        ]];
+    });
+    return k.length && [allow containsObject:k];
+}
+
 static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef);
 static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     NDTweakState *st = [NDTweakState shared];
     if ([st shouldSpoofIdentity] && key) {
         NSString *k = (__bridge NSString *)key;
+        // Venmo: only remap a small string whitelist (full MG hook historically SIGSEGV'd).
+        if (NDIsVenmoHost() && !NDVenmoMGKeyAllowed(k)) {
+            return orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL;
+        }
         NDDeviceProfile *p = st.profile;
 
         if ([k isEqualToString:@"UniqueDeviceIDData"] && p.UDID.length) {
@@ -216,24 +241,59 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     return v;
 }
 %ctor {
-    // NEVER hook MobileGestalt / UIDevice inside Venmo on iOS 18.
-    // MGCopyAnswer hooks + UIDevice.systemVersion → SIGSEGV/SIGBUS (see Venmo *.ips).
-    // Identity spoof for Venmo is handled by SpringBoard/CommCenter + amg.dylib.
-    // Venmo inject is keychain clear/restore only (KeychainRestore.x).
-    if (NDIsVenmoHost()) return;
-    NDRunAfterUIKitReady(^{
+    void (^installIdentity)(void) = ^{
+        [[NDTweakState shared] reload];
+        if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
+
         %init(NDDeviceIdentity);
+
         void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
         if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
         if (gestalt) {
-        void *sym = dlsym(gestalt, "MGCopyAnswer");
-        if (sym) {
-        MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+            void *sym = dlsym(gestalt, "MGCopyAnswer");
+            if (sym) {
+                MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+            }
+            void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+            if (symErr) {
+                MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+            }
         }
-        void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
-        if (symErr) {
-        MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+
+        // Marker so probeVenmo can confirm identity hooks installed.
+        @try {
+            NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+            if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) {
+                NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+                [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
+                NDDeviceProfile *p = [NDTweakState shared].profile;
+                NSString *line = [NSString stringWithFormat:
+                                  @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\ntime=%@\n",
+                                  bid,
+                                  p.IDFA ?: @"",
+                                  p.ProductType ?: @"",
+                                  p.SystemVer ?: @"",
+                                  [NSDate date]];
+                [line writeToFile:[docs stringByAppendingPathComponent:@"nd-identity-ok.txt"]
+                       atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            }
+        } @catch (__unused NSException *ex) {
         }
-        }
+    };
+
+    // Venmo (AMG-style): delayed ObjC + whitelist MG — past mParticle / UIKit init.
+    if (NDIsVenmoHost()) {
+        NDRunVenmoSafeObjCHooksAfterReady(^{
+            // Extra beat before MG hook — MGCopyAnswer early = historical SIGSEGV.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                @try { installIdentity(); } @catch (__unused NSException *ex) {}
+            });
+        });
+        return;
+    }
+
+    NDRunAfterUIKitReady(^{
+        installIdentity();
     });
 }

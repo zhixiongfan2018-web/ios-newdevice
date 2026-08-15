@@ -23,7 +23,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     return CTRadioAccessTechnologyLTE;
 }
 
-%group NDModelVersion
+%group NDModelVersionObjC
 %hook UIDevice
 - (NSString *)model {
     NDTweakState *st = [NDTweakState shared];
@@ -96,7 +96,8 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 - (NSString *)currentRadioAccessTechnology {
     NDTweakState *st = [NDTweakState shared];
     if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.RadioAccess.length) {
-        return NDMappedRadioAccess(st.profile.RadioAccess);
+        NSString *m = NDMappedRadioAccess(st.profile.RadioAccess);
+        if (m.length) return m;
     }
     return %orig;
 }
@@ -106,37 +107,27 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.RadioAccess.length) {
         NSString *mapped = NDMappedRadioAccess(st.profile.RadioAccess);
         NSDictionary *orig = %orig;
-        if ([orig isKindOfClass:[NSDictionary class]] && orig.count) {
+        if (mapped.length && [orig isKindOfClass:[NSDictionary class]] && orig.count) {
             NSMutableDictionary *out = [NSMutableDictionary dictionaryWithCapacity:orig.count];
             for (id key in orig) {
                 out[key] = mapped;
             }
             return out;
         }
-        return @{@"0000000100000001": mapped};
+        if (mapped.length) return @{@"0000000100000001": mapped};
     }
     return %orig;
 }
 
 - (CTCarrier *)subscriberCellularProvider {
-    NDTweakState *st = [NDTweakState shared];
-    CTCarrier *orig = %orig;
-    if ([st shouldSpoof] && st.config.fakeCarrier && orig) return orig; // property hooks on CTCarrier cover fields
-    return orig;
+    return %orig; // CTCarrier property hooks cover fields
 }
 
 - (NSDictionary *)serviceSubscriberCellularProviders {
-    NDTweakState *st = [NDTweakState shared];
-    NSDictionary *orig = %orig;
-    if (![st shouldSpoof] || !st.config.fakeCarrier) return orig;
-    if (![orig isKindOfClass:[NSDictionary class]] || !orig.count) {
-        // Fabricate a single-service map so probes see spoofed carrier via CTCarrier hooks
-        return orig ?: @{};
-    }
-    return orig; // values are CTCarrier instances; their getters are hooked
+    return %orig;
 }
 %end
-%end // NDModelVersion
+%end // NDModelVersionObjC
 
 static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
 static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
@@ -160,7 +151,6 @@ static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
                 return 0;
             }
         }
-        // AMG-style uptime fingerprint: spoof kern.boottime
         if (strcmp(name, "kern.boottime") == 0 && st.profile.BootTime > 0) {
             struct timeval tv;
             memset(&tv, 0, sizeof(tv));
@@ -202,9 +192,15 @@ static int hooked_uname(struct utsname *buf) {
     }
     return ret;
 }
+
 %ctor {
+    // ObjC model/carrier/systemVersion — also for Venmo (AMG-style faker surface).
+    NDRunVenmoSafeObjCHooksAfterReady(^{
+        [[NDTweakState shared] reload];
+        %init(NDModelVersionObjC);
+    });
+    // sysctl/uname — never inside Venmo (SIGILL on iOS 18 + ElleKit).
     NDRunRiskyCHooksAfterUIKitReady(^{
-        %init(NDModelVersion);
         MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
         MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);
     });

@@ -80,24 +80,45 @@ static inline BOOL NDVenmoPendingAkcRestore(void) {
     return NO;
 }
 
-/// Legacy alias — prefer NDIsVenmoHost.
+/// Legacy alias.
 static inline BOOL NDIsKeychainOnlyHost(void) {
     return NDIsVenmoHost();
 }
 
-/// ObjC / UIKit hooks must NOT install before UIApplication init — ElleKit + iOS 18
-/// crashes inside _UIApplicationInfoParser when UIDevice/NSBundle are swizzled early.
-/// Venmo: skip ALL of these — UIDevice/ASIdentifier hooks caused SIGBUS with mParticle.
-/// Venmo only gets KeychainRestore (see KeychainRestore.x). Never MG inside Venmo.
+/// ObjC / UIKit hooks for non-Venmo hosts. Must NOT install before UIApplication init
+/// (ElleKit + iOS 18 crashes inside _UIApplicationInfoParser when swizzled early).
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
+    // Venmo uses NDRunVenmoSafeObjCHooksAfterReady (delayed AMG-style identity).
     if (NDIsVenmoHost()) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        // Re-check: early %ctor may miss Venmo before bundle id is ready.
         if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
         block();
+    });
+}
+
+/// AMG-style identity for Venmo: ObjC hooks only, delayed past mParticle / UIKit init.
+/// Early ASIdentifier / UIDevice hooks historically SIGBUS'd Venmo on iOS 18.
+static inline void NDRunVenmoSafeObjCHooksAfterReady(void (^block)(void)) {
+    if (!block) return;
+    if (!NDShouldLoadTweak()) return;
+    void (^run)(void) = ^{
+        @try {
+            if (!NDShouldLoadTweak()) return;
+            block();
+        } @catch (__unused NSException *ex) {
+        }
+    };
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!NDShouldLoadTweak()) return;
+        if (NDIsVenmoHost()) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), run);
+        } else {
+            run();
+        }
     });
 }
 

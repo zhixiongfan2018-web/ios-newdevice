@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 200: home shows env IDFA; probe separates profile vs unhooked system IDFA.
+Description: 201: AMG-style Venmo identity (delayed IDFA/MG/model) + holographic akc path.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
