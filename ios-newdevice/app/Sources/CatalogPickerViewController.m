@@ -54,15 +54,23 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"不选则从全部列表随机。多选时一键新机从池中随机。";
+    return @"不选则从全部官方版本随机。多选时一键新机从池中抽；版本与 Build 已对齐。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"c"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
     NSString *opt = self.options[indexPath.row];
     BOOL on = [self.selected containsObject:opt];
     cell.textLabel.font = [NDTheme bodyFont];
     cell.textLabel.text = opt;
+    cell.detailTextLabel.font = [NDTheme captionFont];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    if (self.kind == NDCatalogPickerSystems) {
+        NSString *build = [NDDeviceCatalog buildForSystemVersion:opt];
+        cell.detailTextLabel.text = build.length ? [NSString stringWithFormat:@"Build %@", build] : @"官方版本";
+    } else {
+        cell.detailTextLabel.text = nil;
+    }
     cell.imageView.image = [UIImage systemImageNamed:on ? @"checkmark.circle.fill" : @"circle"];
     cell.imageView.tintColor = on ? [NDTheme accent] : [UIColor tertiaryLabelColor];
     cell.accessoryType = UITableViewCellAccessoryNone;

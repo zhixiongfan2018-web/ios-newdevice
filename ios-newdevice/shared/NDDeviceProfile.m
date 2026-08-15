@@ -196,39 +196,11 @@ static NSTimeInterval NDRandomBootTime(void) {
 }
 
 static NSDictionary<NSString *, NSString *> *NDKnownBuilds(void) {
-    static NSDictionary<NSString *, NSString *> *known;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        known = @{
-            @"16.0": @"20A362", @"16.0.2": @"20A380",
-            @"16.1": @"20B82", @"16.1.1": @"20B101", @"16.1.2": @"20B110",
-            @"16.2": @"20C65", @"16.3": @"20D47", @"16.3.1": @"20D67",
-            @"16.4": @"20E247", @"16.4.1": @"20E252",
-            @"16.5": @"20F66", @"16.5.1": @"20F75",
-            @"16.6": @"20G75", @"16.6.1": @"20G81",
-            @"16.7": @"20H19", @"16.7.1": @"20H30", @"16.7.2": @"20H115",
-            @"16.7.5": @"20H307", @"16.7.8": @"20H343", @"16.7.10": @"20H350",
-            @"17.0": @"21A329", @"17.0.1": @"21A340", @"17.0.2": @"21A351", @"17.0.3": @"21A360",
-            @"17.1": @"21B74", @"17.1.1": @"21B91", @"17.1.2": @"21B101",
-            @"17.2": @"21C62", @"17.2.1": @"21C66",
-            @"17.3": @"21D50", @"17.3.1": @"21D61",
-            @"17.4": @"21E219", @"17.4.1": @"21E236",
-            @"17.5": @"21F79", @"17.5.1": @"21F90",
-            @"17.6": @"21G80", @"17.6.1": @"21G93",
-            @"17.7": @"21H16", @"17.7.1": @"21H216", @"17.7.2": @"21H221",
-            @"18.0": @"22A3354", @"18.0.1": @"22A3370",
-            @"18.1": @"22B83", @"18.1.1": @"22B91",
-            @"18.2": @"22C152", @"18.2.1": @"22C161",
-            @"18.3": @"22D63", @"18.3.1": @"22D72", @"18.3.2": @"22D82",
-            @"18.4": @"22E240", @"18.4.1": @"22E252",
-            @"18.5": @"22F76",
-        };
-    });
-    return known;
+    return [NDDeviceCatalog officialSystemBuilds];
 }
 
 static NSString *NDRandomBuild(NSString *systemVer) {
-    NSString *hit = NDKnownBuilds()[systemVer ?: @""];
+    NSString *hit = [NDDeviceCatalog buildForSystemVersion:systemVer ?: @""];
     if (hit.length) return hit;
 
     NSArray *parts = [systemVer componentsSeparatedByString:@"."];

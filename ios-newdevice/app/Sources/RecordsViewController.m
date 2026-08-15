@@ -10,6 +10,7 @@
 #import "NDConfig.h"
 #import "ProfileDetailViewController.h"
 #import "ExportPickerViewController.h"
+#import "SystemVersionPickerViewController.h"
 
 @interface RecordsViewController ()
 @property (nonatomic, copy) NSArray<NSString *> *names;
@@ -318,7 +319,29 @@
         [self editRemarkForRecord:name];
     }];
     remark.backgroundColor = [UIColor systemOrangeColor];
-    return [UISwipeActionsConfiguration configurationWithActions:@[del, toggle, remark]];
+    UIContextualAction *sys = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"系统" handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
+        completionHandler(YES);
+        [self editSystemForRecord:name];
+    }];
+    sys.backgroundColor = [UIColor systemTealColor];
+    return [UISwipeActionsConfiguration configurationWithActions:@[del, toggle, remark, sys]];
+}
+
+- (void)editSystemForRecord:(NSString *)name {
+    NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:name];
+    if (!p) return;
+    SystemVersionPickerViewController *picker =
+        [[SystemVersionPickerViewController alloc] initWithCurrentVersion:p.SystemVer];
+    __weak typeof(self) weakSelf = self;
+    picker.onPick = ^(NSString *systemVer, NSString *build) {
+        p.SystemVer = systemVer;
+        if (build.length) p.Build = build;
+        [p alignConsistency];
+        [[NDRecordStore shared] saveProfile:p error:nil];
+        [[NDRecordStore shared] notifyReload];
+        [weakSelf reload];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (void)editRemarkForRecord:(NSString *)name {
