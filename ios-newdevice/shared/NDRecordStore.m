@@ -317,6 +317,49 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     return p;
 }
 
+- (NDDeviceProfile *)renewRecordNamed:(NSString *)name error:(NSError **)error {
+    if (!name.length || [name isEqualToString:@"原始机器"]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"NDRecordStore" code:50
+                                     userInfo:@{NSLocalizedDescriptionKey: @"请先选中一个环境"}];
+        }
+        return nil;
+    }
+    NDDeviceProfile *old = [self profileNamed:name];
+    if (!old) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"NDRecordStore" code:51
+                                     userInfo:@{NSLocalizedDescriptionKey: @"环境不存在"}];
+        }
+        return nil;
+    }
+
+    [[NDConfig shared] reload];
+    NDConfig *cfg = [NDConfig shared];
+    NSString *model = cfg.preferredModels.count ? cfg.preferredModels[arc4random_uniform((uint32_t)cfg.preferredModels.count)] : nil;
+    NSString *sys = cfg.preferredSystems.count ? cfg.preferredSystems[arc4random_uniform((uint32_t)cfg.preferredSystems.count)] : nil;
+    NDDeviceProfile *p = [NDDeviceProfile randomProfileWithName:name preferredModel:model preferredSystem:sys];
+    p.remark = old.remark ?: @"";
+
+    if (cfg.locationFromIP && cfg.spoofLocation) {
+        NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
+        [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
+    }
+
+    [p alignConsistency];
+    if (![self saveProfile:p error:error]) return nil;
+
+    // Drop staged sandboxes so 一键新机 starts clean for target apps.
+    NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
+    [[NSFileManager defaultManager] removeItemAtPath:appsRoot error:nil];
+    NSString *ag = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"AppGroup"];
+    [[NSFileManager defaultManager] removeItemAtPath:ag error:nil];
+
+    [self setCurrentRecordName:name];
+    [self notifyReload];
+    return p;
+}
+
 - (BOOL)switchToOriginal:(NSError **)error {
     return [self switchToRecord:@"原始机器" error:error];
 }

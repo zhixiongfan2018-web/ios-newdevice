@@ -2,6 +2,7 @@
 #import "NDPaths.h"
 #import "NDOperationService.h"
 #import "NDHTTPServer.h"
+#import "NDRecordStore.h"
 
 @implementation NDAPIClient
 
@@ -23,12 +24,26 @@
             NSString *raw = [NSString stringWithContentsOfFile:[NDPaths resultFilePath] encoding:NSUTF8StringEncoding error:nil];
             raw = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
             if ([raw isEqualToString:@"1"]) {
-                dispatch_async(dispatch_get_main_queue(), ^{ completion(YES, @"1", nil); });
+                NSString *body = [NSString stringWithContentsOfFile:@"/var/mobile/newdeviceResult.body.txt"
+                                                          encoding:NSUTF8StringEncoding error:nil];
+                if (!body.length) {
+                    body = [NSString stringWithContentsOfFile:[[NDPaths mediaHomeDir] stringByAppendingPathComponent:@"newdeviceResult.body.txt"]
+                                                    encoding:NSUTF8StringEncoding error:nil];
+                }
+                body = [body stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (!body.length) body = [[NDRecordStore shared] currentRecordName] ?: @"1";
+                NSString *outBody = body;
+                dispatch_async(dispatch_get_main_queue(), ^{ completion(YES, outBody, nil); });
                 return;
             }
             if ([raw isEqualToString:@"0"]) {
+                NSString *errBody = [NSString stringWithContentsOfFile:@"/var/mobile/newdeviceResult.body.txt"
+                                                             encoding:NSUTF8StringEncoding error:nil];
+                errBody = [errBody stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(NO, @"0", [NSError errorWithDomain:@"NDAPI" code:0 userInfo:@{NSLocalizedDescriptionKey: @"执行失败"}]);
+                    completion(NO, errBody.length ? errBody : @"0",
+                               [NSError errorWithDomain:@"NDAPI" code:0
+                                              userInfo:@{NSLocalizedDescriptionKey: errBody.length ? errBody : @"执行失败"}]);
                 });
                 return;
             }

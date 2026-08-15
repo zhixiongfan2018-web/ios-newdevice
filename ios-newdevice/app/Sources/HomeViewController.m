@@ -6,7 +6,9 @@
 #import "NDHTTPServer.h"
 #import "NDPaths.h"
 #import "NDTheme.h"
+#import "NDConfig.h"
 #import "ProbeViewController.h"
+#import "EnvSelectViewController.h"
 
 @interface HomeViewController ()
 @property (nonatomic, strong) UIScrollView *scroll;
@@ -252,16 +254,52 @@
 
 - (void)newDevice {
     if (self.busy) return;
+
+    [[NDConfig shared] reload];
+    if (![NDConfig shared].targetApps.count) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"请先选中环境应用"
+                                                                   message:@"到「应用」页勾选要隔离的 App（如 Venmo）并保存，再一键新机。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"去应用页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            self.tabBarController.selectedIndex = 2;
+        }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+
+    EnvSelectViewController *picker = [EnvSelectViewController new];
+    __weak typeof(self) weakSelf = self;
+    picker.onPick = ^(NSString *recordName) {
+        [weakSelf runNewDeviceForRecord:recordName];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)runNewDeviceForRecord:(NSString *)recordName {
+    if (self.busy) return;
     self.busy = YES;
     NSString *prevIP = self.lastIP;
-    [[NDAPIClient shared] call:@"newRecord" completion:^(BOOL ok, NSString *body, NSError *error) {
+    NSString *fun = recordName.length ? @"renewRecord" : @"newRecord";
+    NSDictionary *query = recordName.length ? @{@"recordName": recordName} : @{};
+    [[NDAPIClient shared] call:fun query:query completion:^(BOOL ok, NSString *body, NSError *error) {
         self.busy = NO;
         [self refresh];
         [self refreshAPIStatus];
         [self refreshIP:YES expectedChangeFrom:prevIP];
         if (!ok) {
-            [self alert:error.localizedDescription ?: @"执行失败"];
+            [self alert:error.localizedDescription ?: (body.length ? body : @"执行失败")];
+            return;
         }
+        // Async ops only write result code 0/1 — real name is currentRecord.
+        NSString *name = [[NDRecordStore shared] currentRecordName] ?: @"";
+        if (recordName.length) name = recordName;
+        NSString *msg = name.length
+            ? [NSString stringWithFormat:@"已选中环境：%@\n参数已刷新，可打开目标 App。", name]
+            : @"已完成";
+        [self alert:msg];
     }];
 }
 

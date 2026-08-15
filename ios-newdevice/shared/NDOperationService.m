@@ -33,7 +33,7 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         set = [NSSet setWithArray:@[
-            @"newRecord", @"originRecord", @"nextRecord", @"firstRecord", @"prevRecord", @"previousRecord", @"setRecord",
+            @"newRecord", @"renewRecord", @"originRecord", @"nextRecord", @"firstRecord", @"prevRecord", @"previousRecord", @"setRecord",
             @"deleteRecord", @"deleteAllRecords",
             @"disableRecord", @"enableRecord", @"disableAllRecord", @"enableAllRecord",
             @"setRecordName", @"setCurrentRecordParam", @"setRecordParam",
@@ -190,6 +190,20 @@
 
 - (void)runAsync:(NSString *)fun query:(NSDictionary<NSString *,NSString *> *)query completion:(void (^)(NSString * _Nullable, NSInteger))completion {
     void (^done)(NSString *, NSInteger) = ^(NSString *body, NSInteger code) {
+        // Persist body for async pollers (HTTP only ACKs "accepted").
+        NSString *text = body ?: @"";
+        NSArray *bodyPaths = @[
+            @"/var/mobile/newdeviceResult.body.txt",
+            [[NDPaths jbPrefix] stringByAppendingPathComponent:@"var/mobile/newdeviceResult.body.txt"],
+            [[NDPaths mediaHomeDir] stringByAppendingPathComponent:@"newdeviceResult.body.txt"],
+        ];
+        for (NSString *path in bodyPaths) {
+            if (!path.length) continue;
+            NSString *dir = [path stringByDeletingLastPathComponent];
+            [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [NDPaths makePathWorldReadable:path];
+        }
         if (completion) completion(body, code);
     };
 
@@ -210,6 +224,28 @@
                 }
                 // Wipe previous live env BEFORE ack — otherwise UI/AMG scripts think
                 // 一键新机 finished while Venmo still shows the old environment.
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                [[NDRecordStore shared] writeResultCode:1];
+                done(p.name, 200);
+            }];
+            return;
+        }
+
+        if ([fun isEqualToString:@"renewRecord"]) {
+            NSString *name = query[@"recordName"] ?: @"";
+            if (!name.length) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"请先选中一个环境", 400);
+                return;
+            }
+            [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
+                NSError *err = nil;
+                NDDeviceProfile *p = [[NDRecordStore shared] renewRecordNamed:name error:&err];
+                if (!p) {
+                    [[NDRecordStore shared] writeResultCode:0];
+                    done(err.localizedDescription ?: @"", 500);
+                    return;
+                }
                 [self afterSwitchFrom:previousRecord to:p.name apps:apps];
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);

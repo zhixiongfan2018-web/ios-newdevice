@@ -21,6 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)setEnabledForAll:(BOOL)enabled error:(NSError * _Nullable * _Nullable)error;
 
 - (NDDeviceProfile *)createNewRecordAndActivate:(NSError * _Nullable * _Nullable)error;
+/// Re-randomize an existing record (keep name + remark), clear staged apps, activate.
+- (nullable NDDeviceProfile *)renewRecordNamed:(NSString *)name error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToOriginal:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToNext:(NSError * _Nullable * _Nullable)error;
 - (BOOL)switchToPrevious:(NSError * _Nullable * _Nullable)error;
