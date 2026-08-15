@@ -188,7 +188,7 @@ extern char **environ;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
                     [self alert:n ? @"导出完成" : @"导出结果"
-                        message:n ? [NSString stringWithFormat:@"已导出 %lu 个 NewDevice 环境（含 App 沙盒）\n\n爱思路径：\n%@\n\n另有副本：\n%@", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath]]
+                        message:n ? [NSString stringWithFormat:@"已导出 %lu 个经典 AMG 包（.tar.gz）\n路径含 var/mobile/AMG/…\n\n爱思：\n%@\n\n副本：\n%@\n%@/import", (unsigned long)n, outDir, [NDRecordStore amgMediaExportPath], @"/var/mobile/Media/AMG"]
                                  : (err.localizedDescription ?: @"导出失败")];
                 }];
             });
