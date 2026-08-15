@@ -74,6 +74,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Returns a short human-readable fix report (empty if nothing changed).
 - (NSString *)alignConsistency;
 
+/// Apply public-IP geolocation (lat/lon/timezone). Optional small urban jitter.
+- (NSString *)applyGeolocation:(NSDictionary *)geo jitter:(BOOL)jitter;
+
 @end
 
 NS_ASSUME_NONNULL_END

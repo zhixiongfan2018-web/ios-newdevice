@@ -5,6 +5,7 @@
 #import "NDAppDataManager.h"
 #import "NDAMGParamClient.h"
 #import "NDDeviceProfile.h"
+#import "NDAirplane.h"
 #import <notify.h>
 #import <spawn.h>
 #import <sys/wait.h>
@@ -256,29 +257,29 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     NSString *sys = cfg.preferredSystems.count ? cfg.preferredSystems[arc4random_uniform((uint32_t)cfg.preferredSystems.count)] : nil;
     NDDeviceProfile *p = [NDDeviceProfile randomProfileWithName:[self makeRecordName] preferredModel:model preferredSystem:sys];
 
-    if (!cfg.randomLocation && !cfg.spoofLocation) {
-        NDDeviceProfile *cur = [self currentProfile];
-        if (cur) {
-            p.Latitude = cur.Latitude;
-            p.Longitude = cur.Longitude;
-            p.Altitude = cur.Altitude;
-        }
+    // Prefer GPS/timezone from current public IP (avoids US GPS + China IP mismatch).
+    if (cfg.locationFromIP && cfg.spoofLocation) {
+        NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
+        NSString *note = [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
+        if (note.length) NSLog(@"[NewDevice] locationFromIP %@", note);
     } else if (!cfg.randomLocation) {
         NDDeviceProfile *cur = [self currentProfile];
         if (cur && (cur.Latitude != 0 || cur.Longitude != 0)) {
             p.Latitude = cur.Latitude;
             p.Longitude = cur.Longitude;
             p.Altitude = cur.Altitude;
+            if (cur.TimeZone.length) p.TimeZone = cur.TimeZone;
         }
     }
 
-    if (cfg.smartLocationOffset && cfg.spoofLocation) {
+    if (cfg.smartLocationOffset && cfg.spoofLocation && !(cfg.locationFromIP && cfg.spoofLocation)) {
         double offsetLat = ((double)arc4random_uniform(200) - 100) / 100000.0;
         double offsetLon = ((double)arc4random_uniform(200) - 100) / 100000.0;
         p.Latitude += offsetLat;
         p.Longitude += offsetLon;
     }
 
+    [p alignConsistency];
     if (![self saveProfile:p error:error]) return nil;
     [self setCurrentRecordName:p.name];
     [self notifyReload];

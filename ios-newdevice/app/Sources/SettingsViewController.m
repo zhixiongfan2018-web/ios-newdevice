@@ -8,6 +8,7 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     NDSettingFakeSystem,
     NDSettingFakeCarrier,
     NDSettingSpoofLocation,
+    NDSettingLocationFromIP,
     NDSettingRandomLocation,
     NDSettingSmartOffset,
     NDSettingSmartAirplane,
@@ -91,17 +92,18 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
     [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
     NDConfig *c = [NDConfig shared];
     NSArray *titles = @[
-        @"伪装设备机型", @"伪装系统版本", @"伪装运营商", @"伪装定位", @"随机位置",
+        @"伪装设备机型", @"伪装系统版本", @"伪装运营商", @"伪装定位", @"根据公网 IP 定位", @"随机位置",
         @"智能偏移位置", @"智能飞行模式", @"允许伪装 iPad", @"剪贴板全息（切换备份/还原）",
         @"基础防越狱检测", @"深度防越狱检测", @"全息备份"
     ];
     NSArray *subs = @[
-        @"ProductType / 分辨率 / 内存", @"UIDevice systemVersion", @"运营商 / ISO us", @"CLLocation + 时区", @"一键新机随机美国城市",
-        @"在基准点附近微调", @"切换身份时开关飞行", @"随机池包含 iPad（默认关）", @"一键新机/切换记录时清空",
+        @"ProductType / 分辨率 / 内存", @"UIDevice systemVersion", @"运营商 / ISO us", @"CLLocation + 时区",
+        @"GPS/时区跟随当前出口 IP（推荐）", @"一键新机随机美国城市（IP 定位关闭时）",
+        @"在基准点附近微调", @"切换身份时开关飞行并刷新定位", @"随机池包含 iPad（默认关）", @"一键新机/切换记录时清空",
         @"隐藏路径 + URL Scheme", @"dyld / getenv / fork", @"按记录备份目标 App 数据"
     ];
     NSArray *values = @[
-        @(c.fakeDeviceModel), @(c.fakeSystemVer), @(c.fakeCarrier), @(c.spoofLocation), @(c.randomLocation),
+        @(c.fakeDeviceModel), @(c.fakeSystemVer), @(c.fakeCarrier), @(c.spoofLocation), @(c.locationFromIP), @(c.randomLocation),
         @(c.smartLocationOffset), @(c.smartAirplane), @(c.allowIPadSpoof), @(c.clearPasteboardOnSwitch),
         @(c.jailbreakHideBasic), @(c.jailbreakHideDeep), @(c.holographicBackup)
     ];
@@ -122,6 +124,7 @@ typedef NS_ENUM(NSInteger, NDSettingRow) {
         case NDSettingFakeSystem: c.fakeSystemVer = sw.on; break;
         case NDSettingFakeCarrier: c.fakeCarrier = sw.on; break;
         case NDSettingSpoofLocation: c.spoofLocation = sw.on; break;
+        case NDSettingLocationFromIP: c.locationFromIP = sw.on; break;
         case NDSettingRandomLocation: c.randomLocation = sw.on; break;
         case NDSettingSmartOffset: c.smartLocationOffset = sw.on; break;
         case NDSettingSmartAirplane: c.smartAirplane = sw.on; break;

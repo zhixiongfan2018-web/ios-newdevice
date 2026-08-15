@@ -253,6 +253,8 @@
                     (unsigned long)apps.count, akc ? @" akc" : @"", apps.count ? @"" : @" (空)"];
     }
     NSString *meta = [NSString stringWithFormat:@"%@ · iOS %@%@%@", p.Model ?: @"-", p.SystemVer ?: @"-", state, appsHint];
+    NSString *udidShort = p.UDID.length > 6 ? [p.UDID substringFromIndex:p.UDID.length - 6] : (p.UDID ?: @"");
+    if (udidShort.length) meta = [meta stringByAppendingFormat:@" · …%@", udidShort];
     if (p.remark.length) {
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%@", name, meta];
     } else {

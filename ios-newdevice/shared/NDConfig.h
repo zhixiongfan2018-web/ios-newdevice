@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL fakeCarrier;
 @property (nonatomic, assign) BOOL spoofLocation;
 @property (nonatomic, assign) BOOL randomLocation;
+@property (nonatomic, assign) BOOL locationFromIP; // GPS/时区跟随当前公网 IP
 @property (nonatomic, assign) BOOL smartLocationOffset;
 @property (nonatomic, assign) BOOL smartAirplane;
 @property (nonatomic, assign) BOOL jailbreakHideBasic;

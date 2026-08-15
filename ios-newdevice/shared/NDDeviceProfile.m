@@ -4,6 +4,7 @@
 #import "NDConfig.h"
 #import <stdlib.h>
 #import <float.h>
+#import <mach/mach_time.h>
 
 static NSString *NDRandomHex(NSUInteger length) {
     static const char *hex = "0123456789abcdef";
@@ -272,6 +273,14 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.spoofDeviceIdentity = YES;
     p.createdAt = [NSDate date];
 
+    // Extra entropy so rapid 一键新机 / AMG fill never collide on weak patterns.
+    uint32_t tick = (uint32_t)mach_absolute_time();
+    uint32_t nameMix = 2166136261u;
+    for (const char *cs = (name ?: @"").UTF8String; cs && *cs; cs++) {
+        nameMix ^= (uint8_t)(*cs);
+        nameMix *= 16777619u;
+    }
+
     NSDictionary *dev = nil;
     NSArray *allModels = [NDDeviceCatalog deviceModels];
     BOOL allowPad = [NDConfig shared].allowIPadSpoof;
@@ -304,9 +313,9 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
         if (biasStart > 0 && arc4random_uniform(100) < 70) {
             NSUInteger span = models.count - biasStart;
-            dev = models[biasStart + arc4random_uniform((uint32_t)span)];
+            dev = models[biasStart + ((arc4random_uniform((uint32_t)span) + tick) % span)];
         } else {
-            dev = models[arc4random_uniform((uint32_t)models.count)];
+            dev = models[(arc4random_uniform((uint32_t)models.count) + tick) % models.count];
         }
     }
 
@@ -319,12 +328,13 @@ static BOOL NDLooksLikeProductType(NSString *s) {
             if ([v hasPrefix:@"17."] || [v hasPrefix:@"18."]) [modern addObject:v];
         }
         if (modern.count && arc4random_uniform(100) < 75) {
-            sys = modern[arc4random_uniform((uint32_t)modern.count)];
+            sys = modern[(arc4random_uniform((uint32_t)modern.count) + tick) % modern.count];
         } else {
-            sys = systems[arc4random_uniform((uint32_t)systems.count)];
+            sys = systems[(arc4random_uniform((uint32_t)systems.count) + tick) % systems.count];
         }
     }
-    NSDictionary *carrier = [NDDeviceCatalog carriers][arc4random_uniform((uint32_t)[NDDeviceCatalog carriers].count)];
+    NSArray *carrierList = [NDDeviceCatalog carriers];
+    NSDictionary *carrier = carrierList[(arc4random_uniform((uint32_t)carrierList.count) + (tick >> 3)) % carrierList.count];
     NSDictionary *coord = [NDDeviceCatalog randomUSCoordinate];
 
     p.IDFA = NDRandomUUID();
@@ -333,7 +343,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.Serial = NDRandomSerial();
     p.UDID = NDRandomHex(40); // lowercase 40-hex, matches Apple UDID style
     p.WiFiMAC = NDRandomMAC();
-    p.BTMAC = NDPairedBTMAC(p.WiFiMAC, arc4random());
+    p.BTMAC = NDPairedBTMAC(p.WiFiMAC, arc4random() ^ tick ^ nameMix);
     p.DeviceToken = NDRandomHex(64);
     p.IMEI = NDRandomIMEI();
     p.IMEI2 = NDRandomIMEI();
@@ -347,23 +357,24 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     dispatch_once(&colorOnce, ^{
         colors = @[@"Black", @"White", @"Blue", @"Pink", @"Yellow", @"Green", @"Purple", @"NaturalTitanium", @"BlueTitanium", @"WhiteTitanium", @"BlackTitanium"];
     });
-    p.DeviceColor = colors[arc4random_uniform((uint32_t)colors.count)];
+    p.DeviceColor = colors[(arc4random_uniform((uint32_t)colors.count) + tick) % colors.count];
     p.DiskCapacity = [NDDeviceCatalog diskBytesForProductType:dev[@"ProductType"]];
     p.PhysicalMemory = [NDDeviceCatalog memoryBytesForProductType:dev[@"ProductType"]];
     p.Brightness = 0.35f + (arc4random_uniform(50) / 100.0f);
     p.BatteryLevel = 0.25f + (arc4random_uniform(70) / 100.0f);
-    p.ICCID = [NSString stringWithFormat:@"8901%016llu", ((unsigned long long)arc4random() << 32) | arc4random()];
+    p.ICCID = [NSString stringWithFormat:@"8901%016llu", ((unsigned long long)arc4random() << 32) | (arc4random() ^ tick)];
     if (p.ICCID.length > 20) p.ICCID = [p.ICCID substringToIndex:20];
     p.AdvertisingTrackingEnabled = YES;
 
     p.Model = dev[@"Model"];
-    // AMG-style user device name, e.g. "John's iPhone"
+    // AMG-style user device name — mix record name so environments don't share the same label
     static NSArray<NSString *> *namePrefixes;
     static dispatch_once_t nameOnce;
     dispatch_once(&nameOnce, ^{
-        namePrefixes = @[@"Alex", @"Jordan", @"Sam", @"Taylor", @"Chris", @"Jamie", @"Casey", @"Morgan", @"Riley", @"Avery"];
+        namePrefixes = @[@"Alex", @"Jordan", @"Sam", @"Taylor", @"Chris", @"Jamie", @"Casey", @"Morgan", @"Riley", @"Avery",
+                         @"Drew", @"Quinn", @"Reese", @"Skyler", @"Parker", @"Cameron", @"Blake", @"Hayden", @"Rowan", @"Sage"];
     });
-    NSString *who = namePrefixes[arc4random_uniform((uint32_t)namePrefixes.count)];
+    NSString *who = namePrefixes[(nameMix + tick) % namePrefixes.count];
     BOOL isPad = [((NSString *)dev[@"ProductType"] ?: @"") hasPrefix:@"iPad"];
     p.DeviceName = [NSString stringWithFormat:@"%@'s %@", who, isPad ? @"iPad" : @"iPhone"];
     p.ProductType = dev[@"ProductType"];
@@ -374,7 +385,8 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.Carrier = carrier[@"Carrier"];
     p.MCC = carrier[@"MCC"];
     p.MNC = carrier[@"MNC"];
-    p.RadioAccess = [NDDeviceCatalog radioAccessTypes][arc4random_uniform((uint32_t)[NDDeviceCatalog radioAccessTypes].count)];
+    NSArray *rats = [NDDeviceCatalog radioAccessTypes];
+    p.RadioAccess = rats[(arc4random_uniform((uint32_t)rats.count) + tick) % rats.count];
 
     p.Latitude = [coord[@"lat"] doubleValue];
     p.Longitude = [coord[@"lon"] doubleValue];
@@ -960,6 +972,35 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     }
 
     return fixes.count ? [fixes componentsJoinedByString:@"; "] : @"";
+}
+
+- (NSString *)applyGeolocation:(NSDictionary *)geo jitter:(BOOL)jitter {
+    if (![geo isKindOfClass:[NSDictionary class]]) return @"";
+    double lat = [geo[@"lat"] doubleValue];
+    double lon = [geo[@"lon"] doubleValue];
+    if (fabs(lat) < 0.01 && fabs(lon) < 0.01) return @"";
+    if (jitter) {
+        lat += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
+        lon += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
+    }
+    self.Latitude = lat;
+    self.Longitude = lon;
+    NSString *tz = geo[@"timezone"];
+    if ([tz isKindOfClass:[NSString class]] && tz.length) self.TimeZone = tz;
+    NSString *cc = [geo[@"countryCode"] isKindOfClass:[NSString class]] ? geo[@"countryCode"] : @"";
+    // Keep US carrier pool only when egress IP is US; otherwise avoid NY GPS + AT&T mismatch.
+    if (cc.length && ![cc.uppercaseString isEqualToString:@"US"]) {
+        NSString *isp = [geo[@"isp"] isKindOfClass:[NSString class]] ? geo[@"isp"] : @"";
+        if (isp.length > 28) isp = [isp substringToIndex:28];
+        if (isp.length) self.Carrier = isp;
+        // Leave MCC/MNC empty so we don't claim a US PLMN abroad.
+        self.MCC = @"";
+        self.MNC = @"";
+    }
+    NSString *city = [geo[@"city"] isKindOfClass:[NSString class]] ? geo[@"city"] : @"";
+    NSString *ip = [geo[@"ip"] isKindOfClass:[NSString class]] ? geo[@"ip"] : @"";
+    return [NSString stringWithFormat:@"geo %@ %@ (%.4f,%.4f) tz=%@",
+            ip.length ? ip : @"?", city.length ? city : cc, lat, lon, self.TimeZone ?: @"?"];
 }
 
 - (BOOL)writeToPath:(NSString *)path error:(NSError **)error {

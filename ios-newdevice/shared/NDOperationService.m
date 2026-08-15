@@ -160,10 +160,26 @@
                 [adm restorePasteboardFromRecord:current];
             }
         }
-        // Airplane is not isolation — run async so switch ACK is not blocked (~5s before).
+        // Airplane is not isolation — run async so switch ACK is not blocked.
+        // After IP may change, realign GPS/timezone to the new egress IP.
         if (cfg.smartAirplane) {
+            NSString *recordForGeo = [current copy];
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                 [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
+                if (!cfg.locationFromIP || !cfg.spoofLocation) return;
+                if (!recordForGeo.length || [recordForGeo isEqualToString:@"原始机器"]) return;
+                NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
+                NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:recordForGeo];
+                if (!p || !geo) return;
+                NSString *note = [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
+                if (note.length) {
+                    [p alignConsistency];
+                    [[NDRecordStore shared] saveProfile:p error:nil];
+                    if ([[[NDRecordStore shared] currentRecordName] isEqualToString:recordForGeo]) {
+                        [[NDRecordStore shared] notifyReload];
+                    }
+                    NSLog(@"[NewDevice] post-switch locationFromIP %@", note);
+                }
             });
         }
     } @catch (NSException *ex) {

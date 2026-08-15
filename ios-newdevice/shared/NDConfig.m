@@ -22,6 +22,7 @@
     self.fakeCarrier = YES;
     self.spoofLocation = YES;
     self.randomLocation = YES;
+    self.locationFromIP = YES;
     self.smartLocationOffset = YES;
     self.smartAirplane = YES;
     // Default OFF so install/respring never hides JB paths from tooling
@@ -43,6 +44,7 @@
     self.fakeCarrier = [dict[@"fakeCarrier"] boolValue];
     self.spoofLocation = dict[@"spoofLocation"] ? [dict[@"spoofLocation"] boolValue] : YES;
     self.randomLocation = dict[@"randomLocation"] ? [dict[@"randomLocation"] boolValue] : YES;
+    self.locationFromIP = dict[@"locationFromIP"] ? [dict[@"locationFromIP"] boolValue] : YES;
     self.smartLocationOffset = [dict[@"smartLocationOffset"] boolValue];
     self.smartAirplane = dict[@"smartAirplane"] ? [dict[@"smartAirplane"] boolValue] : YES;
     self.jailbreakHideBasic = dict[@"jailbreakHideBasic"] ? [dict[@"jailbreakHideBasic"] boolValue] : NO;
@@ -96,6 +98,7 @@
         @"fakeCarrier": @(self.fakeCarrier),
         @"spoofLocation": @(self.spoofLocation),
         @"randomLocation": @(self.randomLocation),
+        @"locationFromIP": @(self.locationFromIP),
         @"smartLocationOffset": @(self.smartLocationOffset),
         @"smartAirplane": @(self.smartAirplane),
         @"jailbreakHideBasic": @(self.jailbreakHideBasic),

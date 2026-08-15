@@ -52,17 +52,81 @@
 }
 
 + (void)fetchPublicIPWithCompletion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
-    NSURL *url = [NSURL URLWithString:@"https://api.ipify.org?format=text"];
+    [self fetchIPGeolocationWithCompletion:^(NSDictionary *info, NSError *error) {
+        if (completion) completion(info[@"ip"], error);
+    }];
+}
+
++ (void)fetchIPGeolocationWithCompletion:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
+    // geojs: HTTPS, no key, returns lat/lon/timezone for the egress IP.
+    NSURL *url = [NSURL URLWithString:@"https://get.geojs.io/v1/ip/geo.json"];
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) {
-            completion(nil, error);
+        if (error || !data.length) {
+            // Fallback: ipify + ip-api (HTTP)
+            [self NDFetchGeoFallback:completion];
             return;
         }
-        NSString *ip = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        ip = [ip stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        completion(ip, nil);
+        NSDictionary *raw = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![raw isKindOfClass:[NSDictionary class]]) {
+            [self NDFetchGeoFallback:completion];
+            return;
+        }
+        double lat = [raw[@"latitude"] doubleValue];
+        double lon = [raw[@"longitude"] doubleValue];
+        if (fabs(lat) < 0.01 && fabs(lon) < 0.01) {
+            [self NDFetchGeoFallback:completion];
+            return;
+        }
+        NSDictionary *info = @{
+            @"ip": raw[@"ip"] ?: @"",
+            @"lat": @(lat),
+            @"lon": @(lon),
+            @"timezone": raw[@"timezone"] ?: @"",
+            @"city": raw[@"city"] ?: @"",
+            @"countryCode": raw[@"country_code"] ?: @"",
+            @"isp": raw[@"organization_name"] ?: (raw[@"organization"] ?: @""),
+        };
+        if (completion) completion(info, nil);
     }];
     [task resume];
+}
+
++ (void)NDFetchGeoFallback:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
+    NSURL *url = [NSURL URLWithString:@"http://ip-api.com/json/?fields=status,message,query,country,countryCode,city,lat,lon,timezone,isp"];
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error || !data.length) {
+            if (completion) completion(nil, error ?: [NSError errorWithDomain:@"NDAirplane" code:2 userInfo:@{NSLocalizedDescriptionKey: @"geo failed"}]);
+            return;
+        }
+        NSDictionary *raw = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![raw isKindOfClass:[NSDictionary class]] || ![raw[@"status"] isEqualToString:@"success"]) {
+            if (completion) completion(nil, [NSError errorWithDomain:@"NDAirplane" code:3 userInfo:@{NSLocalizedDescriptionKey: raw[@"message"] ?: @"geo failed"}]);
+            return;
+        }
+        NSDictionary *info = @{
+            @"ip": raw[@"query"] ?: @"",
+            @"lat": raw[@"lat"] ?: @0,
+            @"lon": raw[@"lon"] ?: @0,
+            @"timezone": raw[@"timezone"] ?: @"",
+            @"city": raw[@"city"] ?: @"",
+            @"countryCode": raw[@"countryCode"] ?: @"",
+            @"isp": raw[@"isp"] ?: @"",
+        };
+        if (completion) completion(info, nil);
+    }];
+    [task resume];
+}
+
++ (NSDictionary *)fetchIPGeolocationSync {
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block NSDictionary *out = nil;
+    [self fetchIPGeolocationWithCompletion:^(NSDictionary *info, NSError *error) {
+        (void)error;
+        out = info;
+        dispatch_semaphore_signal(sem);
+    }];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)));
+    return out;
 }
 
 @end

@@ -16,6 +16,7 @@
         @"fakeCarrier": @(config.fakeCarrier),
         @"spoofLocation": @(config.spoofLocation),
         @"randomLocation": @(config.randomLocation),
+        @"locationFromIP": @(config.locationFromIP),
         @"smartLocationOffset": @(config.smartLocationOffset),
         @"smartAirplane": @(config.smartAirplane),
         @"jailbreakHideBasic": @(config.jailbreakHideBasic),
