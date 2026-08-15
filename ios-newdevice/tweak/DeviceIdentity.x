@@ -203,7 +203,13 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
 typedef CFTypeRef (*MGCopyAnswerErrFunc)(CFStringRef, void *);
 static MGCopyAnswerErrFunc orig_MGCopyAnswerWithError;
 static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
+    NDTweakState *st = [NDTweakState shared];
+    if (![st shouldSpoofIdentity]) {
+        return orig_MGCopyAnswerWithError ? orig_MGCopyAnswerWithError(key, errOut)
+                                          : (orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL);
+    }
     CFTypeRef v = hooked_MGCopyAnswer(key);
+    if (errOut) *((CFErrorRef *)errOut) = NULL;
     return v;
 }
 %ctor {

@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 179: Venmo no MG hooks (crash fix); bind keychain per record on switch.
+Description: 180: isolation audit — setRecord ACK order, akc pending fix, bind on import/clear.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

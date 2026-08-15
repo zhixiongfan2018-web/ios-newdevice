@@ -68,6 +68,8 @@ static inline BOOL NDVenmoPendingClearKeychain(void) {
 }
 
 static inline BOOL NDVenmoPendingAkcRestore(void) {
+    // Only explicit pending pointers — live Documents/akc.plist alone must NOT
+    // keep re-entering KeychainRestore on every cold launch.
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *p in @[
              @"/var/jb/Library/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
@@ -75,8 +77,6 @@ static inline BOOL NDVenmoPendingAkcRestore(void) {
          ]) {
         if ([fm fileExistsAtPath:p]) return YES;
     }
-    NSString *homeAkc = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/akc.plist"];
-    if ([fm fileExistsAtPath:homeAkc]) return YES;
     return NO;
 }
 
@@ -88,12 +88,17 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
 /// ObjC / UIKit hooks must NOT install before UIApplication init — ElleKit + iOS 18
 /// crashes inside _UIApplicationInfoParser when UIDevice/NSBundle are swizzled early.
 /// Venmo: skip ALL of these — UIDevice/ASIdentifier hooks caused SIGBUS with mParticle.
-/// Venmo only gets KeychainRestore + MGCopyAnswer (see DeviceIdentity.x).
+/// Venmo only gets KeychainRestore (see KeychainRestore.x). Never MG inside Venmo.
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
     if (NDIsVenmoHost()) return;
-    dispatch_async(dispatch_get_main_queue(), block);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Re-check: early %ctor may miss Venmo before bundle id is ready.
+        if (NDIsVenmoHost()) return;
+        if (!NDShouldLoadTweak()) return;
+        block();
+    });
 }
 
 /// C/MSHookFunction hooks that previously SIGILL'd Venmo on iOS 18 + ElleKit
@@ -102,7 +107,11 @@ static inline void NDRunRiskyCHooksAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
     if (NDIsVenmoHost()) return;
-    dispatch_async(dispatch_get_main_queue(), block);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (NDIsVenmoHost()) return;
+        if (!NDShouldLoadTweak()) return;
+        block();
+    });
 }
 
 #endif /* NDSafeLoad_h */

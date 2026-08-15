@@ -18,6 +18,16 @@
     return svc;
 }
 
+/// Serialize all mutating ops so two setRecord/newRecord cannot interleave wipe/bind.
+- (dispatch_queue_t)mutateQueue {
+    static dispatch_queue_t q;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        q = dispatch_queue_create("com.local.newdevice.mutate", DISPATCH_QUEUE_SERIAL);
+    });
+    return q;
+}
+
 + (BOOL)isAsyncAckFun:(NSString *)fun {
     static NSSet *set;
     static dispatch_once_t onceToken;
@@ -99,23 +109,17 @@
         }
 
         BOOL hasStaged = [self recordHasStagedApps:current];
-        BOOL prevStaged = [self recordHasStagedApps:previous];
         if (cfg.holographicBackup && apps.count) {
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
             BOOL leavingReal = !sameRecord && previous.length && ![previous isEqualToString:@"原始机器"];
 
-            // Snapshot outgoing live data only when we still need a holographic copy.
-            // If previous already has staged apps (AMG import), skip re-backup — it was
-            // blocking 一键新机 for tens of seconds and often jetsam'd before clear ran,
-            // so the previous environment stayed in Venmo/Safari sandboxes.
-            if (leavingReal && hasStaged) {
-                // Switching into an imported/staged record: save current live first.
-                [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
-            } else if (leavingReal && !prevStaged) {
-                // Leaving a hand-built env with no stage yet — snapshot before wipe.
-                [[NDAppDataManager shared] backupApps:[[NDRecordStore shared] appBundleIdsForRecord:previous]
-                                            toRecord:previous
-                                               error:nil];
+            // Snapshot outgoing live data when leaving a real record.
+            // Keep fat AMG stages (fat-guard in backupApps); never skip backup just
+            // because destination is empty — otherwise live divergence is lost.
+            if (leavingReal) {
+                NSArray *prevApps = [[NDRecordStore shared] appBundleIdsForRecord:previous];
+                if (!prevApps.count) prevApps = apps;
+                [[NDAppDataManager shared] backupApps:prevApps toRecord:previous error:nil];
             }
 
             // Always wipe live sandboxes so the new identity cannot inherit files.
@@ -167,7 +171,7 @@
         if (completion) completion(body, code);
     };
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async([self mutateQueue], ^{
         [[NDRecordStore shared] writeResultCode:2];
         NSError *error = nil;
         NSString *body = @"";
@@ -252,8 +256,9 @@
                 NSError *err = nil;
                 BOOL success = [[NDRecordStore shared] switchToRecord:name error:&err];
                 if (success) {
-                    [[NDRecordStore shared] writeResultCode:1];
+                    // Isolation (wipe/bind) MUST finish before ACK — same as newRecord.
                     [self afterSwitchFrom:previousRecord to:name apps:apps];
+                    [[NDRecordStore shared] writeResultCode:1];
                 } else {
                     [[NDRecordStore shared] writeResultCode:0];
                 }
@@ -297,14 +302,13 @@
             NSError *err = nil;
             [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name error:&err];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
-            // Open Venmo once so KeychainRestore.x runs inside Venmo (daemon SecItem is not enough)
-            [[NDAppDataManager shared] tryLaunchAppToCreateContainer:@"net.kortina.labs.Venmo"];
-            [NSThread sleepForTimeInterval:2.5];
-            [[NDAppDataManager shared] terminateApps:@[@"net.kortina.labs.Venmo"]];
+            // Clear previous Venmo session then apply this record's akc (in-app).
+            NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
             NSString *probe = [[NDAppDataManager shared] probeLiveContainerForBundleId:@"net.kortina.labs.Venmo"];
             NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
             if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
-            report = [NSString stringWithFormat:@"%@\n--- probe after in-app akc pass ---\n%@", report, probe ?: @""];
+            report = [NSString stringWithFormat:@"%@\n--- bindVenmo ---\n%@\n--- probe ---\n%@",
+                      report, bind, probe ?: @""];
             [report writeToFile:@"/var/mobile/Media/NewDevice/last-restore.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
             [[NDRecordStore shared] writeResultCode:1];
             done(report, 200);
@@ -549,8 +553,13 @@
                 (void)previousRecord;
                 NSError *err = nil;
                 BOOL success = [[NDAppDataManager shared] clearDataForApps:apps error:&err];
+                NSString *extra = @"";
+                if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+                    extra = [[NDAppDataManager shared] purgeVenmoSessionInApp] ?: @"";
+                }
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
-                done(success ? @"cleared" : @"", success ? 200 : 500);
+                NSString *msg = success ? (extra.length ? [@"cleared\n" stringByAppendingString:extra] : @"cleared") : @"";
+                done(msg, success ? 200 : 500);
             }];
             return;
         }
@@ -583,15 +592,19 @@
                         NSError *rErr = nil;
                         [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:applyName error:&rErr];
                         [[NDAppDataManager shared] restoreAppGroupsForRecord:applyName];
+                        NSString *bind = @"";
+                        if ([bids containsObject:@"net.kortina.labs.Venmo"]) {
+                            bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
+                        }
                         NSString *rr = [NDAppDataManager shared].lastRestoreReport ?: @"";
                         // Append sandbox write proof into the same import log the user reads
                         NSString *prev = [NSString stringWithContentsOfFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
                                                                   encoding:NSUTF8StringEncoding error:nil] ?: @"";
-                        NSString *extra = [NSString stringWithFormat:@"\n--- sandbox write (Containers) ---\n%@", rr];
+                        NSString *extra = [NSString stringWithFormat:@"\n--- sandbox write (Containers) ---\n%@\n--- bindVenmo ---\n%@", rr, bind];
                         [[prev stringByAppendingString:extra] writeToFile:@"/var/mobile/Media/AMG/import/nd-last-import.txt"
                                                                atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@", applyName,
-                                    rr.length ? rr : (rErr.localizedDescription ?: @"")];
+                        applyMsg = [NSString stringWithFormat:@"applied:%@\n%@\n%@", applyName,
+                                    rr.length ? rr : (rErr.localizedDescription ?: @""), bind];
                     } @catch (NSException *ex) {
                         applyMsg = [NSString stringWithFormat:@"apply exception: %@ — %@", ex.name ?: @"?", ex.reason ?: @"?"];
                     }

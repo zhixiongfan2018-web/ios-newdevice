@@ -347,7 +347,22 @@ static void NDApplyPendingKeychainRestore(void) {
         [report writeToFile:media atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSLog(@"[NewDevice] in-app keychain restore %@ ok=%lu/%lu from %@", bid, (unsigned long)ok, (unsigned long)total, path);
         if (ok > 0) {
-            if (pendingPath.length) [fm removeItemAtPath:pending error:nil];
+            // Clear pending pointers on both jb + Media mirrors
+            for (NSString *p in @[
+                     pending ?: @"",
+                     [[[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"]
+                      stringByAppendingPathComponent:[bid stringByAppendingString:@".txt"]],
+                     @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+                 ]) {
+                if (p.length) [fm removeItemAtPath:p error:nil];
+            }
+            // Rename live akc so cold launches don't treat it as a new pending restore
+            NSString *liveAkc = [homeDocs stringByAppendingPathComponent:@"akc.plist"];
+            NSString *doneAkc = [homeDocs stringByAppendingPathComponent:@"akc.plist.restored"];
+            if ([fm fileExistsAtPath:liveAkc]) {
+                [fm removeItemAtPath:doneAkc error:nil];
+                [fm moveItemAtPath:liveAkc toPath:doneAkc error:nil];
+            }
             break; // success — stop; on failure try next candidate path
         }
     }

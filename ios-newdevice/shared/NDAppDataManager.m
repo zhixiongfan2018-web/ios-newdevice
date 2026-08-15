@@ -481,6 +481,7 @@ extern char **environ;
 }
 
 - (BOOL)backupApps:(NSArray<NSString *> *)bundleIds toRecord:(NSString *)recordName error:(NSError **)error {
+    if (!recordName.length || [recordName isEqualToString:@"原始机器"]) return NO;
     for (NSString *bid in bundleIds) {
         NSString *container = [self containerPathForBundleId:bid];
         if (!container) continue;
@@ -490,10 +491,12 @@ extern char **environ;
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
             liveSize += [self byteSizeAtPath:[container stringByAppendingPathComponent:sub]];
         }
-        // Never clobber a fat AMG stage with a wiped/thin live sandbox (caused apps=0 restores).
-        if (existing > 1024 * 1024 && liveSize < existing / 4) {
-            NSLog(@"[NewDevice] skip backup %@ — keep staged %lluKB, live only %lluKB",
-                  bid, existing / 1024, liveSize / 1024);
+        BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
+        // Never clobber a fat AMG stage OR any stage that still has akc with wiped/thin live.
+        if ((existing > 32 * 1024 && liveSize < existing / 4) ||
+            (hasKC && liveSize < existing)) {
+            NSLog(@"[NewDevice] skip backup %@ — keep staged %lluKB (kc=%@), live only %lluKB",
+                  bid, existing / 1024, hasKC ? @"yes" : @"no", liveSize / 1024);
             continue;
         }
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
@@ -532,7 +535,7 @@ extern char **environ;
         if ([fm fileExistsAtPath:cand]) liveApp = cand;
     }
     if (!liveApp.length) {
-        // Fuzzy: normalize record token vs /var/mobile/AMG/* folder names
+        // Exact match only on normalized names — substring matching picked wrong siblings.
         NSString *want = [[recordName stringByReplacingOccurrencesOfString:@"+" withString:@""]
                           stringByReplacingOccurrencesOfString:@" " withString:@"-"];
         while ([want containsString:@"--"]) want = [want stringByReplacingOccurrencesOfString:@"--" withString:@"-"];
@@ -541,7 +544,7 @@ extern char **environ;
             NSString *got = [[k stringByReplacingOccurrencesOfString:@"+" withString:@""]
                              stringByReplacingOccurrencesOfString:@" " withString:@"-"];
             while ([got containsString:@"--"]) got = [got stringByReplacingOccurrencesOfString:@"--" withString:@"-"];
-            if (![got isEqualToString:want] && ![got containsString:want] && ![want containsString:got]) continue;
+            if (![got isEqualToString:want]) continue;
             NSString *cand = [[@"/var/mobile/AMG" stringByAppendingPathComponent:k] stringByAppendingPathComponent:bid];
             if ([fm fileExistsAtPath:cand]) { liveApp = cand; break; }
         }
@@ -1022,12 +1025,20 @@ extern char **environ;
             [fm removeItemAtPath:liveAkc error:nil];
             copied = [fm copyItemAtPath:srcAkc toPath:liveAkc error:nil];
         }
-        // Pending pointer for in-app restore
+        // Pending pointer for in-app restore (jb + Media — Venmo may only see Media)
         if (srcAkc.length) {
-            NSString *pendingDir = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"];
-            [fm createDirectoryAtPath:pendingDir withIntermediateDirectories:YES attributes:nil error:nil];
-            NSString *pending = [pendingDir stringByAppendingPathComponent:[bid stringByAppendingString:@".txt"]];
-            [srcAkc writeToFile:pending atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            for (NSString *pendingDir in @[
+                     [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc"],
+                     @"/var/mobile/Media/NewDevice/pending-akc",
+                 ]) {
+                [fm createDirectoryAtPath:pendingDir withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *pending = [pendingDir stringByAppendingPathComponent:[bid stringByAppendingString:@".txt"]];
+                // Prefer live Documents path when available so in-app restore reads sandboxed file
+                NSString *ptr = (liveAkc.length && [fm fileExistsAtPath:liveAkc]) ? liveAkc : srcAkc;
+                [ptr writeToFile:pending atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                [NDPaths makePathWorldReadable:pending];
+                [NDPaths makePathWorldReadable:pendingDir];
+            }
         }
         [parts addObject:[NSString stringWithFormat:@"%@: daemonKeychain=SKIP stagedAkc=%@ liveAkc=%@",
                           bid, srcAkc.length ? @"yes" : @"no", copied ? @"copied" : (liveAkc.length && [fm fileExistsAtPath:liveAkc] ? @"present" : @"missing")]];
@@ -1590,6 +1601,14 @@ extern char **environ;
                 [agLines addObject:[NSString stringWithFormat:@"AppGroup FAIL %@ — live container not found", groupId]];
                 continue;
             }
+            // Wipe live group trees first so previous env files cannot linger.
+            for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+                NSString *lp = [live stringByAppendingPathComponent:sub];
+                if ([fm fileExistsAtPath:lp]) {
+                    [fm removeItemAtPath:lp error:nil];
+                    [fm createDirectoryAtPath:lp withIntermediateDirectories:YES attributes:nil error:nil];
+                }
+            }
             for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
                 NSString *src = [leaf stringByAppendingPathComponent:sub];
                 if (![fm fileExistsAtPath:src]) continue;
@@ -1933,20 +1952,4 @@ extern char **environ;
     dispatch_once(&onceToken, ^{
         exts = [NSSet setWithArray:@[
             @"jpg", @"jpeg", @"png", @"gif", @"heic", @"heif", @"webp", @"bmp", @"tiff", @"tif",
-            @"mov", @"mp4", @"m4v", @"avi", @"mkv", @"3gp", @"webm"
-        ]];
-    });
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
-    NSUInteger removed = 0;
-    NSString *rel = nil;
-    while ((rel = [en nextObject])) {
-        NSString *ext = rel.pathExtension.lowercaseString;
-        if (![exts containsObject:ext]) continue;
-        NSString *full = [root stringByAppendingPathComponent:rel];
-        if ([fm removeItemAtPath:full error:nil]) removed++;
-    }
-    return removed;
-}
-
-@end
+            @"mov", @"mp4", @"m4v", @"avi", @"mkv", @"3gp", @"webm

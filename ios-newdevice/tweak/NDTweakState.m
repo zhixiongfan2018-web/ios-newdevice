@@ -53,12 +53,14 @@
 }
 
 - (BOOL)shouldSpoof {
+    if ([self.profile.name isEqualToString:@"原始机器"]) return NO;
     return self.active && self.profile != nil && self.profile.spoofDeviceIdentity;
 }
 
 - (BOOL)shouldSpoofIdentity {
     // Target apps + telephony daemons (baseband-adjacent IMEI / equipment info)
-    if (!self.profile || !self.profile.spoofDeviceIdentity) return NO;
+    if (!self.profile || [self.profile.name isEqualToString:@"原始机器"]) return NO;
+    if (!self.profile.spoofDeviceIdentity) return NO;
     return self.active || self.identityHost;
 }
 
