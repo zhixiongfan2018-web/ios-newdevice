@@ -29,8 +29,14 @@
 	<true/>
 	<key>com.apple.springboard.launchapplications</key>
 	<true/>
-	<key>com.apple.private.MobileGestalt.AllowedProtectedKeys</key>
+	<!-- Allow FrontBoard terminateApplication for target apps on switch -->
+	<key>com.apple.frontboard.shutdown</key>
 	<true/>
+	<key>com.apple.private.mobileinstall.allowedSPI</key>
+	<array>
+		<string>Shutdown</string>
+		<string>InstallForLaunchServices</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>*</string>

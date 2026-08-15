@@ -137,6 +137,11 @@
             apps = [self appsForSwitchTo:current previous:previous];
         }
 
+        // Close targets again right before wipe/restore (user may have reopened them).
+        if (apps.count) {
+            [[NDAppDataManager shared] terminateApps:apps];
+        }
+
         BOOL hasStaged = [self recordHasStagedApps:current];
         if (cfg.holographicBackup && apps.count) {
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];

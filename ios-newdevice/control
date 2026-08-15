@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 211: AMG-aligned export - classic var/mobile/AMG path, single flat apps, strip caches, .tar.gz.
+Description: 212: kill target apps on switch/new (root daemon + FrontBoard) before sandbox wipe.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

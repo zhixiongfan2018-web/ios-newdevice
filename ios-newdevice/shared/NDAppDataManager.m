@@ -8,6 +8,7 @@
 #import <dlfcn.h>
 #import <spawn.h>
 #import <sys/wait.h>
+#import <unistd.h>
 #import <notify.h>
 #import <Security/Security.h>
 
@@ -129,10 +130,91 @@ extern char **environ;
 }
 
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds {
+    if (!bundleIds.count) return;
+
+    // App UI runs as mobile — killall often cannot signal other apps. Prefer root daemon.
+    if (geteuid() != 0) {
+        NSString *csv = [[bundleIds filteredArrayUsingPredicate:
+                          [NSPredicate predicateWithBlock:^BOOL(NSString *b, NSDictionary *bindings) {
+            return [b isKindOfClass:[NSString class]] && b.length > 0;
+        }]] componentsJoinedByString:@","];
+        if (csv.length) {
+            for (NSString *bin in @[
+                     @"/var/jb/usr/local/bin/newdeviced",
+                     @"/var/jb/usr/bin/newdeviced",
+                 ]) {
+                if ([[NSFileManager defaultManager] fileExistsAtPath:bin]) {
+                    [self runCommand:bin arguments:@[ @"kill-apps", csv ]];
+                    break;
+                }
+            }
+        }
+    }
+
+    // FrontBoard terminate (works with platform-application + springboard.launchapplications).
+    static id fbsService;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        void *fb = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_NOW);
+        (void)fb;
+        Class FBS = NSClassFromString(@"FBSSystemService");
+        if ([FBS respondsToSelector:NSSelectorFromString(@"sharedService")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            fbsService = [FBS performSelector:NSSelectorFromString(@"sharedService")];
+#pragma clang diagnostic pop
+        }
+    });
+
+    NSMutableArray *report = [NSMutableArray array];
     for (NSString *bid in bundleIds) {
-        if (!bid.length) continue;
+        if (![bid isKindOfClass:[NSString class]] || !bid.length) continue;
+        if ([bid isEqualToString:@"com.local.newdevice"] || [bid hasPrefix:@"com.apple.springboard"]) continue;
+
+        BOOL fbOk = NO;
+        if (fbsService) {
+            @try {
+                SEL sel4 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:");
+                SEL sel5 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:completion:");
+                if ([fbsService respondsToSelector:sel5]) {
+                    NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel5];
+                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                    [inv setSelector:sel5];
+                    [inv setTarget:fbsService];
+                    NSString *b = bid;
+                    NSInteger reason = 1;
+                    BOOL reportFlag = NO;
+                    NSString *desc = @"NewDevice";
+                    id completion = nil;
+                    [inv setArgument:&b atIndex:2];
+                    [inv setArgument:&reason atIndex:3];
+                    [inv setArgument:&reportFlag atIndex:4];
+                    [inv setArgument:&desc atIndex:5];
+                    [inv setArgument:&completion atIndex:6];
+                    [inv invoke];
+                    fbOk = YES;
+                } else if ([fbsService respondsToSelector:sel4]) {
+                    NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel4];
+                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                    [inv setSelector:sel4];
+                    [inv setTarget:fbsService];
+                    NSString *b = bid;
+                    NSInteger reason = 1;
+                    BOOL reportFlag = NO;
+                    NSString *desc = @"NewDevice";
+                    [inv setArgument:&b atIndex:2];
+                    [inv setArgument:&reason atIndex:3];
+                    [inv setArgument:&reportFlag atIndex:4];
+                    [inv setArgument:&desc atIndex:5];
+                    [inv invoke];
+                    fbOk = YES;
+                }
+            } @catch (__unused NSException *ex) {
+                fbOk = NO;
+            }
+        }
+
         NSMutableSet<NSString *> *names = [NSMutableSet set];
-        // Prefer CFBundleExecutable from LSApplicationProxy
         Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
         if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
 #pragma clang diagnostic push
@@ -156,18 +238,33 @@ extern char **environ;
                 }
             }
         }
-        // Fallbacks: last bundle component (often wrong) + full bid
-        if (bid.pathExtension.length) {
-            // ignore
-        }
         NSString *last = bid.lastPathComponent;
         if (last.length) [names addObject:last];
-        for (NSString *proc in names) {
-            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", proc]];
-            [self runCommand:@"/usr/bin/killall" arguments:@[@"-9", proc]];
-            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[@"-9", [proc stringByReplacingOccurrencesOfString:@" " withString:@""]]];
+        // Common Venmo / Safari names
+        if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) [names addObject:@"Venmo"];
+        if ([bid isEqualToString:@"com.apple.mobilesafari"]) {
+            [names addObject:@"MobileSafari"];
+            [names addObject:@"Safari"];
         }
+
+        for (NSString *proc in names) {
+            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[ @"-9", proc ]];
+            [self runCommand:@"/usr/bin/killall" arguments:@[ @"-9", proc ]];
+            [self runCommand:@"/bin/killall" arguments:@[ @"-9", proc ]];
+            NSString *nospace = [proc stringByReplacingOccurrencesOfString:@" " withString:@""];
+            if (![nospace isEqualToString:proc]) {
+                [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[ @"-9", nospace ]];
+            }
+        }
+        [report addObject:[NSString stringWithFormat:@"%@ fb=%@", bid, fbOk ? @"1" : @"0"]];
     }
+
+    // Give SpringBoard a beat to tear down before sandbox wipe.
+    usleep(250 * 1000);
+
+    NSString *line = [NSString stringWithFormat:@"time=%@\n%@\n", [NSDate date], [report componentsJoinedByString:@"\n"]];
+    [line writeToFile:@"/var/mobile/Media/NewDevice/last-terminate-apps.txt"
+           atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 - (NSString *)NDScanContainerUnderRoots:(NSArray<NSString *> *)roots identifier:(NSString *)identifier {
@@ -451,6 +548,8 @@ extern char **environ;
 }
 
 - (BOOL)clearDataForApps:(NSArray<NSString *> *)bundleIds error:(NSError **)error {
+    // Must quit targets before wiping sandboxes (running app rewrites / keeps files open).
+    [self terminateApps:bundleIds];
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *bid in bundleIds) {
         NSString *container = [self containerPathForBundleId:bid];

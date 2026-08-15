@@ -13,6 +13,22 @@ int main(int argc, char *argv[]) {
     @autoreleasepool {
         [NDPaths ensureDirectories];
 
+        // One-shot: force-quit target apps as root (App UI cannot reliably killall).
+        if (argc >= 3 && argv[1] && strcmp(argv[1], "kill-apps") == 0) {
+            NSString *csv = [NSString stringWithUTF8String:argv[2]] ?: @"";
+            NSMutableArray *bids = [NSMutableArray array];
+            for (NSString *part in [csv componentsSeparatedByString:@","]) {
+                NSString *b = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (b.length) [bids addObject:b];
+            }
+            [[NDAppDataManager shared] terminateApps:bids];
+            NSString *body = [NSString stringWithFormat:@"killed=%lu\n%@", (unsigned long)bids.count, csv];
+            [body writeToFile:@"/var/mobile/Media/NewDevice/last-terminate-apps.txt"
+                   atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            fprintf(stdout, "%s\n", body.UTF8String ?: "");
+            return 0;
+        }
+
         // One-shot: clear Venmo keychain with daemon entitlements (App UI cannot).
         if (argc >= 2 && argv[1] && strcmp(argv[1], "clear-venmo-kc") == 0) {
             NSString *body = [[NDAppDataManager shared] clearVenmoKeychainAllKnownGroups] ?: @"";

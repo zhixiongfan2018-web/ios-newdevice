@@ -33,6 +33,8 @@
 	<true/>
 	<key>com.apple.springboard.launchapplications</key>
 	<true/>
+	<key>com.apple.frontboard.shutdown</key>
+	<true/>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>*</string>
