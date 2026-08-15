@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 204: AMG-style sole inject - exclude targets from amg.plist; keep Venmo MG/IDFA/model + holographic akc.
+Description: 205: root daemon sync-inject excludes Venmo from amg.plist; keep AMG-style identity + holographic akc.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

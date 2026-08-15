@@ -12,8 +12,7 @@
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
-	<key>UserName</key>
-	<string>mobile</string>
+	<!-- Run as root so syncInjectFilter can rewrite amg.plist / NewDevice.plist under /var/jb -->
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>

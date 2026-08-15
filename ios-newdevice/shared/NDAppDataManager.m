@@ -993,7 +993,20 @@ extern char **environ;
             continue;
         }
         BOOL ok = [plist writeToFile:writePath atomically:YES];
-        [lines addObject:[NSString stringWithFormat:@"%@ %@", ok ? @"ok" : @"fail", writePath]];
+        if (!ok) {
+            // Non-atomic fallback (some rootless mounts reject rename-into-place).
+            NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
+                                                                      format:NSPropertyListXMLFormat_v1_0
+                                                                     options:0
+                                                                       error:nil];
+            ok = data && [data writeToFile:writePath atomically:NO];
+        }
+        NSError *attrErr = nil;
+        [[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions: @(0644) }
+                                         ofItemAtPath:writePath error:&attrErr];
+        [lines addObject:[NSString stringWithFormat:@"%@ %@%@",
+                          ok ? @"ok" : @"fail", writePath,
+                          ok ? @"" : @" (need root daemon / postinst sync-inject)"]];
         if (ok) [NDPaths makePathWorldReadable:writePath];
     }
 
@@ -1035,10 +1048,18 @@ extern char **environ;
         filter[@"RejectList"] = reject.array;
         amg[@"Filter"] = filter;
         BOOL ok = [amg writeToFile:amgPath atomically:YES];
+        if (!ok) {
+            NSData *data = [NSPropertyListSerialization dataWithPropertyList:amg
+                                                                      format:NSPropertyListXMLFormat_v1_0
+                                                                     options:0
+                                                                       error:nil];
+            ok = data && [data writeToFile:amgPath atomically:NO];
+        }
         if (ok) [NDPaths makePathWorldReadable:amgPath];
-        [lines addObject:[NSString stringWithFormat:@"amg-%@ %@ removed=%lu reject=%lu",
+        [lines addObject:[NSString stringWithFormat:@"amg-%@ %@ removed=%lu reject=%lu%@",
                           ok ? @"ok" : @"fail", amgPath,
-                          (unsigned long)removed, (unsigned long)reject.count]];
+                          (unsigned long)removed, (unsigned long)reject.count,
+                          ok ? @"" : @" (need root)"]];
     }
 
     NSString *report = [lines componentsJoinedByString:@"\n"];

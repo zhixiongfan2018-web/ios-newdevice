@@ -65,4 +65,13 @@ if [ -d "$DYLIB_DIR" ] && [ -f "$DYLIB_DIR/NewDevice.dylib" ]; then
   fi
 fi
 
+# Root one-shot: exclude NewDevice targets from amg.plist (prevent Venmo double-hook crash).
+mkdir -p /var/mobile/Media/NewDevice 2>/dev/null || true
+if [ -x "$BIN" ]; then
+  "$BIN" sync-inject >/var/mobile/Media/NewDevice/last-inject-filter.txt 2>/dev/null || true
+  # Make inject plists updatable by root daemon later
+  chmod 644 "$DYLIB_DIR/amg.plist" "$INJECT_DIR/amg.plist" 2>/dev/null || true
+  chmod 644 "$DYLIB_DIR/NewDevice.plist" "$INJECT_DIR/NewDevice.plist" 2>/dev/null || true
+fi
+
 exit 0

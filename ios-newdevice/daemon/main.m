@@ -22,6 +22,23 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
+        // One-shot (postinst / root shell): sole-owner inject filter + exclude from amg.plist.
+        if (argc >= 2 && argv[1] && strcmp(argv[1], "sync-inject") == 0) {
+            [[NDConfig shared] reload];
+            NSArray *targets = [NDConfig shared].targetApps ?: @[];
+            if (!targets.count) {
+                targets = @[
+                    @"net.kortina.labs.Venmo",
+                    @"com.apple.mobilesafari",
+                ];
+            }
+            NSString *body = [[NDAppDataManager shared] syncInjectFilterWithTargetApps:targets] ?: @"";
+            [body writeToFile:@"/var/mobile/Media/NewDevice/last-inject-filter.txt"
+                   atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            fprintf(stdout, "%s\n", body.UTF8String ?: "");
+            return body.length ? 0 : 1;
+        }
+
         // Publish world-readable runtime snapshot at boot so sandboxed target apps
         // can spoof even before the NewDevice UI is opened.
         void (^publishRuntime)(void) = ^{
