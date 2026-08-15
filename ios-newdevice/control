@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 199: align authenticity (US geo/carrier; model colors; mainstream iOS; modern UDID).
+Description: 200: home shows env IDFA; probe separates profile vs unhooked system IDFA.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

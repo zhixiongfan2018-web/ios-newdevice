@@ -93,6 +93,12 @@
     size_t memLen = sizeof(mem);
     sysctlbyname("hw.memsize", &mem, &memLen, NULL, 0);
 
+    // NewDevice.app is RejectListed — ASIdentifierManager here is the REAL device IDFA.
+    // Show environment IDFA from the active profile as the source of truth for spoof.
+    NSString *envIDFA = p.IDFA.length ? p.IDFA : @"—";
+    NSString *envIDFV = p.IDFV.length ? p.IDFV : @"—";
+    BOOL zeroLive = [idfa hasPrefix:@"00000000-0000-0000-0000"];
+
     _rows = @[
         @[@"记录", p.name ?: @"-"],
         @[@"设备名", dev.name ?: @""],
@@ -101,8 +107,10 @@
         @[@"Locale", [NSLocale currentLocale].localeIdentifier ?: @"-"],
         @[@"语言", [[NSLocale preferredLanguages] componentsJoinedByString:@", "] ?: @"-"],
         @[@"时区", [NSTimeZone localTimeZone].name ?: @"-"],
-        @[@"IDFA", idfa],
-        @[@"IDFV", idfv],
+        @[@"IDFA(环境)", envIDFA],
+        @[@"IDFV(环境)", envIDFV],
+        @[@"IDFA(本机未注入)", zeroLive ? [NSString stringWithFormat:@"%@ (ATT关/零)", idfa] : idfa],
+        @[@"IDFV(本机未注入)", idfv],
         @[@"UUID(profile)", p.UUID ?: @"-"],
         @[@"OpenUDID(profile)", p.OpenUDID ?: @"-"],
         @[@"DeviceToken(profile)", p.DeviceToken.length ? p.DeviceToken : @"-"],
@@ -129,7 +137,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @"读取到的实际值（含 Hook 后结果）";
+    return @"环境参数来自当前记录；「本机未注入」= NewDevice App 本身不加载 Tweak";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return _rows.count; }

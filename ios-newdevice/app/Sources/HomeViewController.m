@@ -9,12 +9,14 @@
 #import "NDConfig.h"
 #import "ProbeViewController.h"
 #import "EnvSelectViewController.h"
+#import "ProfileDetailViewController.h"
 
 @interface HomeViewController ()
 @property (nonatomic, strong) UIScrollView *scroll;
 @property (nonatomic, strong) UIStackView *content;
 @property (nonatomic, strong) UILabel *recordNameLabel;
 @property (nonatomic, strong) UILabel *modelLabel;
+@property (nonatomic, strong) UILabel *summaryLabel;
 @property (nonatomic, strong) UIView *apiChip;
 @property (nonatomic, strong) UIView *ipChip;
 @property (nonatomic, strong) UIStackView *chipRow;
@@ -60,6 +62,7 @@
 
     [self.content addArrangedSubview:[self buildHeroCard]];
     [self.content addArrangedSubview:[self buildStatusCard]];
+    [self.content addArrangedSubview:[self buildSummaryCard]];
     [self.content addArrangedSubview:[self buildActions]];
 
     self.busyOverlay = [UIView new];
@@ -165,6 +168,42 @@
     return card;
 }
 
+- (UIView *)buildSummaryCard {
+    UIView *card = [UIView new];
+    [NDTheme styleCard:card];
+
+    UILabel *title = [NDTheme captionLabel:@"环境参数"];
+    title.textColor = [NDTheme accent];
+    title.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.summaryLabel = [UILabel new];
+    self.summaryLabel.font = [NDTheme monoFont:13];
+    self.summaryLabel.textColor = [UIColor secondaryLabelColor];
+    self.summaryLabel.numberOfLines = 0;
+    self.summaryLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIButton *detail = [NDTheme secondaryButton:@"查看 / 编辑参数" target:self action:@selector(openDetail)];
+    detail.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [card addSubview:title];
+    [card addSubview:self.summaryLabel];
+    [card addSubview:detail];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
+        [title.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
+        [title.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
+        [self.summaryLabel.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:10],
+        [self.summaryLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
+        [self.summaryLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
+        [detail.topAnchor constraintEqualToAnchor:self.summaryLabel.bottomAnchor constant:14],
+        [detail.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
+        [detail.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18],
+        [detail.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
+    ]];
+    return card;
+}
+
 - (UIView *)buildActions {
     UIStackView *stack = [UIStackView new];
     stack.axis = UILayoutConstraintAxisVertical;
@@ -227,6 +266,20 @@
         self.modelLabel.text = [NSString stringWithFormat:@"%@ · iOS %@", p.Model ?: @"未知机型", p.SystemVer ?: @"--"];
         self.modelLabel.numberOfLines = 1;
     }
+
+    // Always show the *environment* IDFA from the active profile — never ASIdentifierManager
+    // (NewDevice.app is on the tweak RejectList, so the system IDFA is the real device).
+    BOOL passthrough = !p || [p.name isEqualToString:@"原始机器"] || !p.spoofDeviceIdentity;
+    NSString *idfa = passthrough ? @"（原始 / 不伪装）" : (p.IDFA.length ? p.IDFA : @"（未填写）");
+    NSString *idfv = passthrough ? @"—" : (p.IDFV.length ? p.IDFV : @"—");
+    self.summaryLabel.text = [NSString stringWithFormat:
+                              @"IDFA  %@\nIDFV  %@\nIMEI  %@\nSerial %@\nUDID  %@\nWiFi  %@\nSSID  %@\n运营商 %@ (%@/%@)\nTZ    %@\nGPS   %.5f, %.5f",
+                              idfa, idfv, p.IMEI.length ? p.IMEI : @"—",
+                              p.Serial.length ? p.Serial : @"—", p.UDID.length ? p.UDID : @"—",
+                              p.WiFiMAC.length ? p.WiFiMAC : @"—", p.SSID.length ? p.SSID : @"—",
+                              p.Carrier.length ? p.Carrier : @"—", p.MCC.length ? p.MCC : @"—", p.MNC.length ? p.MNC : @"—",
+                              p.TimeZone.length ? p.TimeZone : @"—",
+                              p.Latitude, p.Longitude];
 }
 
 - (void)setBusy:(BOOL)busy {
@@ -338,6 +391,12 @@
 
 - (void)openProbe {
     [self.navigationController pushViewController:[ProbeViewController new] animated:YES];
+}
+
+- (void)openDetail {
+    NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
+    if (!p) return;
+    [self.navigationController pushViewController:[[ProfileDetailViewController alloc] initWithProfile:p] animated:YES];
 }
 
 - (void)alert:(NSString *)msg {
