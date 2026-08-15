@@ -2,7 +2,7 @@ Package: com.local.newdevice
 Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 206: remote installDeb API + root sync-inject; AMG-style Venmo identity + holographic akc.
+Description: 207: disable amg.dylib for ND targets (empty Bundles=all on ElleKit); keep AMG-style identity + akc.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

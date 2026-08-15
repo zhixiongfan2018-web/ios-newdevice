@@ -1012,6 +1012,7 @@ extern char **environ;
 
     // Sole-owner inject: NewDevice target apps must not also load amg.dylib
     // (crash corpus: every Venmo IPS had NewDevice+amg; UIDevice.systemVersion→MG PAC).
+    // ElleKit: empty Filter.Bundles often means "inject ALL apps" — RejectList alone is NOT enough.
     NSArray *amgPaths = @[
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries/amg.plist",
         @"/var/jb/usr/lib/TweakInject/amg.plist",
@@ -1026,6 +1027,13 @@ extern char **environ;
             [lines addObject:[NSString stringWithFormat:@"amg-bad %@", amgPath]];
             continue;
         }
+        // Dump pre-fix for Media debugging
+        @try {
+            NSString *dump = [NSString stringWithFormat:@"/var/mobile/Media/NewDevice/amg-filter-dump-%@.plist",
+                              [[amgPath lastPathComponent] stringByDeletingPathExtension]];
+            [amg writeToFile:dump atomically:YES];
+        } @catch (__unused NSException *ex) {}
+
         NSMutableDictionary *filter = [amg[@"Filter"] isKindOfClass:[NSDictionary class]]
             ? [amg[@"Filter"] mutableCopy]
             : [NSMutableDictionary dictionary];
@@ -1044,6 +1052,16 @@ extern char **environ;
             }
             [reject addObject:bid];
         }
+        // Critical: never leave Bundles empty while we need to spare targets.
+        // Scope AMG to its own app only so Venmo/Safari/etc. are not injected.
+        if (targets.count > 0) {
+            if (amgBundles.count == 0) {
+                [amgBundles addObject:@"com.superdev.AMG"];
+            }
+            // Also strip common wildcards if present
+            [amgBundles removeObject:@"*"];
+            [amgBundles removeObject:@"**"];
+        }
         filter[@"Bundles"] = amgBundles;
         filter[@"RejectList"] = reject.array;
         amg[@"Filter"] = filter;
@@ -1056,10 +1074,39 @@ extern char **environ;
             ok = data && [data writeToFile:amgPath atomically:NO];
         }
         if (ok) [NDPaths makePathWorldReadable:amgPath];
-        [lines addObject:[NSString stringWithFormat:@"amg-%@ %@ removed=%lu reject=%lu%@",
+        [lines addObject:[NSString stringWithFormat:@"amg-%@ %@ removed=%lu bundles=%lu reject=%lu%@",
                           ok ? @"ok" : @"fail", amgPath,
-                          (unsigned long)removed, (unsigned long)reject.count,
+                          (unsigned long)removed, (unsigned long)amgBundles.count,
+                          (unsigned long)reject.count,
                           ok ? @"" : @" (need root)"]];
+        // Post-fix dump
+        @try {
+            NSString *dump2 = @"/var/mobile/Media/NewDevice/amg-filter-after.plist";
+            [amg writeToFile:dump2 atomically:YES];
+        } @catch (__unused NSException *ex) {}
+    }
+
+    // Hard fallback: if targets are set, rename amg.dylib so ElleKit cannot load it into those apps.
+    // Restored automatically when sync runs with empty targets (not done here — user re-enables AMG in Sileo).
+    if (targets.count > 0) {
+        NSArray *dylibs = @[
+            @"/var/jb/Library/MobileSubstrate/DynamicLibraries/amg.dylib",
+            @"/var/jb/usr/lib/TweakInject/amg.dylib",
+        ];
+        for (NSString *dy in dylibs) {
+            NSString *off = [dy stringByAppendingString:@".nd-off"];
+            if ([fm fileExistsAtPath:dy] && ![fm fileExistsAtPath:off]) {
+                NSError *err = nil;
+                BOOL mov = [fm moveItemAtPath:dy toPath:off error:&err];
+                [lines addObject:[NSString stringWithFormat:@"amg-dylib-%@ %@%@",
+                                  mov ? @"off" : @"fail", dy,
+                                  err ? [NSString stringWithFormat:@" (%@)", err.localizedDescription] : @""]];
+            } else if ([fm fileExistsAtPath:off]) {
+                [lines addObject:[NSString stringWithFormat:@"amg-dylib-already-off %@", off]];
+            } else {
+                [lines addObject:[NSString stringWithFormat:@"amg-dylib-miss %@", dy]];
+            }
+        }
     }
 
     NSString *report = [lines componentsJoinedByString:@"\n"];
@@ -1567,6 +1614,10 @@ extern char **environ;
     if (!path.length) {
         // Prefer staged upgrade packages under Media/NewDevice
         NSArray *cands = @[
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-207.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-207.deb",
+            @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-206.deb",
+            @"/var/mobile/Media/Downloads/NewDevice-1.0.0-206.deb",
             @"/var/mobile/Media/NewDevice/NewDevice-1.0.0-205.deb",
             @"/var/mobile/Media/Downloads/NewDevice-1.0.0-205.deb",
             @"/var/mobile/Library/Logs/CrashReporter/NewDevice-1.0.0-205.deb",
