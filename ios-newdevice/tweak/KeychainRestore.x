@@ -429,10 +429,15 @@ static void NDApplyPendingKeychainRestore(void) {
         };
 
         // Never run SecItemAdd in %ctor synchronously — wait for main runloop.
+        // When clearing the previous Venmo session, run ASAP so UI does not paint
+        // the old account before SecItemDelete (switch isolation).
         dispatch_async(dispatch_get_main_queue(), ^{
             if (NDIsVenmoHost()) {
-                // One delayed pass only (avoid multi-retry races with mParticle)
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                BOOL wantClear = NDVenmoPendingClearKeychain();
+                BOOL wantRestore = NDVenmoPendingAkcRestore();
+                if (!wantClear && !wantRestore) return;
+                NSTimeInterval delay = wantClear ? 0.08 : 0.6;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), run);
             } else {
                 run();

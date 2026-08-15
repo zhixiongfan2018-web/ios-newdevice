@@ -287,6 +287,50 @@ extern char **environ;
     } @catch (__unused NSException *ex) {}
 }
 
+/// Bring NewDevice to front so Venmo keychain work does not leave the user staring at the old session UI.
+- (void)NDOpenBundleId:(NSString *)bundleId {
+    if (!bundleId.length) return;
+    @try {
+        Class WS = NSClassFromString(@"LSApplicationWorkspace");
+        if (!WS || ![WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) return;
+        id (*msg0)(Class, SEL) = (void *)objc_msgSend;
+        id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
+        SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
+        if (ws && [ws respondsToSelector:openSel]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, bundleId);
+        }
+    } @catch (__unused NSException *ex) {}
+}
+
+- (BOOL)NDLaunchBundleSuspended:(NSString *)bundleId {
+    if (!bundleId.length) return NO;
+    @try {
+        Class UIApp = NSClassFromString(@"UIApplication");
+        if (!UIApp) return NO;
+        id (*sharedMsg)(Class, SEL) = (void *)objc_msgSend;
+        id app = sharedMsg(UIApp, NSSelectorFromString(@"sharedApplication"));
+        SEL sel = NSSelectorFromString(@"launchApplicationWithIdentifier:suspended:");
+        if (app && [app respondsToSelector:sel]) {
+            return ((BOOL (*)(id, SEL, id, BOOL))objc_msgSend)(app, sel, bundleId, YES);
+        }
+    } @catch (__unused NSException *ex) {}
+    return NO;
+}
+
+/// Start Venmo for in-app SecItem work without leaving the previous account on screen.
+/// Prefer suspended launch; otherwise open briefly then bounce back to NewDevice.
+- (NSString *)NDLaunchVenmoForKeychainWork {
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    if ([self NDLaunchBundleSuspended:vbid]) {
+        return @"launched=Venmo(suspended)";
+    }
+    [self NDOpenBundleId:vbid];
+    // Let the process + tweak load, then reclaim foreground immediately.
+    [NSThread sleepForTimeInterval:0.25];
+    [self NDOpenBundleId:NDBundleID];
+    return @"launched=Venmo(bounce-NewDevice)";
+}
+
 - (BOOL)mirrorTree:(NSString *)src to:(NSString *)dst error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:src]) return YES;
@@ -1147,21 +1191,8 @@ extern char **environ;
         [fm removeItemAtPath:p error:nil];
     }
 
-    // Launch Venmo and wait for in-app clear (KeychainRestore delayed ~0.6s).
-    @try {
-        Class WS = NSClassFromString(@"LSApplicationWorkspace");
-        if (WS && [WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) {
-            id (*msg0)(Class, SEL) = (void *)objc_msgSend;
-            id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
-            SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
-            if (ws && [ws respondsToSelector:openSel]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, vbid);
-                [lines addObject:@"launched=Venmo"];
-            }
-        }
-    } @catch (__unused NSException *ex) {
-        [lines addObject:@"launch=failed"];
-    }
+    // Launch Venmo for in-app clear without leaving old-session UI on screen.
+    [lines addObject:[self NDLaunchVenmoForKeychainWork] ?: @"launch=failed"];
 
     BOOL cleared = NO;
     for (NSInteger i = 0; i < 40; i++) { // ~20s
@@ -1184,6 +1215,8 @@ extern char **environ;
     [self terminateApps:@[vbid]];
     [self clearDataForApps:@[vbid] error:nil];
     [lines addObject:@"sandbox=rewiped"];
+    // Stay on NewDevice after background Venmo work.
+    [self NDOpenBundleId:NDBundleID];
 
     NSString *report = [lines componentsJoinedByString:@"\n"];
     [report writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
@@ -1241,20 +1274,7 @@ extern char **environ;
         : nil;
     if (akcOk.length) [[NSFileManager defaultManager] removeItemAtPath:akcOk error:nil];
 
-    @try {
-        Class WS = NSClassFromString(@"LSApplicationWorkspace");
-        if (WS && [WS respondsToSelector:NSSelectorFromString(@"defaultWorkspace")]) {
-            id (*msg0)(Class, SEL) = (void *)objc_msgSend;
-            id ws = msg0(WS, NSSelectorFromString(@"defaultWorkspace"));
-            SEL openSel = NSSelectorFromString(@"openApplicationWithBundleID:");
-            if (ws && [ws respondsToSelector:openSel]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(ws, openSel, vbid);
-                [lines addObject:@"launched=Venmo"];
-            }
-        }
-    } @catch (__unused NSException *ex) {
-        [lines addObject:@"launch=failed"];
-    }
+    [lines addObject:[self NDLaunchVenmoForKeychainWork] ?: @"launch=failed"];
 
     BOOL cleared = NO, restored = NO;
     for (NSInteger i = 0; i < 50; i++) { // ~25s
@@ -1283,6 +1303,30 @@ extern char **environ;
     if (!restored) [lines addObject:@"akc TIMEOUT — open Venmo once"];
 
     [self terminateApps:@[vbid]];
+    // Re-apply staged sandbox after the silent Venmo pass so the first manual open
+    // is the target env (not caches written while old tokens were still briefly live).
+    if (rec.length && ![rec isEqualToString:@"原始机器"] && (cleared || restored)) {
+        NSMutableArray *rLines = [NSMutableArray array];
+        NSMutableArray *missing = [NSMutableArray array];
+        BOOL ok = [self restoreOneApp:vbid fromRecord:rec lines:rLines missing:missing];
+        [lines addObject:ok ? @"sandbox=reapplied" : @"sandbox=reapply-warn"];
+        // Drop pending-akc again: keychain already bound in this pass; avoid another
+        // auto-driven restore flash on the user's first open.
+        for (NSString *p in @[
+                 [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-akc/net.kortina.labs.Venmo.txt"],
+                 @"/var/mobile/Media/NewDevice/pending-akc/net.kortina.labs.Venmo.txt",
+             ]) {
+            [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+        }
+        for (NSString *dir in @[
+                 [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"pending-clear-kc"],
+                 @"/var/mobile/Media/NewDevice/pending-clear-kc",
+             ]) {
+            [[NSFileManager defaultManager] removeItemAtPath:[dir stringByAppendingPathComponent:vbid] error:nil];
+        }
+        [self terminateApps:@[vbid]];
+    }
+    [self NDOpenBundleId:NDBundleID];
     NSString *report = [lines componentsJoinedByString:@"\n"];
     [report writeToFile:@"/var/mobile/Media/NewDevice/last-venmo-bind.txt"
              atomically:YES encoding:NSUTF8StringEncoding error:nil];
