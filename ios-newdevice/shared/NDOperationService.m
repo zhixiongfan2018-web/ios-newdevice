@@ -150,42 +150,46 @@
             apps = [self appsForSwitchTo:current previous:previous];
         }
 
-        // Close again immediately before wipe/restore (user or SpringBoard may have relaunched).
+        // prepareTargets already quit; terminateApps no-ops if that was <1.2s ago.
         if (apps.count) {
-            NSLog(@"[NewDevice] quit targets before wipe (%lu)", (unsigned long)apps.count);
             [[NDAppDataManager shared] terminateApps:apps];
         }
 
         BOOL hasStaged = [self recordHasStagedApps:current];
-        if (cfg.holographicBackup && apps.count) {
+        NSMutableArray<NSString *> *sandboxApps = [NSMutableArray array];
+        for (NSString *b in apps) {
+            if (![b isKindOfClass:[NSString class]] || !b.length) continue;
+            if ([b hasPrefix:@"com.apple."]) continue;
+            [sandboxApps addObject:b];
+        }
+        if (cfg.holographicBackup && sandboxApps.count) {
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
             BOOL leavingReal = !sameRecord && previous.length && ![previous isEqualToString:@"原始机器"];
 
             // Snapshot only work-set apps when leaving a real record (fat-guard in backupApps).
             if (leavingReal) {
-                [[NDAppDataManager shared] backupApps:apps toRecord:previous error:nil];
+                [[NDAppDataManager shared] backupApps:sandboxApps toRecord:previous error:nil];
             }
 
             // Wipe only selected targets so other apps stay untouched.
-            [[NDAppDataManager shared] clearDataForApps:apps error:nil];
+            [[NDAppDataManager shared] clearDataForApps:sandboxApps error:nil];
             if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current
-                                                          onlyBundleIds:apps
+                                                          onlyBundleIds:sandboxApps
                                                                   error:&restoreErr];
-                [[NDAppDataManager shared] restoreAppGroupsForRecord:current];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
                 // Strict isolation: previous Venmo Keychain must not leak into this record.
-                if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+                if ([sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
                     NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord];
                     NSLog(@"[NewDevice] bindVenmo %@", bind);
                 }
-            } else if ([apps containsObject:@"net.kortina.labs.Venmo"]) {
+            } else if ([sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
                 // Empty 一键新机 / 原始机器: stage in-app clear for next Venmo open —
                 // do not launch/bounce Venmo during the switch.
                 [[NDAppDataManager shared] stageVenmoSessionClearOnly];
             }
-        } else if (apps.count) {
+        } else if (sandboxApps.count) {
             // holographicBackup OFF = identity-only switch. Never wipe live sandboxes
             // without a restore path (that permanently destroys target App data).
             if ([apps containsObject:@"net.kortina.labs.Venmo"]) {

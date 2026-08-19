@@ -19,6 +19,8 @@ extern char **environ;
 
 @interface NDAppDataManager ()
 @property (nonatomic, copy, readwrite) NSString *lastRestoreReport;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *containerPathCache;
+@property (nonatomic, assign) CFAbsoluteTime lastTerminateAt;
 - (NSArray *)NDKeychainItemsFromAMGAkcDictionary:(NSDictionary *)akc;
 - (NSArray *)NDLoadKeychainItemsFromBackupDir:(NSString *)dir;
 - (BOOL)NDBackupDirHasKeychainDump:(NSString *)dir;
@@ -33,6 +35,7 @@ extern char **environ;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         m = [NDAppDataManager new];
+        m.containerPathCache = [NSMutableDictionary dictionary];
         // MCM APIs needed for correct data-container paths on iOS 12+
         dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
     });
@@ -115,10 +118,10 @@ extern char **environ;
 }
 
 - (void)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
-    [self runCommand:launchPath arguments:args timeoutSec:8];
+    [self runCommand:launchPath arguments:args timeoutSec:3];
 }
 
-- (int)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args timeoutSec:(NSInteger)timeoutSec {
+- (int)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args timeoutSec:(NSTimeInterval)timeoutSec {
     if (!launchPath.length) return -1;
     pid_t pid = 0;
     const char *path = launchPath.fileSystemRepresentation;
@@ -151,8 +154,25 @@ extern char **environ;
     return -1;
 }
 
+- (NSString *)NDKillallBin {
+    static NSString *bin;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        for (NSString *p in @[ @"/var/jb/usr/bin/killall", @"/usr/bin/killall" ]) {
+            if ([[NSFileManager defaultManager] isExecutableFileAtPath:p]) { bin = p; break; }
+        }
+    });
+    return bin;
+}
+
 - (NSMutableSet<NSString *> *)NDProcessNamesForBundleId:(NSString *)bid {
     NSMutableSet<NSString *> *names = [NSMutableSet set];
+    if ([bid hasPrefix:@"com.apple."]) {
+        // Never wait on SafariViewService — it is a system helper and stays alive,
+        // which used to burn 16 killall rounds (~seconds) on every switch.
+        if ([bid isEqualToString:@"com.apple.mobilesafari"]) [names addObject:@"MobileSafari"];
+        return names;
+    }
     Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
     if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
 #pragma clang diagnostic push
@@ -170,47 +190,25 @@ extern char **environ;
     NSString *last = bid.lastPathComponent;
     if (last.length) [names addObject:last];
     if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) [names addObject:@"Venmo"];
-    if ([bid isEqualToString:@"com.apple.mobilesafari"]) {
-        [names addObject:@"MobileSafari"];
-        [names addObject:@"Safari"];
-        [names addObject:@"SafariViewService"];
-    }
     if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) [names addObject:@"PrizePicks"];
     return names;
 }
 
 - (void)NDKillProcessNames:(NSSet<NSString *> *)names {
-    static NSArray *killBins;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        killBins = @[
-            @"/var/jb/usr/bin/killall",
-            @"/usr/bin/killall",
-            @"/var/jb/usr/bin/pkill",
-        ];
-    });
+    NSString *killall = [self NDKillallBin];
+    if (!killall) return;
     for (NSString *proc in names) {
         if (![proc isKindOfClass:[NSString class]] || !proc.length) continue;
-        for (NSString *bin in killBins) {
-            if (![[NSFileManager defaultManager] isExecutableFileAtPath:bin]) continue;
-            if ([bin hasSuffix:@"pkill"]) {
-                [self runCommand:bin arguments:@[ @"-9", @"-x", proc ] timeoutSec:2];
-            } else {
-                [self runCommand:bin arguments:@[ @"-9", proc ] timeoutSec:2];
-            }
-        }
+        [self runCommand:killall arguments:@[ @"-9", proc ] timeoutSec:0.4];
     }
 }
 
 - (BOOL)NDAnyProcessAlive:(NSSet<NSString *> *)names {
-    NSString *killall = nil;
-    for (NSString *bin in @[ @"/var/jb/usr/bin/killall", @"/usr/bin/killall" ]) {
-        if ([[NSFileManager defaultManager] isExecutableFileAtPath:bin]) { killall = bin; break; }
-    }
+    NSString *killall = [self NDKillallBin];
     if (!killall) return NO;
     for (NSString *proc in names) {
         if (![proc isKindOfClass:[NSString class]] || !proc.length) continue;
-        int st = [self runCommand:killall arguments:@[ @"-0", proc ] timeoutSec:1];
+        int st = [self runCommand:killall arguments:@[ @"-0", proc ] timeoutSec:0.25];
         if (st == 0) return YES;
     }
     return NO;
@@ -218,13 +216,16 @@ extern char **environ;
 
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds {
     if (!bundleIds.count) return;
+    if (self.lastTerminateAt > 0 && (CFAbsoluteTimeGetCurrent() - self.lastTerminateAt) < 1.2) {
+        return;
+    }
 
     @try {
-        // App UI is mobile — root helper can SIGKILL other apps. Cap wait so switch never hangs.
+        // App UI is mobile — one root helper, then stop. Do not also FrontBoard here.
         if (geteuid() != 0) {
             NSString *csv = [[bundleIds filteredArrayUsingPredicate:
                               [NSPredicate predicateWithBlock:^BOOL(NSString *b, NSDictionary *bindings) {
-                return [b isKindOfClass:[NSString class]] && b.length > 0;
+                return [b isKindOfClass:[NSString class]] && b.length > 0 && ![b hasPrefix:@"com.apple."];
             }]] componentsJoinedByString:@","];
             if (csv.length) {
                 for (NSString *bin in @[
@@ -232,25 +233,17 @@ extern char **environ;
                          @"/var/jb/usr/bin/newdeviced",
                      ]) {
                     if ([[NSFileManager defaultManager] fileExistsAtPath:bin]) {
-                        [self runCommand:bin arguments:@[ @"kill-apps", csv ] timeoutSec:8];
-                        break;
+                        [self runCommand:bin arguments:@[ @"kill-apps", csv ] timeoutSec:3];
+                        self.lastTerminateAt = CFAbsoluteTimeGetCurrent();
+                        return;
                     }
                 }
             }
         }
 
-        static id fbsService;
         static void (*bksTerminate)(CFStringRef, int, bool, CFStringRef);
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
-            dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_NOW);
-            Class FBS = NSClassFromString(@"FBSSystemService");
-            if ([FBS respondsToSelector:NSSelectorFromString(@"sharedService")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                fbsService = [FBS performSelector:NSSelectorFromString(@"sharedService")];
-#pragma clang diagnostic pop
-            }
             void *bks = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_NOW);
             if (bks) {
                 bksTerminate = dlsym(bks, "BKSTerminateApplicationForReasonAndReportWithDescription");
@@ -258,86 +251,69 @@ extern char **environ;
         });
 
         NSMutableArray *report = [NSMutableArray array];
-        NSMutableSet<NSString *> *allNames = [NSMutableSet set];
+        NSMutableSet<NSString *> *waitNames = [NSMutableSet set];
         for (NSString *bid in bundleIds) {
             if (![bid isKindOfClass:[NSString class]] || !bid.length) continue;
             if ([bid isEqualToString:@"com.local.newdevice"]) continue;
-            if ([bid hasPrefix:@"com.apple.springboard"]) continue;
-
-            // Safari FrontBoard terminate often hangs the mutate queue — killall only.
-            BOOL isApple = [bid hasPrefix:@"com.apple."];
-            BOOL fbOk = NO;
-            if (!isApple && fbsService) {
-                @try {
-                    SEL sel4 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:");
-                    if ([fbsService respondsToSelector:sel4]) {
-                        NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel4];
-                        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                        [inv setSelector:sel4];
-                        [inv setTarget:fbsService];
-                        NSString *b = bid;
-                        NSInteger reason = 1;
-                        BOOL reportFlag = NO;
-                        NSString *desc = @"NewDevice";
-                        [inv setArgument:&b atIndex:2];
-                        [inv setArgument:&reason atIndex:3];
-                        [inv setArgument:&reportFlag atIndex:4];
-                        [inv setArgument:&desc atIndex:5];
-                        [inv invoke];
-                        fbOk = YES;
-                    }
-                } @catch (__unused NSException *ex) {
-                    fbOk = NO;
-                }
+            if ([bid hasPrefix:@"com.apple."]) {
+                // SIGKILL Safari itself; never FrontBoard and never wait on helpers.
+                NSSet *appleNames = [self NDProcessNamesForBundleId:bid];
+                [self NDKillProcessNames:appleNames];
+                [report addObject:[NSString stringWithFormat:@"%@ apple-kill", bid]];
+                continue;
             }
-            if (!isApple && bksTerminate) {
+
+            if (bksTerminate) {
                 @try {
                     bksTerminate((__bridge CFStringRef)bid, 1, false, CFSTR("NewDevice"));
                 } @catch (__unused NSException *ex) {}
             }
 
             NSSet *names = [self NDProcessNamesForBundleId:bid];
-            [allNames unionSet:names];
+            [waitNames unionSet:names];
             [self NDKillProcessNames:names];
-            [report addObject:[NSString stringWithFormat:@"%@ fb=%@", bid, fbOk ? @"1" : @"0"]];
+            [report addObject:bid];
         }
 
-        // Wait until targets are actually gone so the next identity/sandbox is not mixed.
-        for (NSInteger i = 0; i < 16; i++) {
-            if (![self NDAnyProcessAlive:allNames]) break;
-            [self NDKillProcessNames:allNames];
-            usleep(50 * 1000);
+        for (NSInteger i = 0; i < 4; i++) {
+            if (![self NDAnyProcessAlive:waitNames]) break;
+            [self NDKillProcessNames:waitNames];
+            usleep(25 * 1000);
         }
-        BOOL still = [self NDAnyProcessAlive:allNames];
+        BOOL still = [self NDAnyProcessAlive:waitNames];
         [report addObject:[NSString stringWithFormat:@"alive=%@", still ? @"YES" : @"NO"]];
+        self.lastTerminateAt = CFAbsoluteTimeGetCurrent();
 
         NSString *line = [NSString stringWithFormat:@"time=%@\n%@\n", [NSDate date], [report componentsJoinedByString:@"\n"]];
         [line writeToFile:@"/var/mobile/Media/NewDevice/last-terminate-apps.txt"
                atomically:YES encoding:NSUTF8StringEncoding error:nil];
     } @catch (NSException *ex) {
         NSLog(@"[NewDevice] terminateApps exception: %@", ex);
+        self.lastTerminateAt = CFAbsoluteTimeGetCurrent();
     }
 }
 
-- (NSString *)NDScanContainerUnderRoots:(NSArray<NSString *> *)roots identifier:(NSString *)identifier {
-    if (!identifier.length) return nil;
-    NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *appsRoot in roots) {
-        NSArray *uuids = [fm contentsOfDirectoryAtPath:appsRoot error:nil] ?: @[];
+- (void)NDEnsureContainerIndex {
+    @synchronized (self) {
+        if (self.containerPathCache.count) return;
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *root = @"/var/mobile/Containers/Data/Application";
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
         for (NSString *uuid in uuids) {
-            if (uuid.length < 30) continue; // UUID dirs
-            NSString *dir = [appsRoot stringByAppendingPathComponent:uuid];
+            if (uuid.length < 30) continue;
+            NSString *dir = [root stringByAppendingPathComponent:uuid];
             NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
             NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
-            id mid = plist[@"MCMMetadataIdentifier"] ?: plist[@"identifier"] ?: plist[@"MCMMetadataInfo"][@"MCMMetadataIdentifier"];
-            if ([mid isKindOfClass:[NSString class]] && [mid isEqualToString:identifier]) return dir;
-            // Heuristic: Preferences/<bundleId>.plist is almost always present after first launch
-            NSString *pref = [[dir stringByAppendingPathComponent:@"Library/Preferences"]
-                              stringByAppendingPathComponent:[identifier stringByAppendingString:@".plist"]];
-            if ([fm fileExistsAtPath:pref]) return dir;
+            id mid = plist[@"MCMMetadataIdentifier"] ?: plist[@"identifier"];
+            if (!mid) {
+                id info = plist[@"MCMMetadataInfo"];
+                if ([info isKindOfClass:[NSDictionary class]]) mid = info[@"MCMMetadataIdentifier"];
+            }
+            if ([mid isKindOfClass:[NSString class]] && [mid length]) {
+                self.containerPathCache[mid] = dir;
+            }
         }
     }
-    return nil;
 }
 
 - (NSURL *)NDMCMContainerURLSafe:(NSString *)identifier classNames:(NSArray<NSString *> *)classNames {
@@ -390,14 +366,18 @@ extern char **environ;
     if (!bundleId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // 1) Metadata / Preferences scan — safe, no private API ABI risk
-    NSString *scanned = [self NDScanContainerUnderRoots:@[
-        @"/var/mobile/Containers/Data/Application",
-        @"/private/var/mobile/Containers/Data/Application",
-    ] identifier:bundleId];
-    if (scanned.length) return scanned;
+    @synchronized (self) {
+        NSString *cached = self.containerPathCache[bundleId];
+        if (cached.length && [fm fileExistsAtPath:cached]) return cached;
+    }
 
-    // 2) LSApplicationProxy (no MCM abort)
+    [self NDEnsureContainerIndex];
+    @synchronized (self) {
+        NSString *cached = self.containerPathCache[bundleId];
+        if (cached.length && [fm fileExistsAtPath:cached]) return cached;
+    }
+
+    // LSApplicationProxy (no MCM abort)
     @try {
         Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
         if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
@@ -405,14 +385,20 @@ extern char **environ;
             id proxy = msg(LSApplicationProxy, NSSelectorFromString(@"applicationProxyForIdentifier:"), bundleId);
             if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"dataContainerURL")]) {
                 NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(proxy, NSSelectorFromString(@"dataContainerURL"));
-                if ([url isKindOfClass:[NSURL class]] && url.path.length && [fm fileExistsAtPath:url.path]) return url.path;
+                if ([url isKindOfClass:[NSURL class]] && url.path.length && [fm fileExistsAtPath:url.path]) {
+                    @synchronized (self) { self.containerPathCache[bundleId] = url.path; }
+                    return url.path;
+                }
             }
         }
     } @catch (__unused NSException *ex) {}
 
     // 3) MCM only on iOS < 18 (iOS 18 aborts inside MCMContainer init)
     NSURL *mcm = [self NDMCMContainerURLSafe:bundleId classNames:@[@"MCMAppDataContainer", @"MCMDataContainer"]];
-    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) return mcm.path;
+    if (mcm.path.length && [fm fileExistsAtPath:mcm.path]) {
+        @synchronized (self) { self.containerPathCache[bundleId] = mcm.path; }
+        return mcm.path;
+    }
 
     return nil;
 }
@@ -525,14 +511,22 @@ extern char **environ;
         NSFileOwnerAccountID: @501, // mobile
         NSFileGroupOwnerAccountID: @501,
     };
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:root isDirectory:&isDir]) return;
     [fm setAttributes:top ofItemAtPath:root error:nil];
+    if (!isDir) return;
     NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
     NSString *rel = nil;
     NSUInteger n = 0;
     while ((rel = [en nextObject])) {
+        if ([rel containsString:@"/Caches/"] || [rel hasPrefix:@"Caches/"] ||
+            [rel containsString:@"/WebKit/"] || [rel hasPrefix:@"WebKit/"] ||
+            [rel containsString:@"/tmp/"] || [rel hasPrefix:@"tmp/"]) {
+            continue;
+        }
         NSString *full = [root stringByAppendingPathComponent:rel];
         [fm setAttributes:@{NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:full error:nil];
-        if (++n > 20000) break;
+        if (++n > 400) break;
     }
 }
 
@@ -687,18 +681,22 @@ extern char **environ;
         NSString *container = [self containerPathForBundleId:bid];
         if (!container) continue;
         NSString *backupRoot = [NDPaths appsBackupDirForRecord:recordName bundleId:bid];
-        unsigned long long existing = [self byteSizeAtPath:backupRoot];
-        unsigned long long liveSize = 0;
-        for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
-            liveSize += [self byteSizeAtPath:[container stringByAppendingPathComponent:sub]];
+        unsigned long long existing = 0;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:backupRoot]) {
+            existing = [self byteSizeAtPath:backupRoot];
         }
-        BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
-        // Never clobber a fat AMG stage OR any stage that still has akc with wiped/thin live.
-        if ((existing > 32 * 1024 && liveSize < existing / 4) ||
-            (hasKC && liveSize < existing)) {
-            NSLog(@"[NewDevice] skip backup %@ — keep staged %lluKB (kc=%@), live only %lluKB",
-                  bid, existing / 1024, hasKC ? @"yes" : @"no", liveSize / 1024);
-            continue;
+        if (existing > 32 * 1024) {
+            unsigned long long liveSize = 0;
+            for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
+                liveSize += [self byteSizeAtPath:[container stringByAppendingPathComponent:sub]];
+            }
+            BOOL hasKC = [self NDBackupDirHasKeychainDump:backupRoot];
+            // Never clobber a fat AMG stage OR any stage that still has akc with wiped/thin live.
+            if ((liveSize < existing / 4) || (hasKC && liveSize < existing)) {
+                NSLog(@"[NewDevice] skip backup %@ — keep staged %lluKB (kc=%@), live only %lluKB",
+                      bid, existing / 1024, hasKC ? @"yes" : @"no", liveSize / 1024);
+                continue;
+            }
         }
         for (NSString *sub in @[@"Documents", @"Library", @"tmp"]) {
             NSString *src = [container stringByAppendingPathComponent:sub];
@@ -808,8 +806,7 @@ extern char **environ;
         NSError *e = nil;
         if ([self mirrorTree:src to:dst error:&e]) {
             okSubs++;
-            // iOS 18: imported files may keep Complete protection and be unreadable by Venmo until unlock races
-            [self relaxProtectionAtPath:dst];
+            if ([sub isEqualToString:@"Documents"]) [self relaxProtectionAtPath:dst];
         } else {
             [lines addObject:[NSString stringWithFormat:@"  copy fail %@/%@: %@", bid, sub, e.localizedDescription ?: @"?"]];
         }
@@ -872,8 +869,8 @@ extern char **environ;
     [markText writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [self relaxProtectionAtPath:marker];
 
-    unsigned long long liveDocs = [self byteSizeAtPath:liveDocsPath];
-    unsigned long long liveLib = [self byteSizeAtPath:[container stringByAppendingPathComponent:@"Library"]];
+    unsigned long long liveDocs = staged;
+    unsigned long long liveLib = 0;
     NSString *sqlite = [liveDocsPath stringByAppendingPathComponent:@"Model.sqlite"];
     NSString *prefs = [container stringByAppendingPathComponent:@"Library/Preferences"];
     prefs = [prefs stringByAppendingPathComponent:[bid stringByAppendingString:@".plist"]];
@@ -1851,11 +1848,32 @@ extern char **environ;
 - (NSString *)sharedAppGroupPathForGroupId:(NSString *)groupId {
     if (!groupId.length) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *scanned = [self NDScanContainerUnderRoots:@[
-        @"/var/mobile/Containers/Shared/AppGroup",
-        @"/private/var/mobile/Containers/Shared/AppGroup",
-    ] identifier:groupId];
-    if (scanned.length) return scanned;
+    static NSMutableDictionary *groupCache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ groupCache = [NSMutableDictionary dictionary]; });
+    @synchronized (groupCache) {
+        NSString *cached = groupCache[groupId];
+        if (cached.length && [fm fileExistsAtPath:cached]) return cached;
+    }
+    for (NSString *root in @[ @"/var/mobile/Containers/Shared/AppGroup",
+                              @"/private/var/mobile/Containers/Shared/AppGroup" ]) {
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil] ?: @[];
+        for (NSString *uuid in uuids) {
+            if (uuid.length < 30) continue;
+            NSString *dir = [root stringByAppendingPathComponent:uuid];
+            NSString *meta = [dir stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:meta];
+            id mid = plist[@"MCMMetadataIdentifier"] ?: plist[@"identifier"];
+            if (!mid) {
+                id info = plist[@"MCMMetadataInfo"];
+                if ([info isKindOfClass:[NSDictionary class]]) mid = info[@"MCMMetadataIdentifier"];
+            }
+            if ([mid isKindOfClass:[NSString class]] && [mid length]) {
+                @synchronized (groupCache) { groupCache[mid] = dir; }
+                if ([mid isEqualToString:groupId]) return dir;
+            }
+        }
+    }
 
     NSURL *mcm = [self NDMCMContainerURLSafe:groupId classNames:@[
         @"MCMSharedAppGroupContainer",

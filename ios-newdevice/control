@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 216: record list switch via root daemon so Safari kill cannot busy-fail the UI.
+Description: 217: faster switch — cache containers, skip Safari wait/sandbox, kill apps once.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
