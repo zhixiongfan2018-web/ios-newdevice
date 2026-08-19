@@ -400,7 +400,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.ProductType = dev[@"ProductType"];
     p.HardwareMachine = dev[@"HardwareMachine"];
     p.SystemVer = sys;
-    p.Build = NDRandomBuild(sys);
+    p.Build = [NDDeviceCatalog buildForSystemVersion:sys] ?: NDRandomBuild(sys);
 
     p.Carrier = carrier[@"Carrier"];
     p.MCC = carrier[@"MCC"];
@@ -413,6 +413,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     p.TimeZone = coord[@"timezone"] ?: @"America/New_York";
     // Urban altitude: mostly low buildings / street level
     p.Altitude = 8.0 + (double)arc4random_uniform(120) + ((double)arc4random_uniform(100) / 100.0);
+    [p alignConsistencyForced];
     return p;
 }
 
@@ -700,9 +701,6 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     // Brightness already normalized in import dict; clamp
     if (p.Brightness > 1.0f) p.Brightness = p.Brightness / 100.0f;
     if (p.Brightness > 1.0f) p.Brightness = 1.0f;
-    if (![p.name isEqualToString:@"原始机器"]) {
-        [p alignConsistency];
-    }
     return p;
 }
 
@@ -797,10 +795,18 @@ static BOOL NDLooksLikeProductType(NSString *s) {
 }
 
 - (NSString *)alignConsistency {
+    return [self NDAlignReplaceExisting:NO];
+}
+
+- (NSString *)alignConsistencyForced {
+    return [self NDAlignReplaceExisting:YES];
+}
+
+- (NSString *)NDAlignReplaceExisting:(BOOL)replace {
     if ([self.name isEqualToString:@"原始机器"]) return @"";
     NSMutableArray<NSString *> *fixes = [NSMutableArray array];
 
-    // Deterministic fills from UDID/name so reloads do not reshuffle empty fields.
+    // Deterministic fills from UDID/name so first generation is coherent.
     NSString *seedStr = self.UDID.length ? self.UDID : (self.name ?: @"nd");
     uint32_t seed = 2166136261u;
     const char *cs = seedStr.UTF8String ?: "nd";
@@ -818,13 +824,13 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     if (!self.HardwareMachine.length && self.ProductType.length) {
         self.HardwareMachine = self.ProductType;
         [fixes addObject:@"HardwareMachine←ProductType"];
-    } else if (self.ProductType.length && NDLooksLikeProductType(self.HardwareMachine) == NO) {
+    } else if (replace && self.ProductType.length && NDLooksLikeProductType(self.HardwareMachine) == NO) {
         self.HardwareMachine = self.ProductType;
         [fixes addObject:@"HardwareMachine=ProductType"];
     }
 
     NSString *marketing = [NDDeviceCatalog marketingNameForProductType:self.ProductType];
-    if (marketing.length && (![self.Model isEqualToString:marketing] || NDLooksLikeProductType(self.Model))) {
+    if (marketing.length && (!self.Model.length || (replace && (![self.Model isEqualToString:marketing] || NDLooksLikeProductType(self.Model))))) {
         self.Model = marketing;
         [fixes addObject:[NSString stringWithFormat:@"Model=%@", marketing]];
     }
@@ -833,8 +839,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         || (self.ProductType.length && [self.DeviceName isEqualToString:self.ProductType])
         || (self.HardwareMachine.length && [self.DeviceName isEqualToString:self.HardwareMachine])
         || (self.Model.length && [self.DeviceName isEqualToString:self.Model] && [self.Model hasPrefix:@"iPhone"]);
-    // "iPhone" alone is OK as DeviceName on real units; prefer personalized like AMG.
-    if (!self.DeviceName.length || nameIsMachine || [self.DeviceName isEqualToString:@"iPhone"] || [self.DeviceName isEqualToString:@"iPad"]) {
+    if (!self.DeviceName.length || (replace && (nameIsMachine || [self.DeviceName isEqualToString:@"iPhone"] || [self.DeviceName isEqualToString:@"iPad"]))) {
         static NSArray<NSString *> *prefixes;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
@@ -849,7 +854,7 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     // --- Capacity matches ProductType (real Gestalt values) ---
     if (self.ProductType.length) {
         uint64_t expectMem = [NDDeviceCatalog memoryBytesForProductType:self.ProductType];
-        if (expectMem > 0 && self.PhysicalMemory != expectMem) {
+        if (expectMem > 0 && (self.PhysicalMemory == 0 || (replace && self.PhysicalMemory != expectMem))) {
             self.PhysicalMemory = expectMem;
             [fixes addObject:[NSString stringWithFormat:@"PhysicalMemory=%llu", (unsigned long long)expectMem]];
         }
@@ -865,35 +870,37 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         }
     }
 
-    // --- SystemVer must be iOS 18+ mainstream; keep Build aligned ---
+    // --- SystemVer / Build: fill empties; never change a saved environment ---
     BOOL limitedVer = [NDDeviceCatalog isLimitedSupportSystemVersion:self.SystemVer];
     BOOL limitedOkForDevice = limitedVer && [self.ProductType hasPrefix:@"iPhone11,"];
-    if (!self.SystemVer.length || [NDDeviceCatalog majorSystemVersion:self.SystemVer] < 18 || (limitedVer && !limitedOkForDevice)) {
+    BOOL sysMissing = !self.SystemVer.length;
+    BOOL sysNeedsRewrite = replace && ([NDDeviceCatalog majorSystemVersion:self.SystemVer] < 18 || (limitedVer && !limitedOkForDevice));
+    if (sysMissing || sysNeedsRewrite) {
         NSArray *pool = [NDDeviceCatalog preferredSystemVersions];
         NSString *pick = pool.count ? pool[seed % pool.count] : @"18.5";
         self.SystemVer = pick;
         self.Build = [NDDeviceCatalog buildForSystemVersion:pick] ?: NDRandomBuild(pick);
         [fixes addObject:[NSString stringWithFormat:@"SystemVer=%@ (mainstream)", pick]];
-    } else {
+    } else if (!self.Build.length) {
         NSString *known = NDKnownBuilds()[self.SystemVer];
-        if (known.length && (![self.Build isEqualToString:known] || !self.Build.length)) {
+        self.Build = known.length ? known : NDRandomBuild(self.SystemVer);
+        [fixes addObject:[NSString stringWithFormat:@"Build=%@", self.Build]];
+    } else if (replace) {
+        NSString *known = NDKnownBuilds()[self.SystemVer];
+        if (known.length && ![self.Build isEqualToString:known]) {
             self.Build = known;
             [fixes addObject:[NSString stringWithFormat:@"Build=%@↔%@", known, self.SystemVer]];
-        } else if (!self.Build.length) {
-            self.Build = NDRandomBuild(self.SystemVer);
-            [fixes addObject:[NSString stringWithFormat:@"Build=%@", self.Build]];
         }
     }
 
-    // --- Modern UDID for A12+ (40-hex classic looks synthetic on iOS 18) ---
+    // --- UDID / Serial: fill empty only unless forced ---
     NSString *udidPrefix = [NDDeviceCatalog modernUDIDPrefixForProductType:self.ProductType];
-    if (udidPrefix.length && (NDLooksLikeClassicUDID(self.UDID) || !NDLooksLikeModernUDID(self.UDID))) {
+    if (!self.UDID.length || (replace && udidPrefix.length && (NDLooksLikeClassicUDID(self.UDID) || !NDLooksLikeModernUDID(self.UDID)))) {
         self.UDID = NDModernUDID(self.ProductType, seed);
         [fixes addObject:[NSString stringWithFormat:@"UDID=%@", self.UDID]];
     }
 
-    // --- Serial / IMEI look like Apple equipment ---
-    if (!NDLooksLikeAppleSerial(self.Serial)) {
+    if (!self.Serial.length || (replace && !NDLooksLikeAppleSerial(self.Serial))) {
         self.Serial = NDSeededSerial(seed ^ 0xA5A5A5A5u);
         [fixes addObject:[NSString stringWithFormat:@"Serial=%@", self.Serial]];
     }
@@ -911,8 +918,8 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:@"ICCID=filled"];
     }
 
-    // --- Wi‑Fi / BT: Apple OUI + same family (real phones share OUI) ---
-    if (!self.WiFiMAC.length || !NDAppleOUIKnown(self.WiFiMAC)) {
+    // --- Wi‑Fi / BT ---
+    if (!self.WiFiMAC.length || (replace && !NDAppleOUIKnown(self.WiFiMAC))) {
         NSArray *ouis = NDAppleOUIs();
         NSString *oui = ouis[seed % ouis.count];
         self.WiFiMAC = [NSString stringWithFormat:@"%@:%02X:%02X:%02X",
@@ -925,15 +932,16 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         btOUIMatch = [[[self.BTMAC substringToIndex:8] uppercaseString]
                       isEqualToString:[[self.WiFiMAC substringToIndex:8] uppercaseString]];
     }
-    BOOL btBad = !self.BTMAC.length || !NDAppleOUIKnown(self.BTMAC) || !btOUIMatch;
-    if (btBad) {
+    BOOL btEmpty = !self.BTMAC.length;
+    BOOL btBad = replace && (!NDAppleOUIKnown(self.BTMAC) || !btOUIMatch);
+    if (btEmpty || btBad) {
         self.BTMAC = wantBT;
         [fixes addObject:[NSString stringWithFormat:@"BTMAC=%@", self.BTMAC]];
     }
 
-    // --- US carrier triplet (never keep ISP/POI as Carrier) ---
-    BOOL carrierBad = ![NDDeviceCatalog isPlausibleCarrierName:self.Carrier] || !self.MCC.length || !self.MNC.length;
-    if (carrierBad) {
+    BOOL carrierEmpty = !self.Carrier.length || !self.MCC.length || !self.MNC.length;
+    BOOL carrierBad = replace && ![NDDeviceCatalog isPlausibleCarrierName:self.Carrier];
+    if (carrierEmpty || carrierBad) {
         NSDictionary *c = [NDDeviceCatalog carrierForSeed:seed / 7 preferMCC:self.MCC preferMNC:self.MNC];
         self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
         self.MCC = c[@"MCC"] ?: @"310";
@@ -958,16 +966,18 @@ static BOOL NDLooksLikeProductType(NSString *s) {
         [fixes addObject:[NSString stringWithFormat:@"SSID=%@", self.SSID]];
     }
 
-    // --- GPS + TimeZone + US storyline must agree ---
+    // --- GPS + TimeZone: fill missing only; never move a saved pin ---
     BOOL gpsUS = [NDDeviceCatalog isCoordinateInUS:self.Latitude longitude:self.Longitude];
     BOOL hasGPS = (fabs(self.Latitude) > 0.01 || fabs(self.Longitude) > 0.01);
-    if (!hasGPS || !gpsUS) {
+    if (!hasGPS || (replace && !gpsUS)) {
         NSDictionary *coord = [NDDeviceCatalog usCoordinateForSeed:seed / 17];
         self.Latitude = [coord[@"lat"] doubleValue];
         self.Longitude = [coord[@"lon"] doubleValue];
-        self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
+        if (!self.TimeZone.length || replace) {
+            self.TimeZone = coord[@"timezone"] ?: @"America/New_York";
+        }
         [fixes addObject:[NSString stringWithFormat:@"GPS+TZ=%@ (US)", coord[@"city"] ?: self.TimeZone]];
-    } else {
+    } else if (replace) {
         NSDictionary *near = [NDDeviceCatalog nearestUSCityToLatitude:self.Latitude longitude:self.Longitude maxDegrees:6.0];
         NSString *tz = near[@"timezone"] ?: self.TimeZone;
         if (!tz.length) tz = @"America/New_York";
@@ -975,6 +985,10 @@ static BOOL NDLooksLikeProductType(NSString *s) {
             self.TimeZone = tz;
             [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@ (GPS)", tz]];
         }
+    } else if (!self.TimeZone.length) {
+        NSDictionary *near = [NDDeviceCatalog nearestUSCityToLatitude:self.Latitude longitude:self.Longitude maxDegrees:6.0];
+        self.TimeZone = near[@"timezone"] ?: @"America/New_York";
+        [fixes addObject:[NSString stringWithFormat:@"TimeZone=%@", self.TimeZone]];
     }
 
     if (!self.OpenUDID.length) {

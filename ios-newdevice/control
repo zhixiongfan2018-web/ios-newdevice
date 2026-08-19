@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 220: closing NewDevice restores 本机 and wipes target app sandboxes.
+Description: 221: freeze environment params after generate; official Build; no rewrite on launch.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

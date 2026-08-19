@@ -298,7 +298,6 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Empty record name"}];
         return NO;
     }
-    [profile alignConsistency];
     BOOL ok = [profile writeToPath:[NDPaths profilePathForRecord:profile.name] error:error];
     // During import session, defer notify — mid-import notify_post on a background
     // queue was aborting AMG_resolved imports (archiveImport=0 with extract OK).

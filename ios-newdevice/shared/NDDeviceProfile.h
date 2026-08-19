@@ -70,9 +70,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)writeAMGFakerToDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
 
-/// Fill/normalize inconsistent fields (Model vs ProductType, RAM/disk, Build↔SystemVer, empty carrier/Wi‑Fi…).
-/// Returns a short human-readable fix report (empty if nothing changed).
+/// Fill empty fields only. Existing identity/GPS/build never change after first save.
 - (NSString *)alignConsistency;
+/// Full rewrite (Tools / 一键新机 generation only). Do not call on launch or switch.
+- (NSString *)alignConsistencyForced;
 
 /// Apply public-IP geolocation (lat/lon/timezone). Optional small urban jitter.
 - (NSString *)applyGeolocation:(NSDictionary *)geo jitter:(BOOL)jitter;

@@ -147,16 +147,7 @@
     NDConfig *cfg = [NDConfig shared];
     @try {
         // Make spoofed identity look like a coherent real device before sandbox work.
-        if (current.length && ![current isEqualToString:@"原始机器"]) {
-            NDDeviceProfile *curP = [[NDRecordStore shared] profileNamed:current];
-            if (curP) {
-                NSString *fix = [curP alignConsistency];
-                if (fix.length) {
-                    [[NDRecordStore shared] saveProfile:curP error:nil];
-                    NSLog(@"[NewDevice] alignParams %@", fix);
-                }
-            }
-        }
+        // Never rewrite a saved environment — params are frozen after 一键新机 / import.
 
         // Work set = user targetApps (from prepareTargets). Do not grow targetApps here.
         if (!apps.count) {
@@ -241,23 +232,8 @@
         // Airplane is not isolation — run async so switch ACK is not blocked.
         // After IP may change, realign GPS/timezone to the new egress IP.
         if (cfg.smartAirplane) {
-            NSString *recordForGeo = [current copy];
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                 [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
-                if (!cfg.locationFromIP || !cfg.spoofLocation) return;
-                if (!recordForGeo.length || [recordForGeo isEqualToString:@"原始机器"]) return;
-                NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
-                NDDeviceProfile *p = [[NDRecordStore shared] profileNamed:recordForGeo];
-                if (!p || !geo) return;
-                NSString *note = [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
-                if (note.length) {
-                    [p alignConsistency];
-                    [[NDRecordStore shared] saveProfile:p error:nil];
-                    if ([[[NDRecordStore shared] currentRecordName] isEqualToString:recordForGeo]) {
-                        [[NDRecordStore shared] notifyReload];
-                    }
-                    NSLog(@"[NewDevice] post-switch locationFromIP %@", note);
-                }
             });
         }
     } @catch (NSException *ex) {
@@ -662,12 +638,6 @@
 
         if ([fun isEqualToString:@"getCurrentRecordParam"]) {
             NDDeviceProfile *p = [[NDRecordStore shared] currentProfile];
-            if (p && ![p.name isEqualToString:@"原始机器"]) {
-                NSString *fix = [p alignConsistency];
-                if (fix.length) {
-                    [[NDRecordStore shared] saveProfile:p error:nil];
-                }
-            }
             NSString *savePath = query[@"saveFilePath"];
             if (p && savePath.length) {
                 [p writeToPath:savePath error:&error];
@@ -686,7 +656,7 @@
                 done(@"no profile", 500);
                 return;
             }
-            NSString *fix = [p alignConsistency] ?: @"";
+            NSString *fix = [p alignConsistencyForced] ?: @"";
             ok = [[NDRecordStore shared] saveProfile:p error:&error];
             [[NDRecordStore shared] notifyReload];
             body = [NSString stringWithFormat:@"record=%@\nfixes=%@\n", p.name ?: @"?", fix.length ? fix : @"(already aligned)"];
