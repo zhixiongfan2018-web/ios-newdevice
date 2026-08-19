@@ -8,7 +8,6 @@
 #import "NDTheme.h"
 #import "NDConfig.h"
 #import "ProbeViewController.h"
-#import "EnvSelectViewController.h"
 #import "ProfileDetailViewController.h"
 
 @interface HomeViewController ()
@@ -321,23 +320,14 @@
         return;
     }
 
-    EnvSelectViewController *picker = [EnvSelectViewController new];
-    __weak typeof(self) weakSelf = self;
-    picker.onPick = ^(NSString *recordName) {
-        [weakSelf runNewDeviceForRecord:recordName];
-    };
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self presentViewController:nav animated:YES completion:nil];
+    [self runNewDevice];
 }
 
-- (void)runNewDeviceForRecord:(NSString *)recordName {
+- (void)runNewDevice {
     if (self.busy) return;
     self.busy = YES;
     NSString *prevIP = self.lastIP;
-    NSString *fun = recordName.length ? @"renewRecord" : @"newRecord";
-    NSDictionary *query = recordName.length ? @{@"recordName": recordName} : @{};
-    [[NDAPIClient shared] call:fun query:query completion:^(BOOL ok, NSString *body, NSError *error) {
+    [[NDAPIClient shared] call:@"newRecord" completion:^(BOOL ok, NSString *body, NSError *error) {
         self.busy = NO;
         [self refresh];
         [self refreshAPIStatus];
@@ -346,11 +336,10 @@
             [self alert:error.localizedDescription ?: (body.length ? body : @"执行失败")];
             return;
         }
-        // Async ops only write result code 0/1 — real name is currentRecord.
-        NSString *name = [[NDRecordStore shared] currentRecordName] ?: @"";
-        if (recordName.length) name = recordName;
+        NSString *name = [body stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!name.length) name = [[NDRecordStore shared] currentRecordName] ?: @"";
         NSString *msg = name.length
-            ? [NSString stringWithFormat:@"已选中环境：%@\n参数已刷新，可打开目标 App。", name]
+            ? [NSString stringWithFormat:@"已新建环境：%@\n原有环境未改身份，可在「记录」里切回去。", name]
             : @"已完成";
         [self alert:msg];
     }];

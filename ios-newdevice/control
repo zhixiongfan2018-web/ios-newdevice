@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 218: do not inject/wipe Safari; no MG/sysctl in target apps; keep unstaged apps.
+Description: 219: 一键新机 always creates a new record; never renews an existing identity.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
