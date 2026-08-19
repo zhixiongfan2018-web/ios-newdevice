@@ -403,9 +403,16 @@
 
         if ([fun isEqualToString:@"restoreHolo"]) {
             NSString *name = query[@"recordName"] ?: [[NDRecordStore shared] currentRecordName] ?: @"";
+            NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
             if (!name.length || [name isEqualToString:@"原始机器"]) {
                 [[NDRecordStore shared] writeResultCode:0];
                 done(@"无当前记录", 500);
+                return;
+            }
+            // Never apply another environment's holographic onto the active env.
+            if (cur.length && ![name isEqualToString:cur]) {
+                [[NDRecordStore shared] writeResultCode:0];
+                done(@"restoreHolo 只能还原当前环境，不能把别的记录写到正在用的环境上", 400);
                 return;
             }
             // Restore only configured target apps (do not grow targetApps from record).
@@ -436,7 +443,7 @@
             }
             NSError *err = nil;
             [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name onlyBundleIds:bids error:&err];
-            [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
+            [[NDAppDataManager shared] restoreAppGroupsForRecord:name onlyBundleIds:bids];
             NSString *bind = @"";
             if (!onlyBid.length && [bids containsObject:@"net.kortina.labs.Venmo"]) {
                 bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";

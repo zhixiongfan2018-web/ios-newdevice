@@ -38,6 +38,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Restore App Group containers previously imported/backed up under Records/<name>/AppGroup.
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName;
+- (BOOL)restoreAppGroupsForRecord:(NSString *)recordName onlyBundleIds:(NSArray<NSString *> *)only;
 
 /// Pasteboard holographic: backup current general pasteboard into record, restore from record.
 - (void)backupPasteboardToRecord:(NSString *)recordName;

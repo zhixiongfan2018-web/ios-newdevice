@@ -2086,6 +2086,10 @@ extern char **environ;
 }
 
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName {
+    return [self restoreAppGroupsForRecord:recordName onlyBundleIds:nil];
+}
+
+- (BOOL)restoreAppGroupsForRecord:(NSString *)recordName onlyBundleIds:(NSArray<NSString *> *)only {
     if (!recordName.length) return YES;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray *agLines = [NSMutableArray array];
@@ -2118,6 +2122,7 @@ extern char **environ;
     NSUInteger agOK = 0, agSkip = 0;
     NSArray *appBids = [fm contentsOfDirectoryAtPath:agRoot error:nil] ?: @[];
     for (NSString *bid in appBids) {
+        if (only.count && ![only containsObject:bid]) continue;
         NSString *bidRoot = [agRoot stringByAppendingPathComponent:bid];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:bidRoot isDirectory:&isDir] || !isDir) continue;
@@ -2245,7 +2250,7 @@ extern char **environ;
     NSString *rtAkc = [[NDPaths runtimeStateDir] stringByAppendingPathComponent:@"last-akc-restore.txt"];
     NSString *rt = [NSString stringWithContentsOfFile:rtAkc encoding:NSUTF8StringEncoding error:nil];
     if (rt.length) [lines addObject:[NSString stringWithFormat:@"--- runtime last-akc-restore ---\n%@", rt]];
-    else [lines addObject:@"runtime last-akc-restore: (missing) — tweak may not have run in Venmo"];
+    else [lines addObject:[NSString stringWithFormat:@"runtime last-akc-restore: (missing) — tweak may not have run in %@", bundleId]];
 
     NSString *tw = @"/var/jb/Library/NewDevice/last-tweak-loaded.txt";
     NSString *twBody = [NSString stringWithContentsOfFile:tw encoding:NSUTF8StringEncoding error:nil];
@@ -2253,11 +2258,12 @@ extern char **environ;
         twBody = [NSString stringWithContentsOfFile:@"/var/mobile/Media/NewDevice/last-tweak-loaded.txt" encoding:NSUTF8StringEncoding error:nil];
     }
     if (twBody.length) [lines addObject:[NSString stringWithFormat:@"--- last-tweak-loaded ---\n%@", twBody]];
-    else [lines addObject:@"last-tweak-loaded: (missing) — NewDevice.dylib not injected into Venmo"];
+    else [lines addObject:[NSString stringWithFormat:@"last-tweak-loaded: (missing) — NewDevice.dylib not injected into %@", bundleId]];
 
-    NSString *groupLive = [self sharedAppGroupPathForGroupId:@"group.net.kortina.labs.Venmo"];
-    [lines addObject:[NSString stringWithFormat:@"AppGroup group.net.kortina.labs.Venmo=%@",
-                      groupLive.length ? groupLive : @"(not found)"]];
+    NSString *guessGroup = [NSString stringWithFormat:@"group.%@", bundleId];
+    NSString *groupLive = [self sharedAppGroupPathForGroupId:guessGroup];
+    [lines addObject:[NSString stringWithFormat:@"AppGroup %@=%@",
+                      guessGroup, groupLive.length ? groupLive : @"(not found)"]];
     if (groupLive.length) {
         [lines addObject:[NSString stringWithFormat:@"  AppGroupKB=%llu", [self byteSizeAtPath:groupLive] / 1024]];
     }
