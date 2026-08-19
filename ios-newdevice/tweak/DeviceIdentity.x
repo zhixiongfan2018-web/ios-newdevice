@@ -102,29 +102,6 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 
 typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 
-/// Only the classic 8-byte stub (`MOV X1,#0; B internal`). Never follow a random B
-/// (that is what crashed SpringBoard when we scanned 64 bytes blindly).
-static void *NDLocateMGCopyAnswerInternalSafe(const void *fn) {
-    if (!fn) return NULL;
-    const uint32_t *w = (const uint32_t *)fn;
-    unsigned i = 0;
-    for (; i < 4; i++) {
-        uint32_t insn = w[i];
-        if (insn == 0xD503237Fu || insn == 0xD503201Fu || insn == 0xD503233Fu) continue; // PACIBSP / NOP / PACIBSP variant
-        break;
-    }
-    if (i >= 4) return NULL;
-    uint32_t mov = w[i];
-    if (mov != 0xD2800001u && mov != 0xAA1F03E1u) return NULL; // MOV X1,#0 / MOV X1,XZR
-    uint32_t br = w[i + 1];
-    uint32_t op = br & 0xFC000000u;
-    if (op != 0x14000000u && op != 0x94000000u) return NULL; // B / BL
-    long long imm = br & 0x3FFFFFF;
-    imm <<= 38;
-    imm >>= 36;
-    return (void *)((const uint8_t *)fn + (i + 1) * 4 + imm);
-}
-
 static BOOL NDVenmoMGKeyAllowed(NSString *k) {
     // Minimal AMG-like faker surface inside Venmo — avoid binary / screen / baseband edge keys.
     static NSSet *allow;
@@ -147,10 +124,9 @@ static BOOL NDVenmoMGKeyAllowed(NSString *k) {
 }
 
 static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef);
-static CFTypeRef (*orig_MGCopyAnswer_internal)(CFStringRef, uint32_t *);
 
 static CFTypeRef NDOrigMGCopyAnswer(CFStringRef key, uint32_t *outTypeCode) {
-    if (orig_MGCopyAnswer_internal) return orig_MGCopyAnswer_internal(key, outTypeCode);
+    (void)outTypeCode;
     if (orig_MGCopyAnswer) return orig_MGCopyAnswer(key);
     return NULL;
 }
@@ -291,12 +267,6 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         }
     }
     return NDOrigMGCopyAnswer(key, NULL);
-}
-
-static CFTypeRef hooked_MGCopyAnswer_internal(CFStringRef key, uint32_t *outTypeCode) {
-    CFTypeRef v = hooked_MGCopyAnswer(key);
-    if (v) return v;
-    return NDOrigMGCopyAnswer(key, outTypeCode);
 }
 
 typedef CFTypeRef (*MGCopyAnswerErrFunc)(CFStringRef, void *);
