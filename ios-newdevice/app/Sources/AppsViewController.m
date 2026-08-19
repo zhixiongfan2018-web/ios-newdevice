@@ -72,8 +72,7 @@
             proxies = ((id (*)(id, SEL))objc_msgSend)(workspace, sel);
         }
     }
-    // Prefer user apps. Do not list Safari — injecting NewDevice.dylib into
-    // MobileSafari SIGILL/SIGBUS on iOS 18 and 一键新机 would wipe its data.
+    // User apps + Safari. Other Apple UI apps stay off the list (inject/crash).
     for (id proxy in proxies) {
         NSString *bid = nil;
         NSString *name = nil;
@@ -86,8 +85,9 @@
             name = ((id (*)(id, SEL))objc_msgSend)(proxy, nameSel);
         }
         if (!bid.length) continue;
-        if ([bid hasPrefix:@"com.apple."]) continue;
         if ([bid isEqualToString:@"com.local.newdevice"]) continue;
+        // Safari is a target for backup/wipe. Other Apple UI apps stay off the list.
+        if ([bid hasPrefix:@"com.apple."] && ![bid isEqualToString:@"com.apple.mobilesafari"]) continue;
         NDAppItem *item = [NDAppItem new];
         item.bundleId = bid;
         item.name = name.length ? name : bid;
@@ -130,7 +130,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"勾选后点右上角保存（会同步注入列表）。切换环境只处理勾选的应用。强杀并重开后生效。";
+    return @"勾选后点右上角保存。切换环境只处理勾选的应用。Safari 会备份/清理，但不注入（注入会闪退）。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

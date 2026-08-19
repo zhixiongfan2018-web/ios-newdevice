@@ -168,7 +168,7 @@
         NSMutableArray<NSString *> *sandboxApps = [NSMutableArray array];
         for (NSString *b in apps) {
             if (![b isKindOfClass:[NSString class]] || !b.length) continue;
-            if ([b hasPrefix:@"com.apple."]) continue;
+            if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.mobilesafari"]) continue;
             [sandboxApps addObject:b];
         }
         if (cfg.holographicBackup && sandboxApps.count) {

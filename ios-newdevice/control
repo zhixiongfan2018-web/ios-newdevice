@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 229: PrizePicks ObjC env only (no MG); keep pz in inject filter.
+Description: 230: Safari is a target app for backup/wipe; still not injected.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

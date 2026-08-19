@@ -1108,32 +1108,38 @@ extern char **environ;
     for (NSString *b in bundleIds ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
         if ([b isEqualToString:@"com.local.newdevice"]) continue;
-        // Safari / other Apple UI apps crash with this tweak on iOS 18.
-        if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.springboard"]) continue;
+        // Safari / other Apple UI apps crash if this tweak injects. Keep Safari
+        // in the backup/wipe work-set, but never in Filter.Bundles.
+        if ([b hasPrefix:@"com.apple."]) continue;
         [bundles addObject:b];
         [targets addObject:b];
     }
     // PrizePicks must stay in the inject/work set. Dropping it leaves an empty
     // sandbox + no identity, and XPoint/RN abort on launch.
     NSString *pz = @"com.myprizepicks.prizepicks";
+    NSString *safari = @"com.apple.mobilesafari";
     if (![bundles containsObject:pz]) [bundles addObject:pz];
     if (![targets containsObject:pz]) [targets addObject:pz];
-    // Drop Safari from saved work-set so 一键新机 / terminate no longer touches it.
+    if (![targets containsObject:safari]) [targets addObject:safari];
+    // Persist work-set: keep Safari, drop other Apple UI apps, keep PrizePicks.
     NDConfig *cfg = [NDConfig shared];
     NSMutableArray *persist = [NSMutableArray array];
     BOOL droppedApple = NO;
     BOOL havePz = NO;
+    BOOL haveSafari = NO;
     for (NSString *b in cfg.targetApps ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
-        if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.springboard"]) {
+        if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:safari]) {
             droppedApple = YES;
             continue;
         }
         if ([b isEqualToString:pz]) havePz = YES;
+        if ([b isEqualToString:safari]) haveSafari = YES;
         [persist addObject:b];
     }
     if (!havePz) [persist addObject:pz];
-    if (droppedApple || !havePz) {
+    if (!haveSafari) [persist addObject:safari];
+    if (droppedApple || !havePz || !haveSafari) {
         cfg.targetApps = persist;
         [cfg save];
     }
