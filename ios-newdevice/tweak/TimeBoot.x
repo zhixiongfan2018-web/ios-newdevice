@@ -34,7 +34,6 @@
 %end // NDTimeBoot
 
 %ctor {
-    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDTimeBoot);
     });

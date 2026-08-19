@@ -77,7 +77,6 @@ static void NDDeliverFake(CLLocationManager *manager) {
 %end // NDLocation
 
 %ctor {
-    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDLocation);
     });

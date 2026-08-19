@@ -137,19 +137,30 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
 %end // NDNetworkInfo
 
 %ctor {
-    NDRunRiskyCHooksAfterUIKitReady(^{
+    NDRunAfterUIKitReady(^{
         %init(NDNetworkInfo);
+        if (NDIsSystemIdentityHost() || NDIsPrizePicksHost()) return;
         void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");
         void *symInfo = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
         if (symIf) {
-        MSHookFunction(symIf, (void *)hooked_CNCopySupportedInterfaces, (void **)&orig_CNCopySupportedInterfaces);
+            MSHookFunction(symIf, (void *)hooked_CNCopySupportedInterfaces, (void **)&orig_CNCopySupportedInterfaces);
         }
         if (symInfo) {
-        MSHookFunction(symInfo, (void *)hooked_CNCopyCurrentNetworkInfo, (void **)&orig_CNCopyCurrentNetworkInfo);
+            MSHookFunction(symInfo, (void *)hooked_CNCopyCurrentNetworkInfo, (void **)&orig_CNCopyCurrentNetworkInfo);
+        }
+    });
+    NDRunRiskyCHooksAfterUIKitReady(^{
+        void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");
+        void *symInfo = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
+        if (symIf && !orig_CNCopySupportedInterfaces) {
+            MSHookFunction(symIf, (void *)hooked_CNCopySupportedInterfaces, (void **)&orig_CNCopySupportedInterfaces);
+        }
+        if (symInfo && !orig_CNCopyCurrentNetworkInfo) {
+            MSHookFunction(symInfo, (void *)hooked_CNCopyCurrentNetworkInfo, (void **)&orig_CNCopyCurrentNetworkInfo);
         }
         void *symGetIf = dlsym(RTLD_DEFAULT, "getifaddrs");
         if (symGetIf) {
-        MSHookFunction(symGetIf, (void *)hooked_getifaddrs, (void **)&orig_getifaddrs);
+            MSHookFunction(symGetIf, (void *)hooked_getifaddrs, (void **)&orig_getifaddrs);
         }
     });
 }

@@ -60,8 +60,6 @@ static inline BOOL NDShouldLoadTweak(void) {
         && ![bid isEqualToString:@"com.apple.CommCenter"]) {
         return NO;
     }
-    // PrizePicks XPoint kills the process if NewDevice.dylib is mapped.
-    if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return NO;
     return YES;
 }
 
@@ -83,9 +81,9 @@ static inline BOOL NDIsPrizePicksHost(void) {
     return NO;
 }
 
-/// Venmo only: IDFA/IDFV + Keychain. PrizePicks uses delayed full ObjC + safe MG internal.
+/// Third-party apps that get ObjC identity. MG C-hooks stay off PrizePicks (CoreUI SIGILL).
 static inline BOOL NDIsSoftIdentityHost(void) {
-    return NDIsVenmoHost();
+    return NDIsVenmoHost() || NDIsPrizePicksHost();
 }
 
 /// AMG already owns MG/UIDevice in the same process — double-hook = Venmo SIGBUS/PAC.
@@ -132,19 +130,27 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
     return NDIsVenmoHost();
 }
 
-/// ObjC / UIKit hooks for non-Venmo hosts. Must NOT install before UIApplication init
+/// ObjC / UIKit identity for target apps. Must NOT install before UIApplication init
 /// (ElleKit + iOS 18 crashes inside _UIApplicationInfoParser when swizzled early).
+/// Venmo: delay past mParticle. PrizePicks: first main-queue turn (delay lets XPoint see the real device).
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
-    // Venmo uses delayed IDFA-only hooks.
-    if (NDIsVenmoHost()) return;
+    void (^run)(void) = ^{
+        @try {
+            if (!NDShouldLoadTweak()) return;
+            block();
+        } @catch (__unused NSException *ex) {
+        }
+    };
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
-        // PrizePicks: ObjC environment on the first main-queue turn (after UIKit).
-        // Extra 1.25s delay let XPoint/RN fingerprint the real device and abort.
-        block();
+        if (NDIsVenmoHost()) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), run);
+            return;
+        }
+        run();
     });
 }
 

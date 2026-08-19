@@ -130,7 +130,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"勾选后点右上角保存。切换环境只处理勾选的应用。Safari 会备份/清理，但不注入（注入会闪退）。";
+    return @"勾选后点右上角保存。切换环境只处理勾选的应用。Safari 只备份/清理不注入。PrizePicks / Venmo 会注入环境参数（PrizePicks 不挂 MG）。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

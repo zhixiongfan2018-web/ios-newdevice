@@ -27,8 +27,8 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
     return data;
 }
 
-/// Venmo-safe: IDFA/IDFV only. Never hook UIDevice.name or MobileGestalt here —
-/// MG MSHookFunction corrupts MGGetBoolAnswer and SIGBUS on SwiftUI scroll/text layout.
+/// Delayed IDFA/IDFV + device name. Model/systemVersion come from ModelVersion ObjC.
+/// MG whitelist is installed after UIKit — serial/UDID/IMEI/WiFi for in-app reads.
 %group NDDeviceIdentityVenmo
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
@@ -55,6 +55,12 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
         NSUUID *u = NDUUIDFromString(st.profile.IDFV);
         if (u) return u;
     }
+    return %orig;
+}
+- (NSString *)name {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.DeviceName.length) return st.profile.DeviceName;
+    if ([st shouldSpoof] && st.profile.Model.length) return st.profile.Model;
     return %orig;
 }
 %end
@@ -281,21 +287,24 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     if (errOut) *((CFErrorRef *)errOut) = NULL;
     return v;
 }
+
 %ctor {
-    void (^writeVenmoMarker)(BOOL amgOwns, BOOL mgHook) = ^(BOOL amgOwns, BOOL mgHook) {
+    void (^writeIdentityMarker)(BOOL amgOwns, BOOL mgHook) = ^(BOOL amgOwns, BOOL mgHook) {
         @try {
             NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-            if (![bid isEqualToString:@"net.kortina.labs.Venmo"]
-                && ![bid isEqualToString:@"com.myprizepicks.prizepicks"]) return;
+            if (!bid.length || [bid hasPrefix:@"com.apple."]) return;
             NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
             [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
             NDDeviceProfile *p = [NDTweakState shared].profile;
             NSString *line = [NSString stringWithFormat:
-                              @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\namgOwns=%@\nmgHook=%@\ntime=%@\n",
+                              @"bid=%@\nidfa=%@\nproduct=%@\nsys=%@\nserial=%@\nudid=%@\nimei=%@\namgOwns=%@\nmgHook=%@\ntime=%@\n",
                               bid,
                               p.IDFA ?: @"",
                               p.ProductType ?: @"",
                               p.SystemVer ?: @"",
+                              p.Serial ?: @"",
+                              p.UDID ?: @"",
+                              p.IMEI ?: @"",
                               amgOwns ? @"1" : @"0",
                               mgHook ? @"1" : @"0",
                               [NSDate date]];
@@ -305,7 +314,21 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         }
     };
 
-    // Venmo: IDFA/IDFV ObjC only.
+    void (^installGestalt)(void) = ^{
+        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (!gestalt) return;
+        void *sym = dlsym(gestalt, "MGCopyAnswer");
+        if (sym) {
+            MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+        }
+        void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
+        if (symErr) {
+            MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
+        }
+    };
+
+    // Venmo: delayed IDFA/name + MG whitelist (serial/UDID/IMEI/WiFi). No sysctl.
     if (NDIsVenmoHost()) {
         NDRunVenmoSafeObjCHooksAfterReady(^{
             @try {
@@ -314,8 +337,9 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
                 BOOL amgOwns = NDAmgDylibLoaded();
                 if (!amgOwns) {
                     %init(NDDeviceIdentityVenmo);
+                    installGestalt();
                 }
-                writeVenmoMarker(amgOwns, NO);
+                writeIdentityMarker(amgOwns, !amgOwns);
             } @catch (__unused NSException *ex) {
             }
         });
@@ -326,32 +350,15 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         [[NDTweakState shared] reload];
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
-        // ObjC IDFA/UIDevice only in third-party targets. MG MSHookFunction
-        // corrupts MGGetBoolAnswer → SIGILL/SIGBUS in CoreUI (PrizePicks) and Safari.
         %init(NDDeviceIdentity);
 
-        // PrizePicks: environment via delayed ObjC (UIDevice / locale / GPS / carrier).
-        // Never hook MG here — CoreUI getDeviceTraits SIGILL'd when MGGetBoolAnswer
-        // was overwritten or returned the wrong CF type.
+        // PrizePicks: ObjC IDFA/UIDevice/name only. MG MSHook corrupts CoreUI getDeviceTraits.
         if (NDIsPrizePicksHost()) {
-            writeVenmoMarker(NDAmgDylibLoaded(), NO);
+            writeIdentityMarker(NDAmgDylibLoaded(), NO);
             return;
         }
 
-        if (!NDIsSystemIdentityHost()) return;
-
-        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-
-        if (gestalt) {
-            void *sym = dlsym(gestalt, "MGCopyAnswer");
-            if (sym) {
-                MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
-            }
-            void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
-            if (symErr) {
-                MSHookFunction(symErr, (void *)hooked_MGCopyAnswerWithError, (void **)&orig_MGCopyAnswerWithError);
-            }
-        }
+        installGestalt();
+        writeIdentityMarker(NDAmgDylibLoaded(), YES);
     });
 }

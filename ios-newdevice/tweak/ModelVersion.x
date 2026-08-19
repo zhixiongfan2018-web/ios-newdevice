@@ -194,20 +194,12 @@ static int hooked_uname(struct utsname *buf) {
 }
 
 %ctor {
-    // AMG config on this phone: fakeDeviceModel=0, fakeSystemVer=1.
-    // Venmo: do NOT install UIDevice model/systemVersion ObjC hooks (crash surface).
-    // System/model identity for Venmo comes from DeviceIdentity MG whitelist (ProductType/ProductVersion).
-    if (NDIsVenmoHost()) {
-        return;
-    }
-    if (NDIsPrizePicksHost()) {
-        return;
-    }
+    // ObjC model/systemVersion/carrier go into target apps (Venmo delayed, pz on first main turn).
+    // sysctl/uname stay SpringBoard/CommCenter only — SIGILL in Venmo/pz on iOS 18 + ElleKit.
     NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
         %init(NDModelVersionObjC);
     });
-    // sysctl/uname — never inside Venmo (SIGILL on iOS 18 + ElleKit).
     NDRunRiskyCHooksAfterUIKitReady(^{
         MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&orig_sysctlbyname);
         MSHookFunction((void *)uname, (void *)hooked_uname, (void **)&orig_uname);

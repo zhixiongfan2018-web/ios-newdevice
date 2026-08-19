@@ -36,6 +36,7 @@ static BOOL NDIsJBURLScheme(NSString *scheme) {
 %end // NDURLSchemeHide
 
 %ctor {
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDURLSchemeHide);
     });
