@@ -9,8 +9,11 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <unistd.h>
+#import <errno.h>
+#import <signal.h>
 #import <notify.h>
 #import <Security/Security.h>
+#import <CoreFoundation/CoreFoundation.h>
 
 extern char **environ;
 
@@ -112,159 +115,208 @@ extern char **environ;
 }
 
 - (void)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args {
+    [self runCommand:launchPath arguments:args timeoutSec:8];
+}
+
+- (int)runCommand:(NSString *)launchPath arguments:(NSArray<NSString *> *)args timeoutSec:(NSInteger)timeoutSec {
+    if (!launchPath.length) return -1;
     pid_t pid = 0;
     const char *path = launchPath.fileSystemRepresentation;
+    if (!path) return -1;
     NSUInteger count = args.count;
     char **argv = calloc(count + 2, sizeof(char *));
+    if (!argv) return -1;
     argv[0] = (char *)path;
     for (NSUInteger i = 0; i < count; i++) {
-        argv[i + 1] = (char *)args[i].UTF8String;
+        argv[i + 1] = (char *)(args[i].UTF8String ?: "");
     }
     argv[count + 1] = NULL;
-    posix_spawn(&pid, path, NULL, NULL, argv, environ);
-    if (pid > 0) {
-        int status = 0;
-        waitpid(pid, &status, 0);
-    }
+    int rc = posix_spawn(&pid, path, NULL, NULL, argv, environ);
     free(argv);
+    if (rc != 0 || pid <= 0) return rc ? rc : -1;
+    int status = 0;
+    if (timeoutSec <= 0) {
+        waitpid(pid, &status, 0);
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeoutSec];
+    while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        if (w < 0 && errno != EINTR) return -1;
+        usleep(40 * 1000);
+    }
+    kill(pid, SIGKILL);
+    waitpid(pid, NULL, 0);
+    return -1;
+}
+
+- (NSMutableSet<NSString *> *)NDProcessNamesForBundleId:(NSString *)bid {
+    NSMutableSet<NSString *> *names = [NSMutableSet set];
+    Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
+    if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bid];
+#pragma clang diagnostic pop
+        if (proxy && [proxy respondsToSelector:NSSelectorFromString(@"bundleExecutable")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            NSString *exec = [proxy performSelector:NSSelectorFromString(@"bundleExecutable")];
+#pragma clang diagnostic pop
+            if ([exec isKindOfClass:[NSString class]] && exec.length) [names addObject:exec];
+        }
+    }
+    NSString *last = bid.lastPathComponent;
+    if (last.length) [names addObject:last];
+    if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) [names addObject:@"Venmo"];
+    if ([bid isEqualToString:@"com.apple.mobilesafari"]) {
+        [names addObject:@"MobileSafari"];
+        [names addObject:@"Safari"];
+        [names addObject:@"SafariViewService"];
+    }
+    if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) [names addObject:@"PrizePicks"];
+    return names;
+}
+
+- (void)NDKillProcessNames:(NSSet<NSString *> *)names {
+    static NSArray *killBins;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        killBins = @[
+            @"/var/jb/usr/bin/killall",
+            @"/usr/bin/killall",
+            @"/var/jb/usr/bin/pkill",
+        ];
+    });
+    for (NSString *proc in names) {
+        if (![proc isKindOfClass:[NSString class]] || !proc.length) continue;
+        for (NSString *bin in killBins) {
+            if (![[NSFileManager defaultManager] isExecutableFileAtPath:bin]) continue;
+            if ([bin hasSuffix:@"pkill"]) {
+                [self runCommand:bin arguments:@[ @"-9", @"-x", proc ] timeoutSec:2];
+            } else {
+                [self runCommand:bin arguments:@[ @"-9", proc ] timeoutSec:2];
+            }
+        }
+    }
+}
+
+- (BOOL)NDAnyProcessAlive:(NSSet<NSString *> *)names {
+    NSString *killall = nil;
+    for (NSString *bin in @[ @"/var/jb/usr/bin/killall", @"/usr/bin/killall" ]) {
+        if ([[NSFileManager defaultManager] isExecutableFileAtPath:bin]) { killall = bin; break; }
+    }
+    if (!killall) return NO;
+    for (NSString *proc in names) {
+        if (![proc isKindOfClass:[NSString class]] || !proc.length) continue;
+        int st = [self runCommand:killall arguments:@[ @"-0", proc ] timeoutSec:1];
+        if (st == 0) return YES;
+    }
+    return NO;
 }
 
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds {
     if (!bundleIds.count) return;
 
-    // App UI runs as mobile — killall often cannot signal other apps. Prefer root daemon.
-    if (geteuid() != 0) {
-        NSString *csv = [[bundleIds filteredArrayUsingPredicate:
-                          [NSPredicate predicateWithBlock:^BOOL(NSString *b, NSDictionary *bindings) {
-            return [b isKindOfClass:[NSString class]] && b.length > 0;
-        }]] componentsJoinedByString:@","];
-        if (csv.length) {
-            for (NSString *bin in @[
-                     @"/var/jb/usr/local/bin/newdeviced",
-                     @"/var/jb/usr/bin/newdeviced",
-                 ]) {
-                if ([[NSFileManager defaultManager] fileExistsAtPath:bin]) {
-                    [self runCommand:bin arguments:@[ @"kill-apps", csv ]];
-                    break;
+    @try {
+        // App UI is mobile — root helper can SIGKILL other apps. Cap wait so switch never hangs.
+        if (geteuid() != 0) {
+            NSString *csv = [[bundleIds filteredArrayUsingPredicate:
+                              [NSPredicate predicateWithBlock:^BOOL(NSString *b, NSDictionary *bindings) {
+                return [b isKindOfClass:[NSString class]] && b.length > 0;
+            }]] componentsJoinedByString:@","];
+            if (csv.length) {
+                for (NSString *bin in @[
+                         @"/var/jb/usr/local/bin/newdeviced",
+                         @"/var/jb/usr/bin/newdeviced",
+                     ]) {
+                    if ([[NSFileManager defaultManager] fileExistsAtPath:bin]) {
+                        [self runCommand:bin arguments:@[ @"kill-apps", csv ] timeoutSec:8];
+                        break;
+                    }
                 }
             }
         }
+
+        static id fbsService;
+        static void (*bksTerminate)(CFStringRef, int, bool, CFStringRef);
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_NOW);
+            Class FBS = NSClassFromString(@"FBSSystemService");
+            if ([FBS respondsToSelector:NSSelectorFromString(@"sharedService")]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                fbsService = [FBS performSelector:NSSelectorFromString(@"sharedService")];
+#pragma clang diagnostic pop
+            }
+            void *bks = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_NOW);
+            if (bks) {
+                bksTerminate = dlsym(bks, "BKSTerminateApplicationForReasonAndReportWithDescription");
+            }
+        });
+
+        NSMutableArray *report = [NSMutableArray array];
+        NSMutableSet<NSString *> *allNames = [NSMutableSet set];
+        for (NSString *bid in bundleIds) {
+            if (![bid isKindOfClass:[NSString class]] || !bid.length) continue;
+            if ([bid isEqualToString:@"com.local.newdevice"]) continue;
+            if ([bid hasPrefix:@"com.apple.springboard"]) continue;
+
+            // Safari FrontBoard terminate often hangs the mutate queue — killall only.
+            BOOL isApple = [bid hasPrefix:@"com.apple."];
+            BOOL fbOk = NO;
+            if (!isApple && fbsService) {
+                @try {
+                    SEL sel4 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:");
+                    if ([fbsService respondsToSelector:sel4]) {
+                        NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel4];
+                        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                        [inv setSelector:sel4];
+                        [inv setTarget:fbsService];
+                        NSString *b = bid;
+                        NSInteger reason = 1;
+                        BOOL reportFlag = NO;
+                        NSString *desc = @"NewDevice";
+                        [inv setArgument:&b atIndex:2];
+                        [inv setArgument:&reason atIndex:3];
+                        [inv setArgument:&reportFlag atIndex:4];
+                        [inv setArgument:&desc atIndex:5];
+                        [inv invoke];
+                        fbOk = YES;
+                    }
+                } @catch (__unused NSException *ex) {
+                    fbOk = NO;
+                }
+            }
+            if (!isApple && bksTerminate) {
+                @try {
+                    bksTerminate((__bridge CFStringRef)bid, 1, false, CFSTR("NewDevice"));
+                } @catch (__unused NSException *ex) {}
+            }
+
+            NSSet *names = [self NDProcessNamesForBundleId:bid];
+            [allNames unionSet:names];
+            [self NDKillProcessNames:names];
+            [report addObject:[NSString stringWithFormat:@"%@ fb=%@", bid, fbOk ? @"1" : @"0"]];
+        }
+
+        // Wait until targets are actually gone so the next identity/sandbox is not mixed.
+        for (NSInteger i = 0; i < 16; i++) {
+            if (![self NDAnyProcessAlive:allNames]) break;
+            [self NDKillProcessNames:allNames];
+            usleep(50 * 1000);
+        }
+        BOOL still = [self NDAnyProcessAlive:allNames];
+        [report addObject:[NSString stringWithFormat:@"alive=%@", still ? @"YES" : @"NO"]];
+
+        NSString *line = [NSString stringWithFormat:@"time=%@\n%@\n", [NSDate date], [report componentsJoinedByString:@"\n"]];
+        [line writeToFile:@"/var/mobile/Media/NewDevice/last-terminate-apps.txt"
+               atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } @catch (NSException *ex) {
+        NSLog(@"[NewDevice] terminateApps exception: %@", ex);
     }
-
-    // FrontBoard terminate (works with platform-application + springboard.launchapplications).
-    static id fbsService;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        void *fb = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_NOW);
-        (void)fb;
-        Class FBS = NSClassFromString(@"FBSSystemService");
-        if ([FBS respondsToSelector:NSSelectorFromString(@"sharedService")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            fbsService = [FBS performSelector:NSSelectorFromString(@"sharedService")];
-#pragma clang diagnostic pop
-        }
-    });
-
-    NSMutableArray *report = [NSMutableArray array];
-    for (NSString *bid in bundleIds) {
-        if (![bid isKindOfClass:[NSString class]] || !bid.length) continue;
-        if ([bid isEqualToString:@"com.local.newdevice"] || [bid hasPrefix:@"com.apple.springboard"]) continue;
-
-        BOOL fbOk = NO;
-        if (fbsService) {
-            @try {
-                SEL sel4 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:");
-                SEL sel5 = NSSelectorFromString(@"terminateApplication:forReason:andReport:withDescription:completion:");
-                if ([fbsService respondsToSelector:sel5]) {
-                    NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel5];
-                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                    [inv setSelector:sel5];
-                    [inv setTarget:fbsService];
-                    NSString *b = bid;
-                    NSInteger reason = 1;
-                    BOOL reportFlag = NO;
-                    NSString *desc = @"NewDevice";
-                    id completion = nil;
-                    [inv setArgument:&b atIndex:2];
-                    [inv setArgument:&reason atIndex:3];
-                    [inv setArgument:&reportFlag atIndex:4];
-                    [inv setArgument:&desc atIndex:5];
-                    [inv setArgument:&completion atIndex:6];
-                    [inv invoke];
-                    fbOk = YES;
-                } else if ([fbsService respondsToSelector:sel4]) {
-                    NSMethodSignature *sig = [fbsService methodSignatureForSelector:sel4];
-                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                    [inv setSelector:sel4];
-                    [inv setTarget:fbsService];
-                    NSString *b = bid;
-                    NSInteger reason = 1;
-                    BOOL reportFlag = NO;
-                    NSString *desc = @"NewDevice";
-                    [inv setArgument:&b atIndex:2];
-                    [inv setArgument:&reason atIndex:3];
-                    [inv setArgument:&reportFlag atIndex:4];
-                    [inv setArgument:&desc atIndex:5];
-                    [inv invoke];
-                    fbOk = YES;
-                }
-            } @catch (__unused NSException *ex) {
-                fbOk = NO;
-            }
-        }
-
-        NSMutableSet<NSString *> *names = [NSMutableSet set];
-        Class LSApplicationProxy = NSClassFromString(@"LSApplicationProxy");
-        if (LSApplicationProxy && [LSApplicationProxy respondsToSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bid];
-#pragma clang diagnostic pop
-            if (proxy) {
-                if ([proxy respondsToSelector:NSSelectorFromString(@"bundleExecutable")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                    NSString *exec = [proxy performSelector:NSSelectorFromString(@"bundleExecutable")];
-#pragma clang diagnostic pop
-                    if ([exec isKindOfClass:[NSString class]] && exec.length) [names addObject:exec];
-                }
-                if ([proxy respondsToSelector:NSSelectorFromString(@"localizedName")]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                    NSString *lname = [proxy performSelector:NSSelectorFromString(@"localizedName")];
-#pragma clang diagnostic pop
-                    if ([lname isKindOfClass:[NSString class]] && lname.length) [names addObject:lname];
-                }
-            }
-        }
-        NSString *last = bid.lastPathComponent;
-        if (last.length) [names addObject:last];
-        // Common Venmo / Safari names
-        if ([bid isEqualToString:@"net.kortina.labs.Venmo"]) [names addObject:@"Venmo"];
-        if ([bid isEqualToString:@"com.apple.mobilesafari"]) {
-            [names addObject:@"MobileSafari"];
-            [names addObject:@"Safari"];
-        }
-
-        for (NSString *proc in names) {
-            [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[ @"-9", proc ]];
-            [self runCommand:@"/usr/bin/killall" arguments:@[ @"-9", proc ]];
-            [self runCommand:@"/bin/killall" arguments:@[ @"-9", proc ]];
-            NSString *nospace = [proc stringByReplacingOccurrencesOfString:@" " withString:@""];
-            if (![nospace isEqualToString:proc]) {
-                [self runCommand:@"/var/jb/usr/bin/killall" arguments:@[ @"-9", nospace ]];
-            }
-        }
-        [report addObject:[NSString stringWithFormat:@"%@ fb=%@", bid, fbOk ? @"1" : @"0"]];
-    }
-
-    // Give SpringBoard a beat to tear down before sandbox wipe.
-    usleep(250 * 1000);
-
-    NSString *line = [NSString stringWithFormat:@"time=%@\n%@\n", [NSDate date], [report componentsJoinedByString:@"\n"]];
-    [line writeToFile:@"/var/mobile/Media/NewDevice/last-terminate-apps.txt"
-           atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 - (NSString *)NDScanContainerUnderRoots:(NSArray<NSString *> *)roots identifier:(NSString *)identifier {

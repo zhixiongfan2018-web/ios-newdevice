@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)shared;
 
-/// Kill target apps by bundle id.
+/// Force-quit target apps (FrontBoard + SIGKILL) and wait until they are gone.
 - (void)terminateApps:(NSArray<NSString *> *)bundleIds;
 
 /// Clear sandbox data for apps (Documents/Library/tmp under container).

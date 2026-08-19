@@ -9,6 +9,7 @@
 
 @interface NDOperationService ()
 @property (nonatomic, assign) BOOL asyncBusy;
+@property (nonatomic, strong) NSDate *asyncBusySince;
 @end
 
 @implementation NDOperationService
@@ -34,8 +35,15 @@
 
 - (BOOL)tryBeginAsyncJob {
     @synchronized (self) {
-        if (self.asyncBusy) return NO;
+        if (self.asyncBusy) {
+            NSTimeInterval age = self.asyncBusySince ? -[self.asyncBusySince timeIntervalSinceNow] : 9999;
+            if (age < 90) return NO;
+            NSLog(@"[NewDevice] clearing stale asyncBusy after %.0fs", age);
+            self.asyncBusy = NO;
+            self.asyncBusySince = nil;
+        }
         self.asyncBusy = YES;
+        self.asyncBusySince = [NSDate date];
         return YES;
     }
 }
@@ -43,6 +51,7 @@
 - (void)endAsyncJob {
     @synchronized (self) {
         self.asyncBusy = NO;
+        self.asyncBusySince = nil;
     }
 }
 
@@ -99,6 +108,10 @@
     NSString *prev = [[NDRecordStore shared] currentRecordName] ?: @"原始机器";
     NSString *dest = destination.length ? destination : prev;
     NSArray *apps = [self appsForSwitchTo:dest previous:prev];
+    // Always force-quit work-set apps BEFORE identity/sandbox change so the
+    // previous environment cannot stay in memory (Venmo/Safari/Kalshi...).
+    NSLog(@"[NewDevice] quit targets first (%lu): %@", (unsigned long)apps.count,
+          [apps componentsJoinedByString:@","]);
     [[NDAppDataManager shared] terminateApps:apps];
     block(apps, prev);
 }
@@ -137,8 +150,9 @@
             apps = [self appsForSwitchTo:current previous:previous];
         }
 
-        // Close targets again right before wipe/restore (user may have reopened them).
+        // Close again immediately before wipe/restore (user or SpringBoard may have relaunched).
         if (apps.count) {
+            NSLog(@"[NewDevice] quit targets before wipe (%lu)", (unsigned long)apps.count);
             [[NDAppDataManager shared] terminateApps:apps];
         }
 
