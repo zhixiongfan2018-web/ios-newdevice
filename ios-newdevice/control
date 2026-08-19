@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 227: PrizePicks full ObjC environment + safe MG internal; Venmo stays IDFA-only.
+Description: 228: switch/一键新机 never launches target apps; Venmo keychain staged for next open.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

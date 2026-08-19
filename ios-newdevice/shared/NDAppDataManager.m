@@ -1620,6 +1620,29 @@ extern char **environ;
     return report;
 }
 
+- (NSString *)stageVenmoKeychainBindWithoutLaunch {
+    NSString *vbid = @"net.kortina.labs.Venmo";
+    NSMutableArray *lines = [NSMutableArray array];
+    NSString *rec = [[NDRecordStore shared] currentRecordName] ?: @"";
+    [lines addObject:[NSString stringWithFormat:@"record=%@", rec.length ? rec : @"(none)"]];
+
+    [self terminateApps:@[vbid]];
+    [self NDStageVenmoPendingClearFlag];
+    [lines addObject:@"pending-clear-kc=staged"];
+
+    if (rec.length && ![rec isEqualToString:@"原始机器"]) {
+        NSString *kc = [self restoreKeychainHintsForApps:@[vbid] fromRecord:rec];
+        [lines addObject:kc ?: @"akc=missing"];
+    }
+    [lines addObject:@"venmo=staged-bind-no-launch"];
+
+    NSString *report = [lines componentsJoinedByString:@"\n"];
+    [report writeToFile:@"/var/mobile/Media/NewDevice/last-keychain-clear.txt"
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[NewDevice] %@", report);
+    return report;
+}
+
 - (NSString *)bindVenmoKeychainToCurrentRecord {
     // Environment isolation: drop previous Venmo session tokens, then apply this record's akc.
     NSString *vbid = @"net.kortina.labs.Venmo";

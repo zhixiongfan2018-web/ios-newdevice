@@ -213,9 +213,10 @@
                                                                   error:&restoreErr];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
                 // Strict isolation: previous Venmo Keychain must not leak into this record.
+                // Do not launch Venmo — pending-akc / pending-clear apply on next user open.
                 if ([wipeApps containsObject:@"net.kortina.labs.Venmo"]
                     || [sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
-                    NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord];
+                    NSString *bind = [[NDAppDataManager shared] stageVenmoKeychainBindWithoutLaunch];
                     NSLog(@"[NewDevice] bindVenmo %@", bind);
                 }
             } else if ([sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
@@ -246,15 +247,18 @@
         // Keep NewDevice sole inject owner for targets (exclude from amg.plist).
         [[NDAppDataManager shared] syncInjectFilterWithTargetApps:apps ?: (cfg.targetApps ?: @[])];
 
+        // Stay on NewDevice — never leave target apps in the foreground after a switch.
+        if (sandboxApps.count) {
+            [[NDAppDataManager shared] terminateApps:sandboxApps];
+        }
+
         // Airplane is not isolation — run async so switch ACK is not blocked.
         // After IP may change, GPS/timezone follow the new egress IP (identity stays frozen).
-        // Skip airplane on 一键新机 — radio flap while apps relaunch was another crash path.
+        // Skip airplane on switch/一键新机 — radio flap relaunches target apps.
         BOOL wantGPS = cfg.locationFromIP && cfg.spoofLocation && ![current isEqualToString:@"原始机器"];
-        if ((cfg.smartAirplane && !creatingNew) || wantGPS) {
-            BOOL plane = cfg.smartAirplane && !creatingNew;
+        if (wantGPS) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                if (plane) [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
-                if (wantGPS) [[NDRecordStore shared] refreshLocationFromCurrentIPForce:YES];
+                [[NDRecordStore shared] refreshLocationFromCurrentIPForce:YES];
             });
         }
     } @catch (NSException *ex) {

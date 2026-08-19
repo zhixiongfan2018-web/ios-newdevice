@@ -80,8 +80,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)stageVenmoSessionClearOnly;
 
 /// After restoring a record's Venmo files: wipe previous Keychain session then apply this record's akc.
-/// Launches Venmo suspended (or briefly then returns to NewDevice) so the old account UI is not shown.
+/// Launches Venmo only for explicit purge/bind tools — switch/一键新机 must not open apps.
 - (NSString *)bindVenmoKeychainToCurrentRecord;
+/// Stage pending-clear + akc for this record. Does not launch Venmo (switch / 一键新机).
+- (NSString *)stageVenmoKeychainBindWithoutLaunch;
 
 /// Rename NewDevice.dylib out of inject paths so apps stop loading it (emergency recovery).
 - (NSString *)setTweakInjectionEnabled:(BOOL)enabled;
