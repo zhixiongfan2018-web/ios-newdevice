@@ -75,8 +75,14 @@
 
 %ctor {
     NDRunAfterUIKitReady(^{
-        // NSLocale + NSUserDefaults swizzles crash PrizePicks RN (XPoint/RCT fatal).
-        if (NDPrizePicksSkipHeavyHooks()) return;
+        // NSLocale / NSUserDefaults getter swizzles crash PrizePicks RN (XPoint/RCT fatal).
+        if (NDPrizePicksSkipRNSwizzles()) {
+            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+            [d setObject:@"en_US" forKey:@"AppleLocale"];
+            [d setObject:@[@"en-US", @"en"] forKey:@"AppleLanguages"];
+            [d setObject:@[@"en-US", @"en"] forKey:@"NSLanguages"];
+            return;
+        }
         %init(NDLocaleLang);
         %init(NDLocaleDefaults);
     });

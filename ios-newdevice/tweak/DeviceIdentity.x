@@ -3,6 +3,7 @@
 #import <AdSupport/AdSupport.h>
 #import <dlfcn.h>
 #import <stdint.h>
+#import <string.h>
 #import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
@@ -97,7 +98,7 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 
 - (NSString *)name {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel) {
+    if ([st shouldSpoof] && (st.config.fakeDeviceModel || NDIsPrizePicksHost())) {
         if (st.profile.DeviceName.length) return st.profile.DeviceName;
         if (st.profile.Model.length) return st.profile.Model;
     }
@@ -137,12 +138,31 @@ static CFTypeRef NDOrigMGCopyAnswer(CFStringRef key, uint32_t *outTypeCode) {
     return NULL;
 }
 
+static BOOL NDFramePathContains(void *addr, const char *needle) {
+    if (!addr || !needle) return NO;
+    Dl_info inf;
+    memset(&inf, 0, sizeof(inf));
+    if (!dladdr(addr, &inf) || !inf.dli_fname) return NO;
+    return strstr(inf.dli_fname, needle) != NULL;
+}
+
+/// CoreUI reads gestalt for display traits. Spoofing those keys (or the call itself)
+/// SIGILL'd PrizePicks. Pass the real answer when the caller is CoreUI.
+static BOOL NDCallerIsCoreUI(void) {
+    if (NDFramePathContains(__builtin_return_address(0), "CoreUI")) return YES;
+    if (NDFramePathContains(__builtin_return_address(1), "CoreUI")) return YES;
+    return NO;
+}
+
 static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     NDTweakState *st = [NDTweakState shared];
     if ([st shouldSpoofIdentity] && key) {
         NSString *k = (__bridge NSString *)key;
-        // Venmo: only remap a small string whitelist (full MG hook historically SIGSEGV'd).
-        if (NDIsVenmoHost() && !NDVenmoMGKeyAllowed(k)) {
+        if (NDIsPrizePicksHost() && NDCallerIsCoreUI()) {
+            return NDOrigMGCopyAnswer(key, NULL);
+        }
+        // Venmo / PrizePicks: only remap a small string whitelist (full MG hook historically SIGSEGV'd).
+        if ((NDIsVenmoHost() || NDIsPrizePicksHost()) && !NDVenmoMGKeyAllowed(k)) {
             return NDOrigMGCopyAnswer(key, NULL);
         }
         NDDeviceProfile *p = st.profile;
@@ -154,7 +174,7 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         }
 
         // In CommCenter (identity host), still apply equipment / model gestalt
-        BOOL modelGate = st.config.fakeDeviceModel || st.identityHost;
+        BOOL modelGate = st.config.fakeDeviceModel || st.identityHost || NDIsPrizePicksHost();
         if (modelGate) {
             if ([k isEqualToString:@"PhysicalMemory"]) {
                 uint64_t mem = p.PhysicalMemory > 0 ? p.PhysicalMemory : [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
@@ -352,9 +372,11 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
 
         %init(NDDeviceIdentity);
 
-        // PrizePicks: IDFA/IDFV only from this group. Skip MG — XPoint + CoreUI abort.
+        // PrizePicks: IDFA/name + MG whitelist (CoreUI passthrough). No sysctl/UIScreen.
         if (NDIsPrizePicksHost()) {
-            writeIdentityMarker(NDAmgDylibLoaded(), NO);
+            BOOL amgOwns = NDAmgDylibLoaded();
+            if (!amgOwns) installGestalt();
+            writeIdentityMarker(amgOwns, !amgOwns);
             return;
         }
 

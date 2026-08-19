@@ -78,7 +78,6 @@ static void NDDeliverFake(CLLocationManager *manager) {
 
 %ctor {
     NDRunAfterUIKitReady(^{
-        if (NDPrizePicksSkipHeavyHooks()) return;
         %init(NDLocation);
     });
 }

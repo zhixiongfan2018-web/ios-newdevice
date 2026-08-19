@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 234: PrizePicks IDFA/IDFV only (skip locale/TZ/model/GPS — XPoint SIGABRT).
+Description: 235: PrizePicks full identity (ObjC + MG whitelist, CoreUI passthrough).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

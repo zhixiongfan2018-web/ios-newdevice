@@ -138,9 +138,8 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
 
 %ctor {
     NDRunAfterUIKitReady(^{
-        if (NDPrizePicksSkipHeavyHooks()) return;
         %init(NDNetworkInfo);
-        if (NDIsSystemIdentityHost()) return;
+        if (NDIsSystemIdentityHost() || NDIsPrizePicksHost()) return;
         void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");
         void *symInfo = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
         if (symIf) {

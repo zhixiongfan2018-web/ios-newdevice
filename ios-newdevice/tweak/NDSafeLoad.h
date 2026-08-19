@@ -72,7 +72,7 @@ static inline BOOL NDIsVenmoHost(void) {
     return NO;
 }
 
-/// PrizePicks (pz): wants full environment params, but C-level MG / sysctl SIGILL CoreUI.
+/// PrizePicks (pz): full ObjC identity + MG whitelist. sysctl/uname/UIScreen SIGILL CoreUI.
 static inline BOOL NDIsPrizePicksHost(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return YES;
@@ -81,14 +81,14 @@ static inline BOOL NDIsPrizePicksHost(void) {
     return NO;
 }
 
-/// Third-party apps that get ObjC identity. MG C-hooks stay off PrizePicks (CoreUI SIGILL).
+/// Third-party apps that get ObjC identity. sysctl/uname stay off PrizePicks.
 static inline BOOL NDIsSoftIdentityHost(void) {
     return NDIsVenmoHost() || NDIsPrizePicksHost();
 }
 
-/// PrizePicks (XPoint/HUMAN + RN) abort()s when locale/TZ/model/GPS disagree with
-/// the real SE2 hardware. Keep IDFA/IDFV only in that process.
-static inline BOOL NDPrizePicksSkipHeavyHooks(void) {
+/// RN getter swizzles (NSLocale / NSUserDefaults / UIScreen) SIGABRT XPoint.
+/// Model/GPS/carrier/MG whitelist are allowed.
+static inline BOOL NDPrizePicksSkipRNSwizzles(void) {
     return NDIsPrizePicksHost();
 }
 

@@ -23,11 +23,15 @@ static NSString *NDMappedRadioAccess(NSString *r) {
     return CTRadioAccessTechnologyLTE;
 }
 
+static BOOL NDApplyCarrierSpoof(NDTweakState *st) {
+    return [st shouldSpoof] && (st.config.fakeCarrier || NDIsPrizePicksHost());
+}
+
 %group NDModelVersionObjC
 %hook UIDevice
 - (NSString *)model {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.ProductType.length) {
+    if ([st shouldSpoof] && st.profile.ProductType.length && (st.config.fakeDeviceModel || NDIsPrizePicksHost())) {
         if ([st.profile.ProductType hasPrefix:@"iPad"]) return @"iPad";
         return @"iPhone";
     }
@@ -36,7 +40,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 
 - (NSString *)localizedModel {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeDeviceModel && st.profile.ProductType.length) {
+    if ([st shouldSpoof] && st.profile.ProductType.length && (st.config.fakeDeviceModel || NDIsPrizePicksHost())) {
         if ([st.profile.ProductType hasPrefix:@"iPad"]) return @"iPad";
         return @"iPhone";
     }
@@ -45,7 +49,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 
 - (NSString *)systemVersion {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeSystemVer && st.profile.SystemVer.length) {
+    if ([st shouldSpoof] && st.profile.SystemVer.length && (st.config.fakeSystemVer || NDIsPrizePicksHost())) {
         return st.profile.SystemVer;
     }
     return %orig;
@@ -54,40 +58,61 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 - (NSString *)systemName {
     return %orig;
 }
+
+- (id)_deviceInfoForKey:(NSString *)key {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && [key isKindOfClass:[NSString class]]) {
+        if (st.config.fakeDeviceModel || st.identityHost || NDIsPrizePicksHost()) {
+            if (([key isEqualToString:@"ProductType"] || [key isEqualToString:@"CompatibleProductType"])
+                && st.profile.ProductType.length) {
+                return st.profile.ProductType;
+            }
+            if ([key isEqualToString:@"HardwareModel"] || [key isEqualToString:@"HWModelStr"]) {
+                NSString *board = [NDDeviceCatalog boardIdForProductType:st.profile.ProductType];
+                if (board.length) return board;
+            }
+        }
+        if ((st.config.fakeSystemVer || st.identityHost) && [key isEqualToString:@"ProductVersion"]
+            && st.profile.SystemVer.length) {
+            return st.profile.SystemVer;
+        }
+    }
+    return %orig;
+}
 %end
 
 %hook CTCarrier
 - (NSString *)carrierName {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.Carrier.length) {
+    if (NDApplyCarrierSpoof(st) && st.profile.Carrier.length) {
         return st.profile.Carrier;
     }
     return %orig;
 }
 - (NSString *)mobileCountryCode {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.MCC.length) {
+    if (NDApplyCarrierSpoof(st) && st.profile.MCC.length) {
         return st.profile.MCC;
     }
     return %orig;
 }
 - (NSString *)mobileNetworkCode {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.MNC.length) {
+    if (NDApplyCarrierSpoof(st) && st.profile.MNC.length) {
         return st.profile.MNC;
     }
     return %orig;
 }
 - (NSString *)isoCountryCode {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier) {
+    if (NDApplyCarrierSpoof(st)) {
         return @"us";
     }
     return %orig;
 }
 - (BOOL)allowsVOIP {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier) return YES;
+    if (NDApplyCarrierSpoof(st)) return YES;
     return %orig;
 }
 %end
@@ -95,7 +120,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 %hook CTTelephonyNetworkInfo
 - (NSString *)currentRadioAccessTechnology {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.RadioAccess.length) {
+    if (NDApplyCarrierSpoof(st) && st.profile.RadioAccess.length) {
         NSString *m = NDMappedRadioAccess(st.profile.RadioAccess);
         if (m.length) return m;
     }
@@ -104,7 +129,7 @@ static NSString *NDMappedRadioAccess(NSString *r) {
 
 - (NSDictionary *)serviceCurrentRadioAccessTechnology {
     NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && st.config.fakeCarrier && st.profile.RadioAccess.length) {
+    if (NDApplyCarrierSpoof(st) && st.profile.RadioAccess.length) {
         NSString *mapped = NDMappedRadioAccess(st.profile.RadioAccess);
         NSDictionary *orig = %orig;
         if (mapped.length && [orig isKindOfClass:[NSDictionary class]] && orig.count) {
@@ -197,7 +222,6 @@ static int hooked_uname(struct utsname *buf) {
     // ObjC model/systemVersion/carrier go into target apps (Venmo delayed, pz on first main turn).
     // sysctl/uname stay SpringBoard/CommCenter only — SIGILL in Venmo/pz on iOS 18 + ElleKit.
     NDRunAfterUIKitReady(^{
-        if (NDPrizePicksSkipHeavyHooks()) return;
         [[NDTweakState shared] reload];
         %init(NDModelVersionObjC);
     });
