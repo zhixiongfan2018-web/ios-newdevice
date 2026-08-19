@@ -1,4 +1,4 @@
-Date: Wed, 19 Aug 2026 19:38:06 +0000
+Date: Wed, 19 Aug 2026 19:47:44 +0000
 Origin: NewDevice
 Label: NewDevice
 Suite: stable
@@ -7,10 +7,10 @@ Codename: stable
 Architectures: iphoneos-arm iphoneos-arm64
 Components: main
 Description: NewDevice Sileo source
-Comment: ci-1787168286
+Comment: ci-1787168864
 MD5Sum:
- 6f251223fa6afd1e2dbfb4eb9f0d3026 567 Packages
+ 6db28948cabf4354e89780cd2fcf5aa4 567 Packages
 SHA1:
- aa32b7d48767d6b42c27137f37ac378a24302035 567 Packages
+ a3ea559fabcd5324d7d451068473d658bf2ce724 567 Packages
 SHA256:
- 784485d8490f317177c2bf075e809551c966f7043bb227037b063aad294222a3 567 Packages
+ e858c634f50eaeeb4ca64c1eef657707484a008c28dc6782c765b1f7816f8870 567 Packages
