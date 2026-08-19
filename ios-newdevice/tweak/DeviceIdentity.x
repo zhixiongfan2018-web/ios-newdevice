@@ -277,7 +277,8 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
     void (^writeVenmoMarker)(BOOL amgOwns, BOOL mgHook) = ^(BOOL amgOwns, BOOL mgHook) {
         @try {
             NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
-            if (![bid isEqualToString:@"net.kortina.labs.Venmo"]) return;
+            if (![bid isEqualToString:@"net.kortina.labs.Venmo"]
+                && ![bid isEqualToString:@"com.myprizepicks.prizepicks"]) return;
             NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
             [[NSFileManager defaultManager] createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil];
             NDDeviceProfile *p = [NDTweakState shared].profile;
@@ -296,8 +297,8 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         }
     };
 
-    // Venmo: IDFA/IDFV ObjC only. MG MSHookFunction breaks MGGetBoolAnswer → SIGBUS on scroll/text.
-    if (NDIsVenmoHost()) {
+    // Venmo + PrizePicks: IDFA/IDFV ObjC only. Full UIDevice/MG set SIGBUS on pz.
+    if (NDIsSoftIdentityHost()) {
         NDRunVenmoSafeObjCHooksAfterReady(^{
             @try {
                 [[NDTweakState shared] reload];
