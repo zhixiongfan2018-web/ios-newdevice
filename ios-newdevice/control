@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 222: GPS/timezone follow public IP; identity stays frozen after generate.
+Description: 223: 一键新机 only creates a new env; never rewrites an existing record.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

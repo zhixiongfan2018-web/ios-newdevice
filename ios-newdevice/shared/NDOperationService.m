@@ -10,6 +10,7 @@
 @interface NDOperationService ()
 @property (nonatomic, assign) BOOL asyncBusy;
 @property (nonatomic, strong) NSDate *asyncBusySince;
+- (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps creatingNew:(BOOL)creatingNew;
 @end
 
 @implementation NDOperationService
@@ -144,6 +145,10 @@
 }
 
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
+    [self afterSwitchFrom:previous to:current apps:apps creatingNew:NO];
+}
+
+- (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps creatingNew:(BOOL)creatingNew {
     NDConfig *cfg = [NDConfig shared];
     @try {
         // Make spoofed identity look like a coherent real device before sandbox work.
@@ -170,9 +175,15 @@
             BOOL sameRecord = previous.length && current.length && [previous isEqualToString:current];
             BOOL leavingReal = !sameRecord && previous.length && ![previous isEqualToString:@"原始机器"];
 
-            // Snapshot only work-set apps when leaving a real record (fat-guard in backupApps).
+            // Snapshot live apps into the environment we are leaving.
+            // 一键新机 must not rewrite an already-saved record (AMG holographic stays put).
             if (leavingReal) {
-                [[NDAppDataManager shared] backupApps:sandboxApps toRecord:previous error:nil];
+                BOOL keepExisting = creatingNew && [self recordHasStagedApps:previous];
+                if (!keepExisting) {
+                    [[NDAppDataManager shared] backupApps:sandboxApps toRecord:previous error:nil];
+                } else {
+                    NSLog(@"[NewDevice] 一键新机 keep previous env untouched: %@", previous);
+                }
             }
 
             // Never wipe an app unless this record can restore it, or it is Venmo on
@@ -216,7 +227,7 @@
 
         if (cfg.clearPasteboardOnSwitch) {
             NDAppDataManager *adm = [NDAppDataManager shared];
-            if (previous.length && ![previous isEqualToString:@"原始机器"]) {
+            if (previous.length && ![previous isEqualToString:@"原始机器"] && !creatingNew) {
                 [adm backupPasteboardToRecord:previous];
             }
             if ([current isEqualToString:@"原始机器"]) {
@@ -283,7 +294,8 @@
         NSString *body = @"";
         BOOL ok = YES;
 
-        if ([fun isEqualToString:@"newRecord"]) {
+        if ([fun isEqualToString:@"newRecord"] || [fun isEqualToString:@"renewRecord"]) {
+            // Always create a new record. Never rewrite identity / holographic of an existing env.
             [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
                 NDDeviceProfile *p = [[NDRecordStore shared] createNewRecordAndActivate:&err];
@@ -292,31 +304,8 @@
                     done(@"", 500);
                     return;
                 }
-                // Wipe previous live env BEFORE ack — otherwise UI/AMG scripts think
-                // 一键新机 finished while Venmo still shows the old environment.
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
-                [[NDRecordStore shared] writeResultCode:1];
-                done(p.name, 200);
-            }];
-            return;
-        }
-
-        if ([fun isEqualToString:@"renewRecord"]) {
-            NSString *name = query[@"recordName"] ?: @"";
-            if (!name.length) {
-                [[NDRecordStore shared] writeResultCode:0];
-                done(@"请先选中一个环境", 400);
-                return;
-            }
-            [self prepareTargetsForDestination:name block:^(NSArray<NSString *> *apps, NSString *previousRecord) {
-                NSError *err = nil;
-                NDDeviceProfile *p = [[NDRecordStore shared] renewRecordNamed:name error:&err];
-                if (!p) {
-                    [[NDRecordStore shared] writeResultCode:0];
-                    done(err.localizedDescription ?: @"", 500);
-                    return;
-                }
-                [self afterSwitchFrom:previousRecord to:p.name apps:apps];
+                // Wipe live apps for the NEW empty env. Previous record stays on disk as-is.
+                [self afterSwitchFrom:previousRecord to:p.name apps:apps creatingNew:YES];
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
             }];

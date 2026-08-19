@@ -339,7 +339,7 @@
         NSString *name = [body stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (!name.length) name = [[NDRecordStore shared] currentRecordName] ?: @"";
         NSString *msg = name.length
-            ? [NSString stringWithFormat:@"已新建环境：%@\n原有环境未改身份，可在「记录」里切回去。", name]
+            ? [NSString stringWithFormat:@"已新建环境：%@\n原来的环境未改（身份和 App 备份都还在），可在「记录」里切回去。", name]
             : @"已完成";
         [self alert:msg];
     }];

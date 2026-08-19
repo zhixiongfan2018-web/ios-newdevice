@@ -2000,6 +2000,12 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
         NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
         note = [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
         if (note.length) {
+            NSString *still = [self currentRecordName];
+            if (![still isEqualToString:p.name]) {
+                NSLog(@"[NewDevice] skip location save — current moved %@ → %@", p.name, still ?: @"?");
+                note = @"";
+                return @"";
+            }
             [self saveProfile:p error:nil];
             NSLog(@"[NewDevice] locationFromIP %@", note);
         }
