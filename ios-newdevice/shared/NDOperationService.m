@@ -130,6 +130,19 @@
     return NO;
 }
 
+- (BOOL)record:(NSString *)name hasStagedBundle:(NSString *)bid {
+    if (!name.length || !bid.length || [name isEqualToString:@"原始机器"]) return NO;
+    NSString *dir = [NDPaths appsBackupDirForRecord:name bundleId:bid];
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return NO;
+    NSArray *kids = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *k in kids) {
+        if ([k hasPrefix:@"."]) continue;
+        return YES;
+    }
+    return NO;
+}
+
 - (void)afterSwitchFrom:(NSString *)previous to:(NSString *)current apps:(NSArray<NSString *> *)apps {
     NDConfig *cfg = [NDConfig shared];
     @try {
@@ -171,16 +184,29 @@
                 [[NDAppDataManager shared] backupApps:sandboxApps toRecord:previous error:nil];
             }
 
-            // Wipe only selected targets so other apps stay untouched.
-            [[NDAppDataManager shared] clearDataForApps:sandboxApps error:nil];
+            // Never wipe an app unless this record can restore it, or it is Venmo on
+            // an empty 一键新机 (intentional new session). Wiping Kalshi/FanDuel with
+            // no staged copy permanently destroys the live environment.
+            NSMutableArray<NSString *> *wipeApps = [NSMutableArray array];
+            for (NSString *b in sandboxApps) {
+                BOOL destStaged = hasStaged && [self record:current hasStagedBundle:b];
+                BOOL venmoNew = [b isEqualToString:@"net.kortina.labs.Venmo"]
+                    && (!hasStaged || [current isEqualToString:@"原始机器"]);
+                if (destStaged || venmoNew) [wipeApps addObject:b];
+            }
+
+            if (wipeApps.count) {
+                [[NDAppDataManager shared] clearDataForApps:wipeApps error:nil];
+            }
             if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
                 [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:current
-                                                          onlyBundleIds:sandboxApps
+                                                          onlyBundleIds:wipeApps.count ? wipeApps : sandboxApps
                                                                   error:&restoreErr];
                 if (restoreErr) NSLog(@"[NewDevice] restore warning: %@", restoreErr.localizedDescription);
                 // Strict isolation: previous Venmo Keychain must not leak into this record.
-                if ([sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
+                if ([wipeApps containsObject:@"net.kortina.labs.Venmo"]
+                    || [sandboxApps containsObject:@"net.kortina.labs.Venmo"]) {
                     NSString *bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord];
                     NSLog(@"[NewDevice] bindVenmo %@", bind);
                 }

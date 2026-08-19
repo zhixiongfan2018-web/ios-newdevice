@@ -43,10 +43,7 @@ int main(int argc, char *argv[]) {
             [[NDConfig shared] reload];
             NSArray *targets = [NDConfig shared].targetApps ?: @[];
             if (!targets.count) {
-                targets = @[
-                    @"net.kortina.labs.Venmo",
-                    @"com.apple.mobilesafari",
-                ];
+                targets = @[ @"net.kortina.labs.Venmo" ];
             }
             NSString *body = [[NDAppDataManager shared] syncInjectFilterWithTargetApps:targets] ?: @"";
             [body writeToFile:@"/var/mobile/Media/NewDevice/last-inject-filter.txt"

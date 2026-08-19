@@ -72,11 +72,8 @@
             proxies = ((id (*)(id, SEL))objc_msgSend)(workspace, sel);
         }
     }
-    // Prefer user apps; allow a few useful Apple apps (Safari etc.)
-    NSSet *appleAllow = [NSSet setWithArray:@[
-        @"com.apple.mobilesafari",
-        @"com.apple.SafariViewService",
-    ]];
+    // Prefer user apps. Do not list Safari — injecting NewDevice.dylib into
+    // MobileSafari SIGILL/SIGBUS on iOS 18 and 一键新机 would wipe its data.
     for (id proxy in proxies) {
         NSString *bid = nil;
         NSString *name = nil;
@@ -89,23 +86,12 @@
             name = ((id (*)(id, SEL))objc_msgSend)(proxy, nameSel);
         }
         if (!bid.length) continue;
-        if ([bid hasPrefix:@"com.apple."] && ![appleAllow containsObject:bid]) continue;
+        if ([bid hasPrefix:@"com.apple."]) continue;
         if ([bid isEqualToString:@"com.local.newdevice"]) continue;
         NDAppItem *item = [NDAppItem new];
         item.bundleId = bid;
         item.name = name.length ? name : bid;
         [items addObject:item];
-    }
-    // Ensure Safari appears even if LS enumeration omitted it
-    BOOL hasSafari = NO;
-    for (NDAppItem *it in items) {
-        if ([it.bundleId isEqualToString:@"com.apple.mobilesafari"]) { hasSafari = YES; break; }
-    }
-    if (!hasSafari) {
-        NDAppItem *safari = [NDAppItem new];
-        safari.bundleId = @"com.apple.mobilesafari";
-        safari.name = @"Safari";
-        [items addObject:safari];
     }
     [items sortUsingComparator:^NSComparisonResult(NDAppItem *a, NDAppItem *b) {
         return [a.name localizedCompare:b.name];

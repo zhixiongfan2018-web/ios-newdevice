@@ -317,7 +317,11 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         [[NDTweakState shared] reload];
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
+        // ObjC IDFA/UIDevice only in third-party targets. MG MSHookFunction
+        // corrupts MGGetBoolAnswer → SIGBUS in Safari / Kalshi / FanDuel.
         %init(NDDeviceIdentity);
+
+        if (!NDIsSystemIdentityHost()) return;
 
         void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
         if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);

@@ -440,7 +440,9 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     [p alignConsistency];
     if (![self saveProfile:p error:error]) return nil;
 
-    // Drop staged sandboxes so 一键新机 starts clean for target apps.
+    // Drop staged sandboxes so this record starts clean with the new identity.
+    // afterSwitch will only wipe live apps that have a restore copy (or Venmo
+    // on empty) — Kalshi/FanDuel without a stage stay untouched.
     NSString *appsRoot = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"apps"];
     [[NSFileManager defaultManager] removeItemAtPath:appsRoot error:nil];
     NSString *ag = [[NDPaths recordDir:name] stringByAppendingPathComponent:@"AppGroup"];

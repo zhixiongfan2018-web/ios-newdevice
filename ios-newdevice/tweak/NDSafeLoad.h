@@ -38,12 +38,28 @@ static inline BOOL NDBundleIsJailbreakTool(NSString *bundleId) {
     return NO;
 }
 
+/// CommCenter / SpringBoard may spoof IMEI + gestalt. Never treat Safari as a host —
+/// injecting into MobileSafari historically SIGILL/SIGBUS on iOS 18 + ElleKit.
+static inline BOOL NDIsSystemIdentityHost(void) {
+    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+    if ([proc isEqualToString:@"CommCenter"] || [proc isEqualToString:@"CommCenterRootHelper"]) return YES;
+    if ([proc isEqualToString:@"SpringBoard"]) return YES;
+    NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    if ([bid isEqualToString:@"com.apple.springboard"]) return YES;
+    if ([bid isEqualToString:@"com.apple.CommCenter"]) return YES;
+    return NO;
+}
+
 static inline BOOL NDShouldLoadTweak(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if (NDBundleIsJailbreakTool(bid)) return NO;
-    // Empty bundle id is common in very early %ctor — do NOT refuse here;
-    // callers should retry on main queue once UIKit/app bundle is ready.
+    // Empty bundle id is common in very early %ctor (CommCenter) — do NOT refuse.
     if (!bid.length) return YES;
+    // Apple UI apps (Safari, Settings, …) crash with MG/sysctl hooks. SpringBoard is ok.
+    if ([bid hasPrefix:@"com.apple."] && ![bid isEqualToString:@"com.apple.springboard"]
+        && ![bid isEqualToString:@"com.apple.CommCenter"]) {
+        return NO;
+    }
     return YES;
 }
 
@@ -138,14 +154,17 @@ static inline void NDRunVenmoSafeObjCHooksAfterReady(void (^block)(void)) {
 }
 
 /// C/MSHookFunction hooks that previously SIGILL'd Venmo on iOS 18 + ElleKit
-/// (getifaddrs / statfs / DNS / IOKit / sysctl). Always skip inside Venmo.
+/// (getifaddrs / statfs / DNS / IOKit / sysctl). Skip Venmo AND third-party
+/// targets (Safari/Kalshi/FanDuel) — only SpringBoard / CommCenter.
 static inline void NDRunRiskyCHooksAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
     if (NDIsVenmoHost()) return;
+    if (!NDIsSystemIdentityHost()) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
+        if (!NDIsSystemIdentityHost()) return;
         block();
     });
 }

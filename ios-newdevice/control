@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 217: faster switch — cache containers, skip Safari wait/sandbox, kill apps once.
+Description: 218: do not inject/wipe Safari; no MG/sysctl in target apps; keep unstaged apps.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

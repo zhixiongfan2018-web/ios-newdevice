@@ -526,7 +526,7 @@ extern char **environ;
         }
         NSString *full = [root stringByAppendingPathComponent:rel];
         [fm setAttributes:@{NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:full error:nil];
-        if (++n > 400) break;
+        if (++n > 2500) break;
     }
 }
 
@@ -806,7 +806,9 @@ extern char **environ;
         NSError *e = nil;
         if ([self mirrorTree:src to:dst error:&e]) {
             okSubs++;
-            if ([sub isEqualToString:@"Documents"]) [self relaxProtectionAtPath:dst];
+            if ([sub isEqualToString:@"Documents"] || [sub isEqualToString:@"Library"]) {
+                [self relaxProtectionAtPath:dst];
+            }
         } else {
             [lines addObject:[NSString stringWithFormat:@"  copy fail %@/%@: %@", bid, sub, e.localizedDescription ?: @"?"]];
         }
@@ -1106,8 +1108,26 @@ extern char **environ;
     for (NSString *b in bundleIds ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
         if ([b isEqualToString:@"com.local.newdevice"]) continue;
+        // Safari / other Apple UI apps crash with this tweak on iOS 18.
+        if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.springboard"]) continue;
         [bundles addObject:b];
         [targets addObject:b];
+    }
+    // Drop Safari from saved work-set so 一键新机 / terminate no longer touches it.
+    NDConfig *cfg = [NDConfig shared];
+    NSMutableArray *persist = [NSMutableArray array];
+    BOOL droppedApple = NO;
+    for (NSString *b in cfg.targetApps ?: @[]) {
+        if (![b isKindOfClass:[NSString class]] || !b.length) continue;
+        if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.springboard"]) {
+            droppedApple = YES;
+            continue;
+        }
+        [persist addObject:b];
+    }
+    if (droppedApple) {
+        cfg.targetApps = persist;
+        [cfg save];
     }
     NSDictionary *plist = @{
         @"Filter": @{

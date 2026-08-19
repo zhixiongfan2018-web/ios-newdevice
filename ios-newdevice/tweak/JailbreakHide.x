@@ -65,7 +65,9 @@ static BOOL NDBasicHideActive(void) {
 %end // NDJailbreakHide
 
 %ctor {
-    NDRunRiskyCHooksAfterUIKitReady(^{
+    // ObjC NSFileManager only — not a C hook. Keep it in target apps so
+    // jailbreak-path probes still hide after 一键新机.
+    NDRunAfterUIKitReady(^{
         %init(NDJailbreakHide);
     });
 }
