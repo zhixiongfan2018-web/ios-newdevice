@@ -254,6 +254,29 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     [value writeToFile:[NDPaths currentRecordPointerPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [NDPaths makePathWorldReadable:[NDPaths preferencesDir]];
     [NDPaths makePathWorldReadable:[NDPaths currentRecordPointerPath]];
+    // Remember the last real environment so closing the app can revert to 本机
+    // without forgetting which record to restore when NewDevice is opened again.
+    if (value.length && ![value isEqualToString:@"原始机器"]) {
+        [value writeToFile:[NDPaths lastSessionRecordPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [NDPaths makePathWorldReadable:[NDPaths lastSessionRecordPath]];
+    }
+}
+
+- (NSString *)lastSessionRecordName {
+    NSString *name = [NSString stringWithContentsOfFile:[NDPaths lastSessionRecordPath] encoding:NSUTF8StringEncoding error:nil];
+    name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return name.length ? name : nil;
+}
+
+- (void)clearLastSessionRecordName {
+    [[NSFileManager defaultManager] removeItemAtPath:[NDPaths lastSessionRecordPath] error:nil];
+}
+
++ (BOOL)isNewDeviceUIRunning {
+    for (NSString *bin in @[ @"/var/jb/usr/bin/killall", @"/usr/bin/killall" ]) {
+        if (NDRecordStoreSpawn(bin, @[ @"-0", @"NewDevice" ])) return YES;
+    }
+    return NO;
 }
 
 - (NDDeviceProfile *)profileNamed:(NSString *)name {

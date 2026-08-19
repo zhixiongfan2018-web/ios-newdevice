@@ -5,6 +5,7 @@
 #import "NDRuntimeState.h"
 #import "NDConfig.h"
 #import "NDAppDataManager.h"
+#import "NDOperationService.h"
 #import <errno.h>
 #import <string.h>
 #import <unistd.h>
@@ -52,21 +53,20 @@ int main(int argc, char *argv[]) {
             return body.length ? 0 : 1;
         }
 
-        // Publish world-readable runtime snapshot at boot so sandboxed target apps
-        // can spoof even before the NewDevice UI is opened.
-        void (^publishRuntime)(void) = ^{
+        // Publish world-readable runtime snapshot at boot. App is not open yet —
+        // stay on 本机 until NewDevice.app is launched (remembered session resumes then).
+        void (^syncUIAlive)(void) = ^{
             @try {
-                [[NDRecordStore shared] notifyReload];
+                if ([NDRecordStore isNewDeviceUIRunning]) {
+                    [[NDOperationService shared] resumeSpoofFromLastSession];
+                } else {
+                    [[NDOperationService shared] suspendSpoofAndClean];
+                }
             } @catch (__unused NSException *e) {
-                NSLog(@"[newdeviced] runtime publish failed: %@", e);
-                NDConfig *cfg = [NDConfig shared];
-                [cfg reload];
-                [NDRuntimeState publishWithConfig:cfg
-                                          profile:[[NDRecordStore shared] currentProfile]
-                                      currentName:[[NDRecordStore shared] currentRecordName]];
+                NSLog(@"[newdeviced] ui-alive sync failed: %@", e);
             }
         };
-        publishRuntime();
+        syncUIAlive();
 
         // Ensure NewDevice owns target-app inject (Venmo etc.) — exclude from amg.plist.
         @try {
@@ -84,8 +84,12 @@ int main(int argc, char *argv[]) {
             NSError *error = nil;
             if ([[NDHTTPServer shared] startWithPort:(uint16_t)NDHTTPPort error:&error]) {
                 NSLog(@"[newdeviced] listening on http://127.0.0.1:%ld/cmd", (long)NDHTTPPort);
+                NSTimer *watch = [NSTimer timerWithTimeInterval:2.0 repeats:YES block:^(__unused NSTimer *t) {
+                    syncUIAlive();
+                }];
+                [[NSRunLoop currentRunLoop] addTimer:watch forMode:NSDefaultRunLoopMode];
                 [[NSRunLoop currentRunLoop] run];
-                // runLoop ended unexpectedly — try to rebind
+                [watch invalidate];
                 [[NDHTTPServer shared] stop];
                 NSLog(@"[newdeviced] runloop ended, will rebind");
                 continue;
@@ -93,7 +97,6 @@ int main(int argc, char *argv[]) {
             BOOL inUse = (error.code == EADDRINUSE) || [error.localizedDescription containsString:@"bind"];
             if (inUse) {
                 NSLog(@"[newdeviced] port in use (App may be serving), retry in 3s");
-                publishRuntime();
                 sleep(3);
                 continue;
             }

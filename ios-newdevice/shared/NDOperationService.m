@@ -185,14 +185,14 @@
             }
 
             // Never wipe an app unless this record can restore it, or it is Venmo on
-            // an empty 一键新机 (intentional new session). Wiping Kalshi/FanDuel with
-            // no staged copy permanently destroys the live environment.
+            // an empty 一键新机, or we are returning to 本机 (close 改机 → 清理).
             NSMutableArray<NSString *> *wipeApps = [NSMutableArray array];
+            BOOL revertClean = [current isEqualToString:@"原始机器"];
             for (NSString *b in sandboxApps) {
                 BOOL destStaged = hasStaged && [self record:current hasStagedBundle:b];
                 BOOL venmoNew = [b isEqualToString:@"net.kortina.labs.Venmo"]
-                    && (!hasStaged || [current isEqualToString:@"原始机器"]);
-                if (destStaged || venmoNew) [wipeApps addObject:b];
+                    && (!hasStaged || revertClean);
+                if (destStaged || venmoNew || revertClean) [wipeApps addObject:b];
             }
 
             if (wipeApps.count) {
@@ -347,6 +347,7 @@
         if ([fun isEqualToString:@"originRecord"]) {
             [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                 NSError *err = nil;
+                [[NDRecordStore shared] clearLastSessionRecordName];
                 BOOL success = [[NDRecordStore shared] switchToOriginal:&err];
                 if (success) [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps];
                 [[NDRecordStore shared] writeResultCode:success ? 1 : 0];
@@ -609,6 +610,7 @@
             if (name.length && [name isEqualToString:cur] && ![name isEqualToString:@"原始机器"]) {
                 [self prepareTargets:^(NSArray<NSString *> *apps, NSString *previousRecord) {
                     NSError *err = nil;
+                    [[NDRecordStore shared] clearLastSessionRecordName];
                     [[NDRecordStore shared] setCurrentRecordName:@"原始机器"];
                     [self afterSwitchFrom:previousRecord to:@"原始机器" apps:apps];
                     BOOL success = [[NDRecordStore shared] deleteRecord:name error:&err];
@@ -881,6 +883,42 @@
 
         [[NDRecordStore shared] writeResultCode:0];
         done(@"unknown fun", 404);
+    });
+}
+
+- (void)suspendSpoofAndClean {
+    dispatch_async([self mutateQueue], ^{
+        NDRecordStore *store = [NDRecordStore shared];
+        NSString *cur = [store currentRecordName] ?: @"原始机器";
+        if ([cur isEqualToString:@"原始机器"]) return;
+
+        if (cur.length) {
+            [cur writeToFile:[NDPaths lastSessionRecordPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [NDPaths makePathWorldReadable:[NDPaths lastSessionRecordPath]];
+        }
+
+        NSArray *apps = [self appsForSwitchTo:@"原始机器" previous:cur];
+        [store setCurrentRecordName:@"原始机器"];
+        [self afterSwitchFrom:cur to:@"原始机器" apps:apps];
+        NSLog(@"[NewDevice] suspend+clean from %@", cur);
+    });
+}
+
+- (void)resumeSpoofFromLastSession {
+    dispatch_async([self mutateQueue], ^{
+        NDRecordStore *store = [NDRecordStore shared];
+        NSString *last = [store lastSessionRecordName];
+        if (!last.length || [last isEqualToString:@"原始机器"] || ![store profileNamed:last]) {
+            [store notifyReload];
+            return;
+        }
+        NSString *cur = [store currentRecordName] ?: @"原始机器";
+        if ([cur isEqualToString:last]) return;
+
+        NSArray *apps = [self appsForSwitchTo:last previous:cur];
+        [store setCurrentRecordName:last];
+        [self afterSwitchFrom:cur to:last apps:apps];
+        NSLog(@"[NewDevice] resume session %@", last);
     });
 }
 

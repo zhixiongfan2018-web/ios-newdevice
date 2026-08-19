@@ -21,6 +21,7 @@ FOUNDATION_EXPORT NSInteger const NDHTTPPort;
 + (NSString *)pasteboardDirForRecord:(NSString *)name;
 + (NSString *)resultFilePath;
 + (NSString *)currentRecordPointerPath;
++ (NSString *)lastSessionRecordPath;
 /// World-readable snapshot for sandboxed target apps (tweak injection).
 + (NSString *)runtimeStatePath;
 + (NSString *)runtimeStateDir;

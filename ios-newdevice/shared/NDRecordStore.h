@@ -10,6 +10,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray<NSString *> *)allRecordNames;
 - (nullable NSString *)currentRecordName;
 - (void)setCurrentRecordName:(nullable NSString *)name;
+- (nullable NSString *)lastSessionRecordName;
+- (void)clearLastSessionRecordName;
++ (BOOL)isNewDeviceUIRunning;
 - (nullable NDDeviceProfile *)currentProfile;
 - (nullable NDDeviceProfile *)profileNamed:(NSString *)name;
 

@@ -69,6 +69,10 @@ NSInteger const NDHTTPPort = 8080;
     return [[self preferencesDir] stringByAppendingPathComponent:@"currentRecord.txt"];
 }
 
++ (NSString *)lastSessionRecordPath {
+    return [[self preferencesDir] stringByAppendingPathComponent:@"lastSession.txt"];
+}
+
 + (NSString *)runtimeStateDir {
     return [self jbPath:@"/Library/NewDevice"];
 }

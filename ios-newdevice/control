@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 219: 一键新机 always creates a new record; never renews an existing identity.
+Description: 220: closing NewDevice restores 本机 and wipes target app sandboxes.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

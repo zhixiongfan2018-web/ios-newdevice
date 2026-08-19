@@ -7,6 +7,8 @@
 #import "NDPaths.h"
 #import "NDHTTPServer.h"
 #import "NDTheme.h"
+#import "NDRecordStore.h"
+#import "NDOperationService.h"
 
 @implementation AppDelegate
 
@@ -72,7 +74,16 @@
         }
     });
 
+    // Restore last environment (identity + sandboxes) now that the UI is open.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [[NDOperationService shared] resumeSpoofFromLastSession];
+    });
+
     return YES;
+}
+
+- (void)applicationWillTerminate:(UIApplication *)application {
+    [[NDOperationService shared] suspendSpoofAndClean];
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
