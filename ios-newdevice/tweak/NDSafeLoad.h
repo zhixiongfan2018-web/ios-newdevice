@@ -60,6 +60,8 @@ static inline BOOL NDShouldLoadTweak(void) {
         && ![bid isEqualToString:@"com.apple.CommCenter"]) {
         return NO;
     }
+    // PrizePicks XPoint kills the process if NewDevice.dylib is mapped.
+    if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return NO;
     return YES;
 }
 

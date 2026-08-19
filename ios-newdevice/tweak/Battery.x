@@ -29,6 +29,7 @@
 %end // NDBattery
 
 %ctor {
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDBattery);
     });

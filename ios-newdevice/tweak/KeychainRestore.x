@@ -376,6 +376,7 @@ static void NDApplyPendingKeychainRestore(void) {
                 if (sRan) return;
                 NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
                 if (NDBundleIsJailbreakTool(bid)) return;
+                if (NDIsPrizePicksHost()) return;
                 NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
                 if (!bid.length) {
                     if (![proc isEqualToString:@"Venmo"]) return;
@@ -441,18 +442,13 @@ static void NDApplyPendingKeychainRestore(void) {
         // When clearing the previous Venmo session, run ASAP so UI does not paint
         // the old account before SecItemDelete (switch isolation).
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (NDIsVenmoHost()) {
-                BOOL wantClear = NDVenmoPendingClearKeychain();
-                BOOL wantRestore = NDVenmoPendingAkcRestore();
-                if (!wantClear && !wantRestore) return;
-                NSTimeInterval delay = wantClear ? 0.08 : 0.6;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), run);
-            } else {
-                run();
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), run);
-            }
+            if (!NDIsVenmoHost()) return;
+            BOOL wantClear = NDVenmoPendingClearKeychain();
+            BOOL wantRestore = NDVenmoPendingAkcRestore();
+            if (!wantClear && !wantRestore) return;
+            NSTimeInterval delay = wantClear ? 0.08 : 0.6;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), run);
         });
     }
 }

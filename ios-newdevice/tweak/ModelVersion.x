@@ -200,6 +200,9 @@ static int hooked_uname(struct utsname *buf) {
     if (NDIsVenmoHost()) {
         return;
     }
+    if (NDIsPrizePicksHost()) {
+        return;
+    }
     NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
         %init(NDModelVersionObjC);

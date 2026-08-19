@@ -1114,11 +1114,11 @@ extern char **environ;
         [bundles addObject:b];
         [targets addObject:b];
     }
-    // PrizePicks must stay in the inject/work set. Dropping it leaves an empty
-    // sandbox + no identity, and XPoint/RN abort on launch.
+    // PrizePicks stays in the backup/wipe work-set, but NewDevice.dylib must
+    // NOT load inside it — XPoint aborts when TweakInject is in the image list.
     NSString *pz = @"com.myprizepicks.prizepicks";
     NSString *safari = @"com.apple.mobilesafari";
-    if (![bundles containsObject:pz]) [bundles addObject:pz];
+    [bundles removeObject:pz];
     if (![targets containsObject:pz]) [targets addObject:pz];
     if (![targets containsObject:safari]) [targets addObject:safari];
     // Persist work-set: keep Safari, drop other Apple UI apps, keep PrizePicks.

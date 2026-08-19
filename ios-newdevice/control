@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 230: Safari is a target app for backup/wipe; still not injected.
+Description: 231: do not inject into PrizePicks; KeychainRestore is Venmo-only.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

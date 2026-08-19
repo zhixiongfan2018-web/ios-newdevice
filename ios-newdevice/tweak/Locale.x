@@ -74,11 +74,10 @@
 %end // NDLocaleDefaults
 
 %ctor {
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDLocaleLang);
         // NSUserDefaults objectForKey swizzles crash React Native (PrizePicks XPoint/RCT fatal).
-        if (!NDIsPrizePicksHost()) {
-            %init(NDLocaleDefaults);
-        }
+        %init(NDLocaleDefaults);
     });
 }
