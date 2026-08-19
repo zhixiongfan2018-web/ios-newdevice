@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 215: quit target apps first on switch/new, wait until dead, skip Apple FBS hang.
+Description: 216: record list switch via root daemon so Safari kill cannot busy-fail the UI.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -14,6 +14,7 @@
 
 @interface RecordsViewController ()
 @property (nonatomic, copy) NSArray<NSString *> *names;
+@property (nonatomic, assign) BOOL switching;
 @end
 
 @implementation RecordsViewController
@@ -295,19 +296,32 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.switching) return;
     NSString *name = self.names[indexPath.row];
-    // In-process setRecord: restores App environment + avoids URL '+' encoding bugs
-    [[NDOperationService shared] runAsync:@"setRecord" query:@{@"recordName": name} completion:^(NSString *body, NSInteger code) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self reload];
-            if (code != 200) {
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败"
-                                                                           message:body.length ? body : @"无法切换"
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:a animated:YES completion:nil];
-            }
-        });
+    NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+    if (name.length && [name isEqualToString:cur]) return;
+
+    self.switching = YES;
+    self.tableView.userInteractionEnabled = NO;
+    self.navigationItem.prompt = @"正在切换…";
+    // Root daemon — App in-process kill-apps/FrontBoard hangs (Safari) then the
+    // next tap returns busy and shows 切换失败.
+    [[NDAPIClient shared] call:@"setRecord" query:@{@"recordName": name} completion:^(BOOL ok, NSString *body, NSError *error) {
+        self.switching = NO;
+        self.tableView.userInteractionEnabled = YES;
+        self.navigationItem.prompt = nil;
+        [self reload];
+        if (ok) return;
+        NSString *msg = error.localizedDescription.length ? error.localizedDescription
+                        : (body.length ? body : @"无法切换");
+        if (error.code == 409 || [body isEqualToString:@"busy"]) {
+            msg = @"正在执行其他任务，请稍后重试";
+        }
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"切换失败"
+                                                                   message:msg
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
     }];
 }
 

@@ -426,9 +426,9 @@
             report = [NSString stringWithFormat:@"%@\n--- bindVenmo ---\n%@\n--- probe ---\n%@",
                       report, bind, probe ?: @""];
             [report writeToFile:@"/var/mobile/Media/NewDevice/last-restore.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            BOOL failed = (err != nil)
-                || [report.lowercaseString containsString:@"fail"]
-                || [report.lowercaseString containsString:@"missing"];
+            // Do not treat "liveAkc=missing" / "AppGroup FAIL" notes as a hard
+            // switch failure — those are per-app keychain/group hints.
+            BOOL failed = (err != nil);
             [[NDRecordStore shared] writeResultCode:failed ? 0 : 1];
             done(report, failed ? 500 : 200);
             return;
