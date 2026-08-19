@@ -1968,6 +1968,47 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     }
 }
 
+- (NSString *)refreshLocationFromCurrentIP {
+    return [self refreshLocationFromCurrentIPForce:NO];
+}
+
+- (NSString *)refreshLocationFromCurrentIPForce:(BOOL)force {
+    static BOOL inflight = NO;
+    static NSTimeInterval lastAttempt = 0;
+    @synchronized (self) {
+        NSTimeInterval now = [[NSDate date] timeIntervalSinceReferenceDate];
+        if (!force) {
+            if (inflight) return @"";
+            if ((now - lastAttempt) < 75.0) return @"";
+        }
+        inflight = YES;
+        lastAttempt = now;
+    }
+
+    NSString *note = @"";
+    @try {
+        [[NDConfig shared] reload];
+        NDConfig *cfg = [NDConfig shared];
+        if (!cfg.locationFromIP || !cfg.spoofLocation) {
+            return @"";
+        }
+        NSString *name = [self currentRecordName];
+        if (!name.length || [name isEqualToString:@"原始机器"]) return @"";
+        NDDeviceProfile *p = [self profileNamed:name];
+        if (!p || !p.enabled) return @"";
+
+        NSDictionary *geo = [NDAirplane fetchIPGeolocationSync];
+        note = [p applyGeolocation:geo jitter:cfg.smartLocationOffset];
+        if (note.length) {
+            [self saveProfile:p error:nil];
+            NSLog(@"[NewDevice] locationFromIP %@", note);
+        }
+    } @finally {
+        @synchronized (self) { inflight = NO; }
+    }
+    return note;
+}
+
 - (void)notifyReload {
     // Publish world-readable snapshot BEFORE notify so target apps reload fresh state.
     // Prefer full config.plist for targetApps — runtime.plist alone can be stale/empty

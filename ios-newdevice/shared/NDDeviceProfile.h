@@ -70,12 +70,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)writeToPath:(NSString *)path error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)writeAMGFakerToDirectory:(NSString *)dir error:(NSError * _Nullable * _Nullable)error;
 
-/// Fill empty fields only. Existing identity/GPS/build never change after first save.
+/// Fill empty fields only. Existing identity/build never change after first save.
 - (NSString *)alignConsistency;
 /// Full rewrite (Tools / 一键新机 generation only). Do not call on launch or switch.
 - (NSString *)alignConsistencyForced;
 
-/// Apply public-IP geolocation (lat/lon/timezone). Optional small urban jitter.
+/// Apply public-IP lat/lon/timezone only. Never rewrites UDID/IDFA/Serial/Carrier.
+/// Same IP maps to the same pin (deterministic offset). Returns empty if unchanged.
 - (NSString *)applyGeolocation:(NSDictionary *)geo jitter:(BOOL)jitter;
 
 @end

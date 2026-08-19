@@ -1040,46 +1040,32 @@ static BOOL NDLooksLikeProductType(NSString *s) {
     NSString *ip = [geo[@"ip"] isKindOfClass:[NSString class]] ? geo[@"ip"] : @"";
     NSString *tz = [geo[@"timezone"] isKindOfClass:[NSString class]] ? geo[@"timezone"] : @"";
 
-    // Spoof storyline is US-locale (carrier pool). Never import foreign GPS or ISP-as-Carrier.
-    if (cc.length && ![cc.uppercaseString isEqualToString:@"US"]) {
+    // Deterministic urban offset from the IP so the same egress keeps the same pin.
+    if (jitter) {
         uint32_t seed = 2166136261u;
-        const char *cs = (ip.length ? ip : (self.UDID ?: @"geo")).UTF8String ?: "geo";
+        const char *cs = (ip.length ? ip : [NSString stringWithFormat:@"%.5f,%.5f", lat, lon]).UTF8String ?: "geo";
         while (*cs) { seed ^= (uint8_t)(*cs++); seed *= 16777619u; }
-        NSDictionary *us = [NDDeviceCatalog usCoordinateForSeed:seed];
-        self.Latitude = [us[@"lat"] doubleValue];
-        self.Longitude = [us[@"lon"] doubleValue];
-        self.TimeZone = us[@"timezone"] ?: @"America/New_York";
-        if (![NDDeviceCatalog isPlausibleCarrierName:self.Carrier] || !self.MCC.length || !self.MNC.length) {
-            NSDictionary *c = [NDDeviceCatalog carrierForSeed:seed preferMCC:nil preferMNC:nil];
-            self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
-            self.MCC = c[@"MCC"] ?: @"310";
-            self.MNC = c[@"MNC"] ?: @"260";
-        }
-        return [NSString stringWithFormat:@"geo %@ %@→US %@ (%.4f,%.4f) tz=%@",
-                ip.length ? ip : @"?", city.length ? city : cc,
-                us[@"city"] ?: @"?", self.Latitude, self.Longitude, self.TimeZone ?: @"?"];
+        lat += ((double)(seed % 8000) / 100000.0) - 0.04;
+        lon += ((double)((seed >> 8) % 8000) / 100000.0) - 0.04;
     }
 
-    if (jitter) {
-        lat += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
-        lon += ((double)arc4random_uniform(8000) / 100000.0) - 0.04;
-    }
+    BOOL samePin = (fabs(self.Latitude - lat) < 0.0008 && fabs(self.Longitude - lon) < 0.0008);
+    BOOL sameTZ = !tz.length || [self.TimeZone isEqualToString:tz];
+    if (samePin && sameTZ) return @"";
+
     self.Latitude = lat;
     self.Longitude = lon;
     if (tz.length) {
         self.TimeZone = tz;
-    } else {
+    } else if (!self.TimeZone.length) {
         NSDictionary *near = [NDDeviceCatalog nearestUSCityToLatitude:lat longitude:lon maxDegrees:8.0];
         if (near[@"timezone"]) self.TimeZone = near[@"timezone"];
     }
-    if (![NDDeviceCatalog isPlausibleCarrierName:self.Carrier]) {
-        NSDictionary *c = [NDDeviceCatalog carrierForSeed:(uint32_t)(fabs(lat) * 1000) preferMCC:self.MCC preferMNC:self.MNC];
-        self.Carrier = c[@"Carrier"] ?: @"T-Mobile";
-        if (!self.MCC.length) self.MCC = c[@"MCC"] ?: @"310";
-        if (!self.MNC.length) self.MNC = c[@"MNC"] ?: @"260";
-    }
-    return [NSString stringWithFormat:@"geo %@ %@ (%.4f,%.4f) tz=%@",
-            ip.length ? ip : @"?", city.length ? city : (cc.length ? cc : @"US"), lat, lon, self.TimeZone ?: @"?"];
+    return [NSString stringWithFormat:@"geo %@ %@ %@ (%.4f,%.4f) tz=%@",
+            ip.length ? ip : @"?",
+            cc.length ? cc : @"",
+            city.length ? city : @"",
+            self.Latitude, self.Longitude, self.TimeZone ?: @"?"];
 }
 
 - (BOOL)writeToPath:(NSString *)path error:(NSError **)error {

@@ -68,6 +68,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)writeResultCode:(NSInteger)code;
 - (void)notifyReload;
 
+/// GPS/timezone follow current public IP. Identity fields are never rewritten.
+/// Returns a short note when the pin actually moved, else empty.
+- (nullable NSString *)refreshLocationFromCurrentIP;
+/// @param force YES after airplane / switch (skip the 75s throttle).
+- (nullable NSString *)refreshLocationFromCurrentIPForce:(BOOL)force;
+
 @end
 
 NS_ASSUME_NONNULL_END

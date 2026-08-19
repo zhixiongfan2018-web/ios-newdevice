@@ -86,6 +86,9 @@ int main(int argc, char *argv[]) {
                 NSLog(@"[newdeviced] listening on http://127.0.0.1:%ld/cmd", (long)NDHTTPPort);
                 NSTimer *watch = [NSTimer timerWithTimeInterval:2.0 repeats:YES block:^(__unused NSTimer *t) {
                     syncUIAlive();
+                    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                        [[NDRecordStore shared] refreshLocationFromCurrentIP];
+                    });
                 }];
                 [[NSRunLoop currentRunLoop] addTimer:watch forMode:NSDefaultRunLoopMode];
                 [[NSRunLoop currentRunLoop] run];

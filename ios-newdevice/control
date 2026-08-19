@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 221: freeze environment params after generate; official Build; no rewrite on launch.
+Description: 222: GPS/timezone follow public IP; identity stays frozen after generate.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

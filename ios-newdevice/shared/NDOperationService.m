@@ -230,10 +230,13 @@
         [[NDAppDataManager shared] syncInjectFilterWithTargetApps:apps ?: (cfg.targetApps ?: @[])];
 
         // Airplane is not isolation — run async so switch ACK is not blocked.
-        // After IP may change, realign GPS/timezone to the new egress IP.
-        if (cfg.smartAirplane) {
+        // After IP may change, GPS/timezone follow the new egress IP (identity stays frozen).
+        BOOL wantGPS = cfg.locationFromIP && cfg.spoofLocation && ![current isEqualToString:@"原始机器"];
+        if (cfg.smartAirplane || wantGPS) {
+            BOOL plane = cfg.smartAirplane;
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
+                if (plane) [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
+                if (wantGPS) [[NDRecordStore shared] refreshLocationFromCurrentIPForce:YES];
             });
         }
     } @catch (NSException *ex) {
