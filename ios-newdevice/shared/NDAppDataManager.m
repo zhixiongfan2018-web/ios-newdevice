@@ -2086,7 +2086,7 @@ extern char **environ;
 }
 
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName {
-    return [self restoreAppGroupsForRecord:recordName onlyBundleIds:nil];
+    return [self restoreAppGroupsForRecord:recordName onlyBundleIds:@[]];
 }
 
 - (BOOL)restoreAppGroupsForRecord:(NSString *)recordName onlyBundleIds:(NSArray<NSString *> *)only {
