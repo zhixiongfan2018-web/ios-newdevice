@@ -149,9 +149,7 @@ static BOOL NDFramePathContains(void *addr, const char *needle) {
 /// CoreUI reads gestalt for display traits. Spoofing those keys (or the call itself)
 /// SIGILL'd PrizePicks. Pass the real answer when the caller is CoreUI.
 static BOOL NDCallerIsCoreUI(void) {
-    if (NDFramePathContains(__builtin_return_address(0), "CoreUI")) return YES;
-    if (NDFramePathContains(__builtin_return_address(1), "CoreUI")) return YES;
-    return NO;
+    return NDFramePathContains(__builtin_return_address(0), "CoreUI");
 }
 
 static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
