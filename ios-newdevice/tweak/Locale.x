@@ -2,7 +2,7 @@
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
 
-%group NDLocale
+%group NDLocaleLang
 %hook NSLocale
 + (NSLocale *)currentLocale {
     NDTweakState *st = [NDTweakState shared];
@@ -34,6 +34,18 @@
 }
 %end
 
+%hook NSBundle
+- (NSArray<NSString *> *)preferredLocalizations {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && self == [NSBundle mainBundle]) {
+        return @[@"en"];
+    }
+    return %orig;
+}
+%end
+%end // NDLocaleLang
+
+%group NDLocaleDefaults
 %hook NSUserDefaults
 - (id)objectForKey:(NSString *)defaultName {
     NDTweakState *st = [NDTweakState shared];
@@ -59,20 +71,14 @@
     return %orig;
 }
 %end
-
-%hook NSBundle
-- (NSArray<NSString *> *)preferredLocalizations {
-    NDTweakState *st = [NDTweakState shared];
-    if ([st shouldSpoof] && self == [NSBundle mainBundle]) {
-        return @[@"en"];
-    }
-    return %orig;
-}
-%end
-%end // NDLocale
+%end // NDLocaleDefaults
 
 %ctor {
     NDRunAfterUIKitReady(^{
-        %init(NDLocale);
+        %init(NDLocaleLang);
+        // NSUserDefaults objectForKey swizzles crash React Native (PrizePicks XPoint/RCT fatal).
+        if (!NDIsPrizePicksHost()) {
+            %init(NDLocaleDefaults);
+        }
     });
 }

@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 228: switch/一键新机 never launches target apps; Venmo keychain staged for next open.
+Description: 229: PrizePicks ObjC env only (no MG); keep pz in inject filter.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

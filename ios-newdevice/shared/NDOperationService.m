@@ -409,9 +409,13 @@
                 return;
             }
             // Restore only configured target apps (do not grow targetApps from record).
+            // bundleId= restricts to one app (e.g. PrizePicks) without launching Venmo.
             NDConfig *cfg = [NDConfig shared];
+            NSString *onlyBid = query[@"bundleId"] ?: @"";
             NSArray *bids = cfg.targetApps ?: @[];
-            if (!bids.count) {
+            if (onlyBid.length) {
+                bids = @[onlyBid];
+            } else if (!bids.count) {
                 bids = [[NDRecordStore shared] appBundleIdsForRecord:name] ?: @[];
                 if (!bids.count) bids = @[ @"net.kortina.labs.Venmo" ];
             }
@@ -420,18 +424,25 @@
             for (NSString *bid in bids) {
                 if ([bid hasPrefix:@"."]) continue;
                 if (![[NDAppDataManager shared] containerPathForBundleId:bid]) {
-                    [[NDAppDataManager shared] tryLaunchAppToCreateContainer:bid];
-                    [lines addObject:[NSString stringWithFormat:@"launch-try %@", bid]];
+                    // Switch/一键新机 never launch apps. restoreHolo may create a
+                    // missing container only when the caller named a single bundle.
+                    if (onlyBid.length) {
+                        [[NDAppDataManager shared] tryLaunchAppToCreateContainer:bid];
+                        [lines addObject:[NSString stringWithFormat:@"launch-try %@", bid]];
+                    } else {
+                        [lines addObject:[NSString stringWithFormat:@"skip-launch-no-container %@", bid]];
+                    }
                 }
             }
             NSError *err = nil;
             [[NDAppDataManager shared] restoreAllStagedAppsFromRecord:name onlyBundleIds:bids error:&err];
             [[NDAppDataManager shared] restoreAppGroupsForRecord:name];
             NSString *bind = @"";
-            if ([bids containsObject:@"net.kortina.labs.Venmo"]) {
+            if (!onlyBid.length && [bids containsObject:@"net.kortina.labs.Venmo"]) {
                 bind = [[NDAppDataManager shared] bindVenmoKeychainToCurrentRecord] ?: @"";
             }
-            NSString *probe = [[NDAppDataManager shared] probeLiveContainerForBundleId:@"net.kortina.labs.Venmo"];
+            NSString *probeBid = onlyBid.length ? onlyBid : @"net.kortina.labs.Venmo";
+            NSString *probe = [[NDAppDataManager shared] probeLiveContainerForBundleId:probeBid];
             NSString *report = [NDAppDataManager shared].lastRestoreReport ?: err.localizedDescription ?: @"";
             if (lines.count) report = [NSString stringWithFormat:@"%@\n%@", [lines componentsJoinedByString:@"\n"], report];
             report = [NSString stringWithFormat:@"%@\n--- bindVenmo ---\n%@\n--- probe ---\n%@",

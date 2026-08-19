@@ -1113,19 +1113,27 @@ extern char **environ;
         [bundles addObject:b];
         [targets addObject:b];
     }
+    // PrizePicks must stay in the inject/work set. Dropping it leaves an empty
+    // sandbox + no identity, and XPoint/RN abort on launch.
+    NSString *pz = @"com.myprizepicks.prizepicks";
+    if (![bundles containsObject:pz]) [bundles addObject:pz];
+    if (![targets containsObject:pz]) [targets addObject:pz];
     // Drop Safari from saved work-set so 一键新机 / terminate no longer touches it.
     NDConfig *cfg = [NDConfig shared];
     NSMutableArray *persist = [NSMutableArray array];
     BOOL droppedApple = NO;
+    BOOL havePz = NO;
     for (NSString *b in cfg.targetApps ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
         if ([b hasPrefix:@"com.apple."] && ![b isEqualToString:@"com.apple.springboard"]) {
             droppedApple = YES;
             continue;
         }
+        if ([b isEqualToString:pz]) havePz = YES;
         [persist addObject:b];
     }
-    if (droppedApple) {
+    if (!havePz) [persist addObject:pz];
+    if (droppedApple || !havePz) {
         cfg.targetApps = persist;
         [cfg save];
     }

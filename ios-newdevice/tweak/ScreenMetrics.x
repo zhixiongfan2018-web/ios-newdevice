@@ -53,6 +53,8 @@ static CGFloat NDSpoofScale(void) {
 %end // NDScreenMetrics
 
 %ctor {
+    // UIScreen bounds/scale spoof feeds CoreUI getDeviceTraits — SIGILL in PrizePicks.
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDScreenMetrics);
     });

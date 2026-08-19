@@ -38,6 +38,8 @@ static BOOL NDKeyLooksOpenUDID(NSString *key) {
 %end // NDOpenUDID
 
 %ctor {
+    // Replacing NSUserDefaults uuid keys with a string crashes PrizePicks RN.
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDOpenUDID);
     });

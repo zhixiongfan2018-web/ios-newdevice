@@ -72,7 +72,7 @@ static inline BOOL NDIsVenmoHost(void) {
     return NO;
 }
 
-/// PrizePicks (pz): wants full environment params, but C-level MG stub / sysctl SIGBUS.
+/// PrizePicks (pz): wants full environment params, but C-level MG / sysctl SIGILL CoreUI.
 static inline BOOL NDIsPrizePicksHost(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return YES;
@@ -140,15 +140,8 @@ static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
-        // PrizePicks: full ObjC environment, but after UIKit (early UIDevice = SIGBUS).
-        if (NDIsPrizePicksHost()) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                if (!NDShouldLoadTweak() || NDIsVenmoHost()) return;
-                block();
-            });
-            return;
-        }
+        // PrizePicks: ObjC environment on the first main-queue turn (after UIKit).
+        // Extra 1.25s delay let XPoint/RN fingerprint the real device and abort.
         block();
     });
 }

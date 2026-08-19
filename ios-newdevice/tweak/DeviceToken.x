@@ -68,6 +68,7 @@ static void NDDeliverSpoofedToken(UIApplication *app) {
 %end // NDDeviceToken
 
 %ctor {
+    if (NDIsPrizePicksHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDDeviceToken);
     });

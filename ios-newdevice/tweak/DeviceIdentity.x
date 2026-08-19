@@ -172,7 +172,7 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
         }
 
         // In CommCenter (identity host), still apply equipment / model gestalt
-        BOOL modelGate = st.config.fakeDeviceModel || st.identityHost || NDIsPrizePicksHost();
+        BOOL modelGate = st.config.fakeDeviceModel || st.identityHost;
         if (modelGate) {
             if ([k isEqualToString:@"PhysicalMemory"]) {
                 uint64_t mem = p.PhysicalMemory > 0 ? p.PhysicalMemory : [NDDeviceCatalog memoryBytesForProductType:p.ProductType];
@@ -252,12 +252,12 @@ static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
                 }
             }
         }
-        if (st.config.fakeSystemVer || st.identityHost || NDIsPrizePicksHost()) {
+        if (st.config.fakeSystemVer || st.identityHost) {
             if (p.SystemVer.length) map[@"ProductVersion"] = p.SystemVer;
             if (p.Build.length) map[@"BuildVersion"] = p.Build;
         }
         // US locale identity hints (when spoofing carrier / device)
-        if (st.config.fakeCarrier || st.identityHost || NDIsPrizePicksHost()) {
+        if (st.config.fakeCarrier || st.identityHost) {
             map[@"RegionInfo"] = @"US";
             map[@"RegionCode"] = @"US";
         }
@@ -357,27 +357,21 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
         // ObjC IDFA/UIDevice only in third-party targets. MG MSHookFunction
-        // corrupts MGGetBoolAnswer → SIGBUS in Safari / Kalshi / FanDuel.
+        // corrupts MGGetBoolAnswer → SIGILL/SIGBUS in CoreUI (PrizePicks) and Safari.
         %init(NDDeviceIdentity);
 
-        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-
-        // PrizePicks: full ObjC env + MG *internal* only (classic stub). Never hook the
-        // 8-byte exported trampoline — that overwrites MGGetBoolAnswer and SIGBUS.
+        // PrizePicks: environment via delayed ObjC (UIDevice / locale / GPS / carrier).
+        // Never hook MG here — CoreUI getDeviceTraits SIGILL'd when MGGetBoolAnswer
+        // was overwritten or returned the wrong CF type.
         if (NDIsPrizePicksHost()) {
-            void *sym = gestalt ? dlsym(gestalt, "MGCopyAnswer") : NULL;
-            void *internal = NDLocateMGCopyAnswerInternalSafe(sym);
-            BOOL mg = NO;
-            if (internal && internal != sym) {
-                MSHookFunction(internal, (void *)hooked_MGCopyAnswer_internal, (void **)&orig_MGCopyAnswer_internal);
-                mg = YES;
-            }
-            writeVenmoMarker(NDAmgDylibLoaded(), mg);
+            writeVenmoMarker(NDAmgDylibLoaded(), NO);
             return;
         }
 
         if (!NDIsSystemIdentityHost()) return;
+
+        void *gestalt = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+        if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
 
         if (gestalt) {
             void *sym = dlsym(gestalt, "MGCopyAnswer");
