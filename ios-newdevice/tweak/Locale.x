@@ -75,10 +75,9 @@
 
 %ctor {
     NDRunAfterUIKitReady(^{
+        // NSLocale + NSUserDefaults swizzles crash PrizePicks RN (XPoint/RCT fatal).
+        if (NDPrizePicksSkipHeavyHooks()) return;
         %init(NDLocaleLang);
-        // NSUserDefaults objectForKey swizzles crash React Native (PrizePicks XPoint/RCT fatal).
-        if (!NDIsPrizePicksHost()) {
-            %init(NDLocaleDefaults);
-        }
+        %init(NDLocaleDefaults);
     });
 }

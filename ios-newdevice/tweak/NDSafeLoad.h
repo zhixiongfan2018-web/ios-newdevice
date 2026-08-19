@@ -86,6 +86,12 @@ static inline BOOL NDIsSoftIdentityHost(void) {
     return NDIsVenmoHost() || NDIsPrizePicksHost();
 }
 
+/// PrizePicks (XPoint/HUMAN + RN) abort()s when locale/TZ/model/GPS disagree with
+/// the real SE2 hardware. Keep IDFA/IDFV only in that process.
+static inline BOOL NDPrizePicksSkipHeavyHooks(void) {
+    return NDIsPrizePicksHost();
+}
+
 /// AMG already owns MG/UIDevice in the same process — double-hook = Venmo SIGBUS/PAC.
 /// Prefer excluding targets from amg.plist (syncInjectFilter); this is the runtime safety net.
 static inline BOOL NDAmgDylibLoaded(void) {

@@ -197,6 +197,7 @@ static int hooked_uname(struct utsname *buf) {
     // ObjC model/systemVersion/carrier go into target apps (Venmo delayed, pz on first main turn).
     // sysctl/uname stay SpringBoard/CommCenter only — SIGILL in Venmo/pz on iOS 18 + ElleKit.
     NDRunAfterUIKitReady(^{
+        if (NDPrizePicksSkipHeavyHooks()) return;
         [[NDTweakState shared] reload];
         %init(NDModelVersionObjC);
     });

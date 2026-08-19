@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 233: identity hooks load inside target apps (Venmo MG whitelist, PrizePicks ObjC).
+Description: 234: PrizePicks IDFA/IDFV only (skip locale/TZ/model/GPS — XPoint SIGABRT).
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -30,6 +30,7 @@
 
 %ctor {
     NDRunAfterUIKitReady(^{
+        if (NDPrizePicksSkipHeavyHooks()) return;
         %init(NDBattery);
     });
 }

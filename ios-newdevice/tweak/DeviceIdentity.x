@@ -350,13 +350,14 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         [[NDTweakState shared] reload];
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
-        %init(NDDeviceIdentity);
-
-        // PrizePicks: ObjC IDFA/UIDevice/name only. MG MSHook corrupts CoreUI getDeviceTraits.
+        // PrizePicks: IDFA/IDFV/name only. Model/locale/TZ/GPS hooks make XPoint SIGABRT.
         if (NDIsPrizePicksHost()) {
+            %init(NDDeviceIdentityVenmo);
             writeIdentityMarker(NDAmgDylibLoaded(), NO);
             return;
         }
+
+        %init(NDDeviceIdentity);
 
         installGestalt();
         writeIdentityMarker(NDAmgDylibLoaded(), YES);
