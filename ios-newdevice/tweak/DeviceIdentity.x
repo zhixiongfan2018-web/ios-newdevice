@@ -2,7 +2,6 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 #import <dlfcn.h>
-#import <stdint.h>
 #import <substrate.h>
 #import "NDTweakState.h"
 #import "NDSafeLoad.h"
@@ -102,26 +101,6 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 
 typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 
-/// MGSpoof (Tonyk7): MGCopyAnswer is an 8-byte stub (`MOV X1,#0; B internal`).
-/// Hooking the stub with ElleKit overwrites MGGetBoolAnswer → SIGBUS. Hook the
-/// branch target (MGCopyAnswer_internal) instead.
-static void *NDLocateMGCopyAnswerInternal(const void *mgCopyAnswer) {
-    if (!mgCopyAnswer) return NULL;
-    const uint8_t *buf = (const uint8_t *)mgCopyAnswer;
-    for (unsigned start = 0; start < 64; start += 4) {
-        uint32_t insn = *(const uint32_t *)(buf + start);
-        uint32_t op = insn & 0xFC000000u;
-        if (op != 0x14000000u && op != 0x94000000u) continue; // B or BL
-        long long w = insn & 0x3FFFFFF;
-        w <<= 64 - 26;
-        w >>= 64 - 26 - 2;
-        const uint8_t *target = buf + start + w;
-        if (target == buf) continue;
-        return (void *)target;
-    }
-    return NULL;
-}
-
 static BOOL NDVenmoMGKeyAllowed(NSString *k) {
     // Minimal AMG-like faker surface inside Venmo — avoid binary / screen / baseband edge keys.
     static NSSet *allow;
@@ -144,22 +123,13 @@ static BOOL NDVenmoMGKeyAllowed(NSString *k) {
 }
 
 static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef);
-static CFTypeRef (*orig_MGCopyAnswer_internal)(CFStringRef, uint32_t *);
-
-static CFTypeRef NDOrigMGCopyAnswer(CFStringRef key, uint32_t *outTypeCode) {
-    if (orig_MGCopyAnswer_internal) return orig_MGCopyAnswer_internal(key, outTypeCode);
-    if (orig_MGCopyAnswer) return orig_MGCopyAnswer(key);
-    return NULL;
-}
-
-/// NULL = do not spoof this key (caller must pass through to original).
-static CFTypeRef NDTrySpoofMGCopyAnswer(CFStringRef key) {
+static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
     NDTweakState *st = [NDTweakState shared];
     if ([st shouldSpoofIdentity] && key) {
         NSString *k = (__bridge NSString *)key;
         // Venmo: only remap a small string whitelist (full MG hook historically SIGSEGV'd).
         if (NDIsVenmoHost() && !NDVenmoMGKeyAllowed(k)) {
-            return NULL;
+            return orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL;
         }
         NDDeviceProfile *p = st.profile;
 
@@ -288,19 +258,7 @@ static CFTypeRef NDTrySpoofMGCopyAnswer(CFStringRef key) {
             return CFBridgingRetain(val);
         }
     }
-    return NULL;
-}
-
-static CFTypeRef hooked_MGCopyAnswer(CFStringRef key) {
-    CFTypeRef v = NDTrySpoofMGCopyAnswer(key);
-    if (v) return v;
-    return NDOrigMGCopyAnswer(key, NULL);
-}
-
-static CFTypeRef hooked_MGCopyAnswer_internal(CFStringRef key, uint32_t *outTypeCode) {
-    CFTypeRef v = NDTrySpoofMGCopyAnswer(key);
-    if (v) return v;
-    return NDOrigMGCopyAnswer(key, outTypeCode);
+    return orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL;
 }
 
 typedef CFTypeRef (*MGCopyAnswerErrFunc)(CFStringRef, void *);
@@ -311,13 +269,9 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         return orig_MGCopyAnswerWithError ? orig_MGCopyAnswerWithError(key, errOut)
                                           : (orig_MGCopyAnswer ? orig_MGCopyAnswer(key) : NULL);
     }
-    CFTypeRef v = NDTrySpoofMGCopyAnswer(key);
-    if (v) {
-        if (errOut) *((CFErrorRef *)errOut) = NULL;
-        return v;
-    }
-    if (orig_MGCopyAnswerWithError) return orig_MGCopyAnswerWithError(key, errOut);
-    return NDOrigMGCopyAnswer(key, NULL);
+    CFTypeRef v = hooked_MGCopyAnswer(key);
+    if (errOut) *((CFErrorRef *)errOut) = NULL;
+    return v;
 }
 %ctor {
     void (^writeVenmoMarker)(BOOL amgOwns, BOOL mgHook) = ^(BOOL amgOwns, BOOL mgHook) {
@@ -373,13 +327,8 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         if (!gestalt) gestalt = dlopen("/var/jb/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
         if (gestalt) {
             void *sym = dlsym(gestalt, "MGCopyAnswer");
-            void *internal = NDLocateMGCopyAnswerInternal(sym);
-            if (internal && internal != sym) {
-                MSHookFunction(internal, (void *)hooked_MGCopyAnswer_internal, (void **)&orig_MGCopyAnswer_internal);
-                NSLog(@"[NewDevice] MG hook internal %p (stub %p)", internal, sym);
-            } else if (sym) {
+            if (sym) {
                 MSHookFunction(sym, (void *)hooked_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
-                NSLog(@"[NewDevice] MG hook stub fallback %p", sym);
             }
             void *symErr = dlsym(gestalt, "MGCopyAnswerWithError");
             if (symErr) {

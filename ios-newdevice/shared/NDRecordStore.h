@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NDDeviceProfile *)profileNamed:(NSString *)name;
 
 - (BOOL)saveProfile:(NDDeviceProfile *)profile error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)saveProfile:(NDDeviceProfile *)profile notify:(BOOL)notify error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)deleteRecord:(NSString *)name error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)deleteAllRecordsKeepingCurrent:(BOOL)keepCurrent error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)renameRecord:(NSString *)oldName to:(NSString *)newName error:(NSError * _Nullable * _Nullable)error;

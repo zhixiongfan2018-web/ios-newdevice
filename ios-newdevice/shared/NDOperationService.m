@@ -188,17 +188,23 @@
 
             // Never wipe an app unless this record can restore it, or it is Venmo on
             // an empty 一键新机, or we are returning to 本机 (close 改机 → 清理).
+            // 一键新机: wipe ALL live targets so the new env is empty — previous
+            // holographic is already left untouched above. Old sandbox + new
+            // identity is what crashed Kalshi/FanDuel/Venmo after 一键新机.
             NSMutableArray<NSString *> *wipeApps = [NSMutableArray array];
             BOOL revertClean = [current isEqualToString:@"原始机器"];
             for (NSString *b in sandboxApps) {
                 BOOL destStaged = hasStaged && [self record:current hasStagedBundle:b];
                 BOOL venmoNew = [b isEqualToString:@"net.kortina.labs.Venmo"]
                     && (!hasStaged || revertClean);
-                if (destStaged || venmoNew || revertClean) [wipeApps addObject:b];
+                if (creatingNew || destStaged || venmoNew || revertClean) [wipeApps addObject:b];
             }
 
             if (wipeApps.count) {
                 [[NDAppDataManager shared] clearDataForApps:wipeApps error:nil];
+            }
+            if (creatingNew && wipeApps.count) {
+                [[NDAppDataManager shared] terminateApps:wipeApps];
             }
             if (hasStaged && ![current isEqualToString:@"原始机器"]) {
                 NSError *restoreErr = nil;
@@ -242,9 +248,10 @@
 
         // Airplane is not isolation — run async so switch ACK is not blocked.
         // After IP may change, GPS/timezone follow the new egress IP (identity stays frozen).
+        // Skip airplane on 一键新机 — radio flap while apps relaunch was another crash path.
         BOOL wantGPS = cfg.locationFromIP && cfg.spoofLocation && ![current isEqualToString:@"原始机器"];
-        if (cfg.smartAirplane || wantGPS) {
-            BOOL plane = cfg.smartAirplane;
+        if ((cfg.smartAirplane && !creatingNew) || wantGPS) {
+            BOOL plane = cfg.smartAirplane && !creatingNew;
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                 if (plane) [NDAirplane toggleAirplaneWithDelay:0.6 error:nil];
                 if (wantGPS) [[NDRecordStore shared] refreshLocationFromCurrentIPForce:YES];
@@ -306,6 +313,7 @@
                 }
                 // Wipe live apps for the NEW empty env. Previous record stays on disk as-is.
                 [self afterSwitchFrom:previousRecord to:p.name apps:apps creatingNew:YES];
+                [[NDRecordStore shared] notifyReload];
                 [[NDRecordStore shared] writeResultCode:1];
                 done(p.name, 200);
             }];

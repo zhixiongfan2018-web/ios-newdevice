@@ -294,6 +294,10 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
 }
 
 - (BOOL)saveProfile:(NDDeviceProfile *)profile error:(NSError **)error {
+    return [self saveProfile:profile notify:YES error:error];
+}
+
+- (BOOL)saveProfile:(NDDeviceProfile *)profile notify:(BOOL)notify error:(NSError **)error {
     if (!profile.name.length) {
         if (error) *error = [NSError errorWithDomain:@"NDRecordStore" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Empty record name"}];
         return NO;
@@ -301,7 +305,7 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     BOOL ok = [profile writeToPath:[NDPaths profilePathForRecord:profile.name] error:error];
     // During import session, defer notify — mid-import notify_post on a background
     // queue was aborting AMG_resolved imports (archiveImport=0 with extract OK).
-    if (ok && self.importingNames == nil) [self notifyReload];
+    if (ok && notify && self.importingNames == nil) [self notifyReload];
     return ok;
 }
 
@@ -420,9 +424,10 @@ static BOOL NDRecordStoreSpawn(NSString *launchPath, NSArray<NSString *> *args) 
     }
 
     [p alignConsistency];
-    if (![self saveProfile:p error:error]) return nil;
+    if (![self saveProfile:p notify:NO error:error]) return nil;
     [self setCurrentRecordName:p.name];
-    [self notifyReload];
+    // Caller (一键新机) notifies after sandbox wipe — publishing identity first
+    // lets target apps relaunch with the new UDID on top of the old sandbox (crash).
     return p;
 }
 

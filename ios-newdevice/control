@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 224: MGSpoof-style MGCopyAnswer_internal hook so MGGetBoolAnswer is not overwritten.
+Description: 225: drop MGSpoof MG internal hook (restore 223); 一键新机 wipes live targets after quit.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks
