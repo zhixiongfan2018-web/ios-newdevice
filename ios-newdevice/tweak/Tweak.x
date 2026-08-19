@@ -7,7 +7,7 @@
         if (!NDShouldLoadTweak()) return;
         // Venmo: still load profile so identity + keychain paths see current record.
         // (MG/C hooks stay gated in their own files; ObjC identity installs delayed.)
-        if (NDIsSoftIdentityHost()) {
+        if (NDIsVenmoHost()) {
             [[NDTweakState shared] reload];
             return;
         }

@@ -65,8 +65,9 @@ static BOOL NDBasicHideActive(void) {
 %end // NDJailbreakHide
 
 %ctor {
-    // ObjC NSFileManager only — not a C hook. Keep it in target apps so
-    // jailbreak-path probes still hide after 一键新机.
+    // Jailbreak-path hide is not environment identity. PrizePicks historically
+    // SIGBUS'd with extra NSFileManager swizzles — skip pz.
+    if (NDIsPrizePicksHost() || NDIsVenmoHost()) return;
     NDRunAfterUIKitReady(^{
         %init(NDJailbreakHide);
     });

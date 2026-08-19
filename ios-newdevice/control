@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 226: PrizePicks uses Venmo-safe IDFA/IDFV-only inject (no UIDevice/MG/jailbreak-hide).
+Description: 227: PrizePicks full ObjC environment + safe MG internal; Venmo stays IDFA-only.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

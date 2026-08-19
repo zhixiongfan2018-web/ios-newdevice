@@ -197,7 +197,7 @@ static int hooked_uname(struct utsname *buf) {
     // AMG config on this phone: fakeDeviceModel=0, fakeSystemVer=1.
     // Venmo: do NOT install UIDevice model/systemVersion ObjC hooks (crash surface).
     // System/model identity for Venmo comes from DeviceIdentity MG whitelist (ProductType/ProductVersion).
-    if (NDIsSoftIdentityHost()) {
+    if (NDIsVenmoHost()) {
         return;
     }
     NDRunAfterUIKitReady(^{

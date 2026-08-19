@@ -72,7 +72,7 @@ static inline BOOL NDIsVenmoHost(void) {
     return NO;
 }
 
-/// PrizePicks (pz) SIGBUS/SIGILL with UIDevice.name / MG / jailbreak-hide ObjC — same as Venmo.
+/// PrizePicks (pz): wants full environment params, but C-level MG stub / sysctl SIGBUS.
 static inline BOOL NDIsPrizePicksHost(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier ?: @"";
     if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return YES;
@@ -81,9 +81,9 @@ static inline BOOL NDIsPrizePicksHost(void) {
     return NO;
 }
 
-/// IDFA/IDFV ObjC only, delayed. No MG, no UIDevice.name, no JailbreakHide.
+/// Venmo only: IDFA/IDFV + Keychain. PrizePicks uses delayed full ObjC + safe MG internal.
 static inline BOOL NDIsSoftIdentityHost(void) {
-    return NDIsVenmoHost() || NDIsPrizePicksHost();
+    return NDIsVenmoHost();
 }
 
 /// AMG already owns MG/UIDevice in the same process — double-hook = Venmo SIGBUS/PAC.
@@ -135,11 +135,20 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
-    // Venmo / PrizePicks use delayed IDFA-only hooks (full ObjC set crashes pz).
-    if (NDIsSoftIdentityHost()) return;
+    // Venmo uses delayed IDFA-only hooks.
+    if (NDIsVenmoHost()) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (NDIsSoftIdentityHost()) return;
+        if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
+        // PrizePicks: full ObjC environment, but after UIKit (early UIDevice = SIGBUS).
+        if (NDIsPrizePicksHost()) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (!NDShouldLoadTweak() || NDIsVenmoHost()) return;
+                block();
+            });
+            return;
+        }
         block();
     });
 }
@@ -158,7 +167,7 @@ static inline void NDRunVenmoSafeObjCHooksAfterReady(void (^block)(void)) {
     };
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!NDShouldLoadTweak()) return;
-        if (NDIsSoftIdentityHost()) {
+        if (NDIsVenmoHost()) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), run);
         } else {
@@ -173,10 +182,10 @@ static inline void NDRunVenmoSafeObjCHooksAfterReady(void (^block)(void)) {
 static inline void NDRunRiskyCHooksAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
-    if (NDIsSoftIdentityHost()) return;
+    if (NDIsVenmoHost()) return;
     if (!NDIsSystemIdentityHost()) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (NDIsSoftIdentityHost()) return;
+        if (NDIsVenmoHost()) return;
         if (!NDShouldLoadTweak()) return;
         if (!NDIsSystemIdentityHost()) return;
         block();
