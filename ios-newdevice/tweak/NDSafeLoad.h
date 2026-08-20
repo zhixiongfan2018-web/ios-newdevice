@@ -105,7 +105,7 @@ static inline void NDRunPrizePicksIdentityAfterXPoint(void (^block)(void)) {
         }
     };
     dispatch_async(dispatch_get_main_queue(), ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), run);
     });
 }
@@ -175,7 +175,7 @@ static inline void NDRunAfterUIKitReady(void (^block)(void)) {
             return;
         }
         if (NDIsPrizePicksHost()) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), run);
             return;
         }

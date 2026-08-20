@@ -11,6 +11,7 @@
             [[NDTweakState shared] reload];
             return;
         }
+        if (NDIsPrizePicksHost()) return;
         NSString *bundleId = [NSBundle mainBundle].bundleIdentifier;
         if (!bundleId.length) return;
         [[NDTweakState shared] reload];

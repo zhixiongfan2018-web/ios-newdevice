@@ -1116,7 +1116,13 @@ extern char **environ;
     }
     NSString *pz = @"com.myprizepicks.prizepicks";
     NSString *safari = @"com.apple.mobilesafari";
-    [bundles addObject:pz];
+    NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+    BOOL original = [cur isEqualToString:@"原始机器"];
+    // Original env: do not inject into PrizePicks (XPoint SIGSEGV / silent exit).
+    // New-env records keep pz in Filter so full identity can load after launch.
+    if (!original) {
+        [bundles addObject:pz];
+    }
     if (![targets containsObject:pz]) [targets addObject:pz];
     if (![targets containsObject:safari]) [targets addObject:safari];
     // Persist work-set: keep Safari, drop other Apple UI apps, keep PrizePicks.

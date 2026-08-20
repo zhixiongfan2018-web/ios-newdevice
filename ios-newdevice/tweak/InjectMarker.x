@@ -19,6 +19,7 @@ static void NDInjectMarkerCtor(void) {
                 ![bid containsString:@"mobilesafari"]) {
                 return;
             }
+            if ([bid isEqualToString:@"com.myprizepicks.prizepicks"]) return;
 
             NSFileManager *fm = [NSFileManager defaultManager];
             NSString *line = [NSString stringWithFormat:@"bid=%@\nproc=%@\ntime=%@\nctor=InjectMarker\n",

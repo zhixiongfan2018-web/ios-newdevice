@@ -77,12 +77,6 @@
     NDRunAfterUIKitReady(^{
         // NSLocale / NSUserDefaults getter swizzles crash PrizePicks RN (XPoint/RCT fatal).
         if (NDPrizePicksSkipRNSwizzles()) {
-            [[NDTweakState shared] reload];
-            if (![[NDTweakState shared] shouldSpoof]) return;
-            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-            [d setObject:@"en_US" forKey:@"AppleLocale"];
-            [d setObject:@[@"en-US", @"en"] forKey:@"AppleLanguages"];
-            [d setObject:@[@"en-US", @"en"] forKey:@"NSLanguages"];
             return;
         }
         %init(NDLocaleLang);
