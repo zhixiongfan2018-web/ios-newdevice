@@ -36,10 +36,11 @@
 %ctor {
     NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
-        // PrizePicks: setDefaultTimeZone only. Hooking +systemTimeZone SIGABRT's RN.
         if (NDIsPrizePicksHost()) {
             NDTweakState *st = [NDTweakState shared];
-            if ([st shouldSpoof] && st.config.spoofLocation && st.profile.TimeZone.length) {
+            if (![st shouldSpoof]) return;
+            // setDefaultTimeZone only. Hooking +systemTimeZone SIGABRT's RN.
+            if (st.config.spoofLocation && st.profile.TimeZone.length) {
                 NSTimeZone *tz = [NSTimeZone timeZoneWithName:st.profile.TimeZone];
                 if (tz) [NSTimeZone setDefaultTimeZone:tz];
             }

@@ -138,6 +138,8 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
 
 %ctor {
     NDRunAfterUIKitReady(^{
+        [[NDTweakState shared] reload];
+        if (NDIsPrizePicksHost() && ![[NDTweakState shared] shouldSpoof]) return;
         %init(NDNetworkInfo);
         if (NDIsSystemIdentityHost() || NDIsPrizePicksHost()) return;
         void *symIf = dlsym(RTLD_DEFAULT, "CNCopySupportedInterfaces");

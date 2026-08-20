@@ -223,6 +223,7 @@ static int hooked_uname(struct utsname *buf) {
     // sysctl/uname stay SpringBoard/CommCenter only — SIGILL in Venmo/pz on iOS 18 + ElleKit.
     NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
+        if (NDIsPrizePicksHost() && ![[NDTweakState shared] shouldSpoof]) return;
         %init(NDModelVersionObjC);
     });
     NDRunRiskyCHooksAfterUIKitReady(^{

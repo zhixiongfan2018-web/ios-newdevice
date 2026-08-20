@@ -364,20 +364,23 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         return;
     }
 
+    if (NDIsPrizePicksHost()) {
+        NDRunPrizePicksIdentityAfterXPoint(^{
+            [[NDTweakState shared] reload];
+            if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
+            %init(NDDeviceIdentity);
+            BOOL amgOwns = NDAmgDylibLoaded();
+            if (!amgOwns) installGestalt();
+            writeIdentityMarker(amgOwns, !amgOwns);
+        });
+        return;
+    }
+
     NDRunAfterUIKitReady(^{
         [[NDTweakState shared] reload];
         if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
 
         %init(NDDeviceIdentity);
-
-        // PrizePicks: IDFA/name + MG whitelist (CoreUI passthrough). No sysctl/UIScreen.
-        if (NDIsPrizePicksHost()) {
-            BOOL amgOwns = NDAmgDylibLoaded();
-            if (!amgOwns) installGestalt();
-            writeIdentityMarker(amgOwns, !amgOwns);
-            return;
-        }
-
         installGestalt();
         writeIdentityMarker(NDAmgDylibLoaded(), YES);
     });

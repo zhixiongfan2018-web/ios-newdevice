@@ -87,9 +87,27 @@ static inline BOOL NDIsSoftIdentityHost(void) {
 }
 
 /// RN getter swizzles (NSLocale / NSUserDefaults / UIScreen) SIGABRT XPoint.
-/// Model/GPS/carrier/MG whitelist are allowed.
 static inline BOOL NDPrizePicksSkipRNSwizzles(void) {
     return NDIsPrizePicksHost();
+}
+
+/// XPoint/HUMAN abort if identity hooks exist during first ~3s of launch.
+/// Delay past that window, then install full ObjC + MG whitelist.
+static inline void NDRunPrizePicksIdentityAfterXPoint(void (^block)(void)) {
+    if (!block) return;
+    if (!NDShouldLoadTweak()) return;
+    void (^run)(void) = ^{
+        @try {
+            if (!NDShouldLoadTweak()) return;
+            if (!NDIsPrizePicksHost()) return;
+            block();
+        } @catch (__unused NSException *ex) {
+        }
+    };
+    dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), run);
+    });
 }
 
 /// AMG already owns MG/UIDevice in the same process — double-hook = Venmo SIGBUS/PAC.
@@ -138,7 +156,7 @@ static inline BOOL NDIsKeychainOnlyHost(void) {
 
 /// ObjC / UIKit identity for target apps. Must NOT install before UIApplication init
 /// (ElleKit + iOS 18 crashes inside _UIApplicationInfoParser when swizzled early).
-/// Venmo: delay past mParticle. PrizePicks: first main-queue turn (delay lets XPoint see the real device).
+/// Venmo: delay past mParticle. PrizePicks: delay 3.5s past XPoint, skip hooks on 原始机器.
 static inline void NDRunAfterUIKitReady(void (^block)(void)) {
     if (!block) return;
     if (!NDShouldLoadTweak()) return;
@@ -153,6 +171,11 @@ static inline void NDRunAfterUIKitReady(void (^block)(void)) {
         if (!NDShouldLoadTweak()) return;
         if (NDIsVenmoHost()) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), run);
+            return;
+        }
+        if (NDIsPrizePicksHost()) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), run);
             return;
         }

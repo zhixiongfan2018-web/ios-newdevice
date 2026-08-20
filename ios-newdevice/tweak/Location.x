@@ -78,6 +78,8 @@ static void NDDeliverFake(CLLocationManager *manager) {
 
 %ctor {
     NDRunAfterUIKitReady(^{
+        [[NDTweakState shared] reload];
+        if (NDIsPrizePicksHost() && ![[NDTweakState shared] shouldSpoof]) return;
         %init(NDLocation);
     });
 }
