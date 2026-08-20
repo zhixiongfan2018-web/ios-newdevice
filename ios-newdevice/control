@@ -3,7 +3,7 @@ Name: NewDevice
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Depends: ellekit
-Description: 237: original env does not inject PrizePicks; new env full identity after 8s.
+Description: 238: original env Filter skips PrizePicks even if it is a target app.
 Maintainer: Local Dev
 Author: Local Dev
 Section: Tweaks

@@ -1105,20 +1105,26 @@ extern char **environ;
 - (NSString *)syncInjectFilterWithTargetApps:(NSArray<NSString *> *)bundleIds {
     NSMutableOrderedSet *bundles = [NSMutableOrderedSet orderedSetWithObject:@"com.apple.springboard"];
     NSMutableOrderedSet *targets = [NSMutableOrderedSet orderedSet];
+    NSString *pz = @"com.myprizepicks.prizepicks";
+    NSString *safari = @"com.apple.mobilesafari";
+    NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
+    NDDeviceProfile *curProfile = [[NDRecordStore shared] currentProfile];
+    BOOL original = [cur isEqualToString:@"原始机器"] || !curProfile.spoofDeviceIdentity;
     for (NSString *b in bundleIds ?: @[]) {
         if (![b isKindOfClass:[NSString class]] || !b.length) continue;
         if ([b isEqualToString:@"com.local.newdevice"]) continue;
         // Safari / other Apple UI apps crash if this tweak injects. Keep Safari
         // in the backup/wipe work-set, but never in Filter.Bundles.
         if ([b hasPrefix:@"com.apple."]) continue;
+        // Original env: dylib load alone crashes PrizePicks (XPoint). Stay in
+        // targetApps for backup/wipe, but never in Filter.Bundles.
+        if (original && [b isEqualToString:pz]) {
+            [targets addObject:b];
+            continue;
+        }
         [bundles addObject:b];
         [targets addObject:b];
     }
-    NSString *pz = @"com.myprizepicks.prizepicks";
-    NSString *safari = @"com.apple.mobilesafari";
-    NSString *cur = [[NDRecordStore shared] currentRecordName] ?: @"";
-    BOOL original = [cur isEqualToString:@"原始机器"];
-    // Original env: do not inject into PrizePicks (XPoint SIGSEGV / silent exit).
     // New-env records keep pz in Filter so full identity can load after launch.
     if (!original) {
         [bundles addObject:pz];
