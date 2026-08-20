@@ -107,6 +107,47 @@ static NSData *NDHexDataFromUDID(NSString *udid) {
 %end
 %end // NDDeviceIdentity
 
+/// Separate Logos group — cannot %init NDDeviceIdentity twice in one file.
+%group NDDeviceIdentityPZ
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.IDFA.length) {
+        NSUUID *u = NDUUIDFromString(st.profile.IDFA);
+        if (u) return u;
+    }
+    return %orig;
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof]) {
+        return st.profile.AdvertisingTrackingEnabled;
+    }
+    return %orig;
+}
+%end
+
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof] && st.profile.IDFV.length) {
+        NSUUID *u = NDUUIDFromString(st.profile.IDFV);
+        if (u) return u;
+    }
+    return %orig;
+}
+
+- (NSString *)name {
+    NDTweakState *st = [NDTweakState shared];
+    if ([st shouldSpoof]) {
+        if (st.profile.DeviceName.length) return st.profile.DeviceName;
+        if (st.profile.Model.length) return st.profile.Model;
+    }
+    return %orig;
+}
+%end
+%end // NDDeviceIdentityPZ
+
 typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
 
 static BOOL NDVenmoMGKeyAllowed(NSString *k) {
@@ -368,7 +409,7 @@ static CFTypeRef hooked_MGCopyAnswerWithError(CFStringRef key, void *errOut) {
         NDRunPrizePicksIdentityAfterXPoint(^{
             [[NDTweakState shared] reload];
             if (![[NDTweakState shared] shouldSpoof] && ![[NDTweakState shared] shouldSpoofIdentity]) return;
-            %init(NDDeviceIdentity);
+            %init(NDDeviceIdentityPZ);
             BOOL amgOwns = NDAmgDylibLoaded();
             if (!amgOwns) installGestalt();
             writeIdentityMarker(amgOwns, !amgOwns);
